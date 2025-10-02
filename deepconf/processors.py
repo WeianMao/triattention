@@ -105,7 +105,7 @@ class WrappedPerReqLogitsProcessor(AdapterLogitsProcessor):
                 and params.extra_args.get("conf_topk")
             ) is None
         ):
-            print("Not using ConfPerReqLogitsProcessor", params.extra_args)
+            # print("Not using ConfPerReqLogitsProcessor", params.extra_args)
             return None
-        print(f"Using ConfPerReqLogitsProcessor with threshold {conf_threshold}, eos_token_id {eos_token_id}, group_size {conf_group_size}, topk {conf_topk}")
+        # print(f"Using ConfPerReqLogitsProcessor with threshold {conf_threshold}, eos_token_id {eos_token_id}, group_size {conf_group_size}, topk {conf_topk}")
         return ConfPerReqLogitsProcessor(conf_threshold, eos_token_id, conf_group_size, conf_topk)
