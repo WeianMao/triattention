@@ -81,6 +81,7 @@ class DeepThinkLLM:
         sampling_params: Optional[SamplingParams] = None,
         # Multiple voting options
         compute_multiple_voting: bool = True,
+        store_logprobs: bool = False,
         **kwargs
     ) -> DeepThinkOutput:
         """
@@ -123,7 +124,9 @@ class DeepThinkLLM:
             "window_size": window_size,
             "compute_multiple_voting": compute_multiple_voting,
         }
-        
+        if mode == "offline":
+            output.config["store_logprobs"] = store_logprobs
+
         if mode == "online":
             output.config.update({
                 "warmup_traces": warmup_traces,
@@ -141,7 +144,8 @@ class DeepThinkLLM:
             })
             result = self._deepthink_offline(
                 prompt, output,
-                budget, window_size, sampling_params
+                budget, window_size, sampling_params,
+                store_logprobs=store_logprobs,
             )
         
         # Perform multiple voting analysis if requested
@@ -177,7 +181,8 @@ class DeepThinkLLM:
         total_budget: int,
         confidence_percentile: int,
         window_size: int,
-        sampling_params: Optional[SamplingParams]
+        sampling_params: Optional[SamplingParams],
+        store_logprobs: bool = False,
     ) -> DeepThinkOutput:
         """Online deep thinking with confidence-based early stopping"""
         
@@ -270,7 +275,8 @@ class DeepThinkLLM:
         output: DeepThinkOutput,
         budget: int,
         window_size: int,
-        sampling_params: Optional[SamplingParams]
+        sampling_params: Optional[SamplingParams],
+        store_logprobs: bool = False,
     ) -> DeepThinkOutput:
         """Offline deep thinking - generate all traces at once"""
         
@@ -291,7 +297,11 @@ class DeepThinkLLM:
         
         # Process results
         processing_start = time.time()
-        processed_results = process_batch_results_offline(vllm_outputs, window_size)
+        processed_results = process_batch_results_offline(
+            vllm_outputs,
+            window_size,
+            store_logprobs=store_logprobs,
+        )
         
         output.all_traces = processed_results['traces']
         output.total_tokens = processed_results['total_tokens']

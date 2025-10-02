@@ -330,7 +330,7 @@ def process_batch_results(batch_outputs, window_size: int) -> Dict[str, Any]:
     }
 
 
-def process_output_offline(output, window_size: int) -> Dict[str, Any]:
+def process_output_offline(output, window_size: int, store_logprobs: bool = False) -> Dict[str, Any]:
     """Process a single vLLM output for offline mode - stores full confidence array"""
     text = output.text
     token_ids = output.token_ids
@@ -341,7 +341,7 @@ def process_output_offline(output, window_size: int) -> Dict[str, Any]:
     
     extracted_answer = extract_answer(text)
     
-    return {
+    trace = {
         "stop_reason": output.finish_reason,
         "text": text,
         "token_ids": token_ids,
@@ -350,8 +350,13 @@ def process_output_offline(output, window_size: int) -> Dict[str, Any]:
         "extracted_answer": extracted_answer,
     }
 
+    if store_logprobs:
+        trace["logprobs"] = logprobs
 
-def process_batch_results_offline(batch_outputs, window_size: int) -> Dict[str, Any]:
+    return trace
+
+
+def process_batch_results_offline(batch_outputs, window_size: int, store_logprobs: bool = False) -> Dict[str, Any]:
     """Process batch results from vLLM for offline mode"""
     # question_outputs = batch_outputs[0].outputs
     question_outputs = []
@@ -363,7 +368,7 @@ def process_batch_results_offline(batch_outputs, window_size: int) -> Dict[str, 
     total_tokens = 0
     
     for output in question_outputs:
-        trace_data = process_output_offline(output, window_size)
+        trace_data = process_output_offline(output, window_size, store_logprobs=store_logprobs)
         traces.append(trace_data)
         total_tokens += trace_data["num_tokens"]
     
@@ -372,5 +377,4 @@ def process_batch_results_offline(batch_outputs, window_size: int) -> Dict[str, 
         'total_tokens': total_tokens,
         'num_traces': len(traces)
     }
-
 

@@ -199,6 +199,8 @@ def main():
                        help='Output directory for results')
     parser.add_argument('--no_multiple_voting', action='store_true',
                        help='Disable multiple voting analysis')
+    parser.add_argument('--no_store_logprobs', action='store_true',
+                       help='Do not persist raw logprobs in the output file')
     
     args = parser.parse_args()
     
@@ -238,16 +240,20 @@ def main():
     )
     
     # Run deep thinking in offline mode
+    store_logprobs = not args.no_store_logprobs
+
     result = deep_llm.deepthink(
         prompt=prompt,
         mode="offline",
         budget=args.budget,
         window_size=args.window_size,
         sampling_params=sampling_params,
-        compute_multiple_voting=not args.no_multiple_voting
+        compute_multiple_voting=not args.no_multiple_voting,
+        store_logprobs=store_logprobs
     )
-    
+
     # Evaluate results against ground truth
+    evaluation = None
     if ground_truth and result.voting_results:
         evaluation = evaluate_voting_results(result.voting_results, ground_truth)
         print_evaluation_report(question, ground_truth, evaluation, result)
@@ -263,7 +269,8 @@ def main():
         'ground_truth': ground_truth,
         'qid': args.qid,
         'run_id': args.rid,
-        'evaluation': evaluation if ground_truth and result.voting_results else None
+        'evaluation': evaluation,
+        'store_logprobs': store_logprobs,
     })
     
     result_filename = f"{args.output_dir}/deepthink_offline_qid{args.qid}_rid{args.rid}_{timestamp}.pkl"
