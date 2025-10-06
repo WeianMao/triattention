@@ -2,6 +2,7 @@
 
 ## 新增组件
 - `development/example_offline_serialized.py`：保持原示例参数与行为，新增 `--serializer` 选项（默认 `msgpack_gzip`）。
+- `development/example_analyze_offline_serialized.py`：分析离线结果（msgpack/pickle），输出 token、投票和时间统计。
 - `development/serialization_utils.py`：负责对象归一化与 msgpack 编解码，兼容 `Logprob` 等复杂结构；压缩支持 `gzip`（默认）与可选 `zstd`。
 - `development/offline_result_loader.py`：辅助脚本，可加载 `.msgpack.*` 或 `.pkl`，并可导出全量 pickle 供兼容流程使用。
 - `scripts/yaml_runs_serialized/run_dispatch_serialized.py` 与 `run_offline_deepseek_serialized.sh`：复制官方调度逻辑，将离线执行入口转向新的示例脚本。
