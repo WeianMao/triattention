@@ -12,6 +12,6 @@ python3 "${PROJECT_ROOT}/scripts/yaml_runs_serialized/run_dispatch_serialized.py
   --mode offline \
   --config "${PROJECT_ROOT}/scripts/configs/deepseek_r1_qwen3_8b_32trace.yaml" \
   --rid 0 \
-  --gpus 0,1,2,3,4,5,6,7 \
+  --gpus 1,2,3,4,5,6,7 \
   --output-dir "${PROJECT_ROOT}/outputs/deepseek_r1_qwen3_8b/offline_msgpack" \
   --serializer msgpack_gzip "$@"
