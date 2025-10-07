@@ -239,6 +239,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rid", type=str, default="0")
     parser.add_argument("--gpus", type=str, default=None)
     parser.add_argument("--max-workers", type=int, default=None)
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Override output directory for result files")
     parser.add_argument("--qids", type=str, default=None, help="Optional comma-separated QIDs to run")
     return parser.parse_known_args(argv)
 
@@ -256,6 +258,9 @@ def main(argv: Iterable[str] | None = None) -> int:
         raise KeyError(f"'dataset' must be specified in section '{spec.config_section}'")
     dataset = resolve_path(config["dataset"], must_exist=True)
 
+    if args.output_dir:
+        config = dict(config)
+        config["output_dir"] = args.output_dir
     output_dir_value = config.get("output_dir", "outputs")
     output_dir = resolve_path(output_dir_value)
     output_dir.mkdir(parents=True, exist_ok=True)

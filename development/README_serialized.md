@@ -6,6 +6,7 @@
 - `development/serialization_utils.py`：负责对象归一化与 msgpack 编解码，兼容 `Logprob` 等复杂结构；压缩支持 `gzip`（默认）与可选 `zstd`。
 - `development/offline_result_loader.py`：辅助脚本，可加载 `.msgpack.*` 或 `.pkl`，并可导出全量 pickle 供兼容流程使用。
 - `scripts/yaml_runs_serialized/run_dispatch_serialized.py` 与 `run_offline_deepseek_serialized.sh`：复制官方调度逻辑，将离线执行入口转向新的示例脚本。
+- `scripts/yaml_runs_serialized/run_offline_deepseek_msgpack.sh`：简化版运行脚本，默认输出到 `outputs/deepseek_r1_qwen3_8b/offline_msgpack` 并启用 msgpack+gzip。
 
 ## 输出格式
 运行新的离线脚本会生成单文件结果：
