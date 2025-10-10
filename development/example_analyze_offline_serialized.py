@@ -3,8 +3,9 @@ import argparse
 import pickle
 import sys
 from collections import defaultdict
+from multiprocessing import Pool, cpu_count
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 from tqdm import tqdm
@@ -24,7 +25,13 @@ def _has_allowed_suffix(path: Path) -> bool:
     return any(name.endswith(ext) for ext in ALLOWED_SUFFIXES)
 
 
-def find_result_files(output_dir: str, max_qid: int = None, rids: List[str] = None) -> List[Path]:
+def _load_file_wrapper(item: Tuple[int, Path]) -> Tuple[int, Optional[Dict], str]:
+    idx, path = item
+    data = load_result(path)
+    return idx, data, path.name
+
+
+def find_result_files(output_dir: str, max_qid: int = None, rids: Optional[List[str]] = None) -> List[Path]:
     """Find serialized offline result files in the output directory."""
     output_path = Path(output_dir)
     if not output_path.exists():
@@ -328,8 +335,8 @@ def print_timing_breakdown(timing_stats: Dict):
                 
                 print(f"{display_name:<25} {mean_str:<18} {median_str:<10} {range_str:<15}")
     
-def print_statistics(token_stats: Dict, method_accuracy: Dict, conf_accuracy: Dict, 
-                    missing_info: Dict, results: List[Dict], timing_stats: Dict = None):
+def print_statistics(token_stats: Dict, method_accuracy: Dict, conf_accuracy: Dict,
+                    missing_info: Dict, results: List[Dict], timing_stats: Optional[Dict] = None):
     """Print comprehensive statistics"""
     print("\n" + "="*80)
     print("DEEPTHINK RESULTS ANALYSIS")
@@ -434,6 +441,8 @@ def main():
                        help='Only check for missing files, do not analyze')
     parser.add_argument('--detailed_timing', action='store_true', default=True,
                        help='Enable detailed timing analysis (default: True)')
+    parser.add_argument('--workers', type=int, default=None,
+                       help='Number of parallel loader processes (default: all cores)')
     
     args = parser.parse_args()
     
@@ -514,20 +523,39 @@ def main():
     # Find all result files
     result_files = find_result_files(args.output_dir, max_qid=args.max_qid, rids=args.rids)
     print(f"Loading {len(result_files)} files...")
-    
-    # Load results with progress indication
-    results = []
-    load_errors = []
-    
-    for i, filepath in tqdm(enumerate(result_files)):
-        if (i + 1) % 50 == 0:
-            print(f"  Loaded {i + 1}/{len(result_files)} files...")
-        
-        result = load_result(filepath)
-        if result:
-            results.append(result)
-        else:
-            load_errors.append(filepath.name)
+
+    workers = args.workers or cpu_count()
+    if workers <= 0:
+        workers = 1
+    if workers == 1:
+        iterator: Iterable[Tuple[int, Path]] = enumerate(result_files)
+        results = []
+        load_errors = []
+        for i, filepath in tqdm(iterator, total=len(result_files)):
+            result = load_result(filepath)
+            if result:
+                results.append(result)
+            else:
+                load_errors.append(filepath.name)
+    else:
+        print(f"Using {workers} worker processes for loading")
+        indexed_files = list(enumerate(result_files))
+        results_buffer: List[Optional[Dict]] = [None] * len(indexed_files)
+        load_errors = []
+
+        def _load_wrapper(item: Tuple[int, Path]) -> Tuple[int, Optional[Dict], str]:
+            idx, path = item
+            data = load_result(path)
+            return idx, data, path.name
+
+        with Pool(processes=workers) as pool:
+            for idx, data, name in tqdm(pool.imap_unordered(_load_wrapper, indexed_files), total=len(indexed_files)):
+                if data:
+                    results_buffer[idx] = data
+                else:
+                    load_errors.append(name)
+
+        results = [res for res in results_buffer if res]
     
     # Report loading results
     print(f"\n📊 Loading Summary:")
