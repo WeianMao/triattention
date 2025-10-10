@@ -522,7 +522,9 @@ def main():
     
     # Find all result files
     result_files = find_result_files(args.output_dir, max_qid=args.max_qid, rids=args.rids)
-    print(f"Loading {len(result_files)} files...")
+    print(f"\nPHASE 2: LOADING AND ANALYZING FILES")
+    print("="*80)
+    print(f"Total files to load: {len(result_files)}")
 
     workers = args.workers or cpu_count()
     if workers <= 0:
@@ -531,6 +533,7 @@ def main():
         iterator: Iterable[Tuple[int, Path]] = enumerate(result_files)
         results = []
         load_errors = []
+        print(f"[Loading] Using single-process mode")
         for i, filepath in tqdm(iterator, total=len(result_files)):
             result = load_result(filepath)
             if result:
@@ -538,18 +541,14 @@ def main():
             else:
                 load_errors.append(filepath.name)
     else:
-        print(f"Using {workers} worker processes for loading")
+        print(f"[Loading] Using {workers} worker processes")
         indexed_files = list(enumerate(result_files))
         results_buffer: List[Optional[Dict]] = [None] * len(indexed_files)
         load_errors = []
 
-        def _load_wrapper(item: Tuple[int, Path]) -> Tuple[int, Optional[Dict], str]:
-            idx, path = item
-            data = load_result(path)
-            return idx, data, path.name
-
+        print("[Loading] Dispatching files to worker pool...")
         with Pool(processes=workers) as pool:
-            for idx, data, name in tqdm(pool.imap_unordered(_load_wrapper, indexed_files), total=len(indexed_files)):
+            for idx, data, name in tqdm(pool.imap_unordered(_load_file_wrapper, indexed_files), total=len(indexed_files)):
                 if data:
                     results_buffer[idx] = data
                 else:
@@ -582,6 +581,8 @@ def main():
     print("="*80)
     
     # Perform analyses
+    print(f"\nPHASE 3: ANALYZING RESULTS")
+    print("="*80)
     print("Running analyses...")
     token_stats = analyze_token_usage(results)
     method_accuracy = analyze_voting_methods(results)
