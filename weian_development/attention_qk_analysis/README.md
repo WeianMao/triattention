@@ -75,7 +75,7 @@ scripts/run_attention_maps.sh
 ```
 
 - 默认在每个 `qidXXXX_traceYY` 目录下创建 `attention_maps/` 子目录，按 `layer_##_head_##.png` 生成 4K 级 PNG。脚本默认参数为 `patch_size=32`、`head_batch=8`、`q_tile=4096`、`dtype=float32`，如需覆盖可在命令后追加参数。
-- 计算过程中先对 `Q·K^T` 分块并完成 softmax，然后对 key/ query 维度分别做 max pooling，最后在概率域执行线性 min-max 归一化（全局最小值映射到 0、最大值映射到 1）；若序列过长，可通过 `--patch-size` 直接指定窗口大小，或使用 `--target-size` 自动推断。绘制时保持 Key 轴从左到右、Query 轴从上到下，便于对照原始 token 顺序。
+- 计算过程中先对 `Q·K^T` 分块并完成 softmax，然后对 key / query 维度分别做最大池化，最后对概率值做线性 min-max 归一化；若序列过长，可通过 `--patch-size` 直接指定窗口大小，或使用 `--target-size` 自动推断。绘制时保持 Query 轴向下、Key 轴向左（反转 X 方向），便于观察远端 token 的注意力分布。
 - `attention_maps/README.md` 会记录池化倍数、图片尺寸以及生成脚本参数。
 
 ## 性能与资源提示
@@ -92,3 +92,18 @@ scripts/run_attention_maps.sh
   - NFS 可能残留 `.nfs*` 文件，请确保相关进程已结束后再删除或等待系统回收。
 
 如需扩展功能（例如捕获 V、注意力权重或按层切片写盘），建议在本目录新增脚本并复用现有的 hook/缓冲封装。
+
+## 频段幅值诊断（可选）
+
+若需分析 RoPE 频段的幅值特征，可运行：
+
+```bash
+python weian_development/attention_qk_analysis/freq_magnitude_plots.py \
+    outputs/deepseek_r1_qwen3_8b/qk_bf16_traces \
+    --output-root outputs/deepseek_r1_qwen3_8b/freq_magnitude_plots \
+    --device cuda:0 --dtype float32 --max-distance 10000 --verbose
+```
+
+- 每个 trace 会在输出目录生成 `layer_##_head_##_freq.png`，包含四幅子图：`|K|` 平均、`|Q|` 平均、自回归遮罩下的 `|Q||K|` 平均，以及依据这些幅值重构的 Σ_f |Q||K| cos(ω_f Δ) 曲线，用于观察随距离的理论衰减趋势（Δ 在 logspace 中采样，最大值可通过 `--max-distance` 控制，默认 10k token）。
+- 横轴为 RoPE 频段索引，纵轴为聚合后的幅值。
+- 附带 `README.md` 说明统计口径，便于后续复现。
