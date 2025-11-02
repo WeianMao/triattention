@@ -63,12 +63,6 @@ def parse_args() -> argparse.Namespace:
         default=10000,
         help="Maximum token distance (Δ) for reconstructed kernels",
     )
-    parser.add_argument(
-        "--pool-size",
-        type=int,
-        default=32,
-        help="Pooling size along sequence when computing angle statistics",
-    )
     return parser.parse_args()
 
 
@@ -115,58 +109,48 @@ def rotate_half(x: torch.Tensor) -> torch.Tensor:
     return torch.cat((-x2, x1), dim=-1)
 
 
-def invert_rope(rotated: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    return rotated * cos - rotate_half(rotated) * sin
+def invert_rope(
+    rotated: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    scale: float,
+) -> torch.Tensor:
+    if scale == 0:
+        raise ValueError("attention scaling factor must be non-zero")
+    scale_t = torch.tensor(scale, device=rotated.device, dtype=rotated.dtype)
+    base = rotated / scale_t
+    cos_unit = cos / scale_t
+    sin_unit = sin / scale_t
+    return base * cos_unit - rotate_half(base) * sin_unit
 
 
-def pool_pairs(pairs: torch.Tensor, pool: int) -> torch.Tensor:
-    if pool <= 1:
-        return pairs
-    seq_len = pairs.size(0)
-    pad = (pool - seq_len % pool) % pool
-    if pad:
-        pad_tensor = torch.zeros(pad, pairs.size(1), pairs.size(2), device=pairs.device, dtype=pairs.dtype)
-        pairs = torch.cat([pairs, pad_tensor], dim=0)
-    grouped = pairs.view(-1, pool, pairs.size(1), pairs.size(2))
-    return grouped.mean(dim=1)
-
-
-def angle_statistics(q_pairs: torch.Tensor, k_pairs: torch.Tensor, pool: int) -> tuple[torch.Tensor, torch.Tensor]:
+def angle_statistics(q_pairs: torch.Tensor, k_pairs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     eps = 1e-8
-    q_pooled = pool_pairs(q_pairs, pool)
-    k_pooled = pool_pairs(k_pairs, pool)
-    groups = q_pooled.size(0)
-    freq_count = q_pooled.size(1)
-    mask = torch.tril(torch.ones(groups, groups, device=q_pairs.device, dtype=torch.bool))
+    q_norm = q_pairs.norm(dim=-1, keepdim=True).clamp_min(eps)
+    k_norm = k_pairs.norm(dim=-1, keepdim=True).clamp_min(eps)
+    q_unit = q_pairs / q_norm
+    k_unit = k_pairs / k_norm
 
-    mean_angles = []
-    var_angles = []
-    for f in range(freq_count):
-        q_vec = q_pooled[:, f, :]
-        k_vec = k_pooled[:, f, :]
-        q_norm = q_vec.norm(dim=-1).clamp_min(eps)
-        k_norm = k_vec.norm(dim=-1).clamp_min(eps)
-        q_unit = q_vec / q_norm.unsqueeze(-1)
-        k_unit = k_vec / k_norm.unsqueeze(-1)
+    qx = q_unit[..., 0]
+    qy = q_unit[..., 1]
+    kx = k_unit[..., 0]
+    ky = k_unit[..., 1]
 
-        dots = torch.matmul(q_unit, k_unit.T).clamp(-1.0, 1.0)
-        cross = (
-            q_unit[:, 0].unsqueeze(1) * k_unit[:, 1].unsqueeze(0)
-            - q_unit[:, 1].unsqueeze(1) * k_unit[:, 0].unsqueeze(0)
-        )
+    prefix_kx = torch.cumsum(kx, dim=0)
+    prefix_ky = torch.cumsum(ky, dim=0)
 
-        causal_dots = dots[mask]
-        causal_cross = cross[mask]
-        if causal_dots.numel() == 0:
-            mean_angles.append(torch.tensor(0.0, device=q_pairs.device, dtype=q_pairs.dtype))
-            var_angles.append(torch.tensor(0.0, device=q_pairs.device, dtype=q_pairs.dtype))
-            continue
+    cos_total = (qx * prefix_kx + qy * prefix_ky).sum(dim=0)
+    sin_total = (qx * prefix_ky - qy * prefix_kx).sum(dim=0)
 
-        angles = torch.atan2(causal_cross, causal_dots)
-        mean_angles.append(angles.mean())
-        var_angles.append(angles.var(unbiased=False))
+    total_pairs = q_pairs.size(0) * (q_pairs.size(0) + 1) / 2.0
+    mean_cos = cos_total / total_pairs
+    mean_sin = sin_total / total_pairs
 
-    return torch.stack(mean_angles), torch.stack(var_angles)
+    mean_angles = torch.atan2(mean_sin, mean_cos)
+    R = torch.sqrt(mean_cos ** 2 + mean_sin ** 2).clamp_max(1.0)
+    circular_variance = 1 - R
+
+    return mean_angles, circular_variance
 
 
 def plot_frequency_diagnostics(
@@ -241,6 +225,7 @@ def process_trace(
     dtype: torch.dtype,
     periods: torch.Tensor,
     rotary: Qwen3RotaryEmbedding,
+    attention_scale: float,
     args: argparse.Namespace,
 ) -> None:
     qk_path = trace_dir / "qk.pt"
@@ -285,12 +270,12 @@ def process_trace(
             causal_mean = causal_product_average(q_mag, k_mag)
 
             # Restore pre-RoPE Q/K to compute angles
-            q_orig = invert_rope(q_block, cos_table, sin_table)
-            k_orig = invert_rope(k_block, cos_table, sin_table)
+            q_orig = invert_rope(q_block, cos_table, sin_table, attention_scale)
+            k_orig = invert_rope(k_block, cos_table, sin_table, attention_scale)
             q_pairs = q_orig.view(token_count, head_dim // 2, 2)
             k_pairs = k_orig.view(token_count, head_dim // 2, 2)
 
-            mean_angles, var_angles = angle_statistics(q_pairs, k_pairs, pool=args.pool_size)
+            mean_angles, var_angles = angle_statistics(q_pairs, k_pairs)
 
             freq_count = mean_k.numel()
             omega = (periods[:freq_count] ** -1) * (2 * math.pi)
@@ -306,7 +291,6 @@ def process_trace(
             omega = omega.to(device=device, dtype=dtype)
             cos_matrix = torch.cos(distance_vals.unsqueeze(1) * omega.unsqueeze(0))
             reconstructed_plain = cos_matrix @ causal_mean[:freq_count]
-
             phase_shift = mean_angles[:freq_count]
             cos_matrix_phase = torch.cos(distance_vals.unsqueeze(1) * omega.unsqueeze(0) + phase_shift.unsqueeze(0))
             reconstructed_phase = cos_matrix_phase @ causal_mean[:freq_count]
@@ -357,13 +341,23 @@ def main() -> None:
     rotary = Qwen3RotaryEmbedding(config=config, device=device)
     inv_freq = rotary.inv_freq.to(torch.float64)
     periods = ((2 * math.pi) / inv_freq).to(device=device, dtype=dtype)
+    attention_scale = float(getattr(rotary, "attention_scaling", 1.0))
 
     args.output_root.mkdir(parents=True, exist_ok=True)
 
     for trace_dir in trace_dirs:
         if args.verbose:
             print(f"Processing {trace_dir}")
-        process_trace(trace_dir, args.output_root, device, dtype, periods, rotary, args)
+        process_trace(
+            trace_dir,
+            args.output_root,
+            device,
+            dtype,
+            periods,
+            rotary,
+            attention_scale,
+            args,
+        )
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 
 ## 数据来源
 - **输入**：`qk.pt`（`capture_qk_distributed.py` 生成），内含 `q`、`k` 两个张量，形状均为 `[num_layers, num_heads, seq_len, head_dim]`。
-- **RoPE 周期**：脚本通过 `AutoConfig` + `Qwen3RotaryEmbedding` 恢复 `inv_freq`，将其转换为实际周期 `period = 2π / inv_freq`，单位为 token，可复现与 Qwen3 forward 完全一致的频段划分。
+- **RoPE 周期**：脚本通过 `AutoConfig` + `Qwen3RotaryEmbedding` 恢复 `inv_freq`，将其转换为实际周期 `period = 2π / inv_freq`，单位为 token，并在还原 Q/K 时同时补偿 Yarn 的 `attention_scaling`，保证与模型前向保持一致。
 
 ## 聚合过程
 1. **幅值计算**：每个 head 的维度按 `(x, y)` 配对，利用 `sqrt(x^2 + y^2)` 得到各频段的幅值。
@@ -24,11 +24,11 @@
 
 ## 使用命令
 ```bash
-scripts/run_freq_magnitude_plots.sh --max-distance 10000 --pool-size 32
+scripts/run_freq_magnitude_plots.sh --max-distance 10000
 ```
-可通过追加参数定制，如 `--max-layers 4 --max-heads 8 --device cuda:1 --max-distance 10000 --pool-size 16`。默认使用 float32 在 GPU 上计算，若显存紧张可改为 `--device cpu`。
+可通过追加参数定制，如 `--max-layers 4 --max-heads 8 --device cuda:1 --max-distance 10000`。默认使用 float32 在 GPU 上计算，若显存紧张可改为 `--device cpu`。
 
 ## 注意事项
 - 由于周期跨度巨大（从约 6 token 到数千万 token），横轴采用对数刻度便于观察低频段细节。
-- 图 3 的平均是在自回归掩码下对全部 (i, j) 对求和后除以对数，因此不会因序列长度而失真；图 4/5 的角度统计在池化后的 token 上计算（池化窗口可通过 `--pool-size` 调整）。
+- 图 3 的平均是在自回归掩码下对全部 (i, j) 对求和后除以对数，因此不会因序列长度而失真；图 4/5 的角度统计直接基于所有 `i ≥ j` 的组合。
 - 若希望对幅值再做归一化或仅关注特定频段，可在脚本中调整聚合方式或添加筛选。
