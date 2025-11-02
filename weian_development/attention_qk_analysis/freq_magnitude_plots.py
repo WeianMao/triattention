@@ -1,28 +1,31 @@
-"""Generate per-frequency magnitude diagnostics for captured Q/K tensors."""
+"""Generate per-frequency magnitude diagnostics (including angle statistics) for captured Q/K tensors."""
 from __future__ import annotations
 
 import argparse
 import json
+import math
+import sys
 from pathlib import Path
 
-import math
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 import torch
+import torch.nn.functional as F
 from transformers import AutoConfig
 from transformers.models.qwen3.modeling_qwen3 import Qwen3RotaryEmbedding
 
 ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in __import__("sys").path:
-    __import__("sys").path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from weian_development.process_utils import mask_process_command
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Visualize frequency-wise magnitudes for Q/K")
+    parser = argparse.ArgumentParser(description="Visualize frequency-wise diagnostics for Q/K")
     parser.add_argument("input_root", type=Path, help="Directory containing qid*_trace*/qk.pt")
     parser.add_argument(
         "--output-root",
@@ -36,52 +39,35 @@ def parse_args() -> argparse.Namespace:
         default=Path("/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B"),
         help="Model directory used to recover RoPE frequency periods",
     )
-    parser.add_argument(
-        "--device",
-        default="cuda:0",
-        help="Device used for computation (e.g., cuda:0 or cpu)",
-    )
+    parser.add_argument("--device", default="cuda:0", help="Device used for computation (e.g., cuda:0 or cpu)")
     parser.add_argument(
         "--dtype",
         choices=["float32", "bfloat16", "float16"],
         default="float32",
         help="Computation dtype",
     )
-    parser.add_argument(
-        "--dpi",
-        type=int,
-        default=200,
-        help="Figure DPI",
-    )
+    parser.add_argument("--dpi", type=int, default=200, help="Figure DPI")
     parser.add_argument(
         "--figsize",
         type=float,
         nargs=2,
-        default=(18.0, 5.0),
+        default=(24.0, 10.0),
         help="Matplotlib figsize in inches",
     )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Print progress for each layer/head",
-    )
-    parser.add_argument(
-        "--max-layers",
-        type=int,
-        default=None,
-        help="Optional limit on number of layers processed",
-    )
-    parser.add_argument(
-        "--max-heads",
-        type=int,
-        default=None,
-        help="Optional limit on number of heads per layer",
-    )
+    parser.add_argument("--verbose", action="store_true", help="Print progress for each layer/head")
+    parser.add_argument("--max-layers", type=int, default=None, help="Optional limit on number of layers processed")
+    parser.add_argument("--max-heads", type=int, default=None, help="Optional limit on number of heads per layer")
     parser.add_argument(
         "--max-distance",
         type=int,
         default=10000,
-        help="Maximum token distance for reconstructed curve",
+        help="Maximum token distance (Δ) for reconstructed kernels",
+    )
+    parser.add_argument(
+        "--pool-size",
+        type=int,
+        default=32,
+        help="Pooling size along sequence when computing angle statistics",
     )
     return parser.parse_args()
 
@@ -108,7 +94,6 @@ def mean_magnitude(mags: torch.Tensor) -> torch.Tensor:
 
 
 def causal_product_average(q_mag: torch.Tensor, k_mag: torch.Tensor) -> torch.Tensor:
-    # q_mag, k_mag: [seq_len, num_freq]
     seq_len = q_mag.shape[0]
     if k_mag.shape[0] != seq_len or k_mag.shape[1] != q_mag.shape[1]:
         raise ValueError("q_mag and k_mag must share dimensions")
@@ -123,12 +108,74 @@ def causal_product_average(q_mag: torch.Tensor, k_mag: torch.Tensor) -> torch.Te
     return result.to(q_mag.dtype)
 
 
+def rotate_half(x: torch.Tensor) -> torch.Tensor:
+    d = x.shape[-1] // 2
+    x1 = x[..., :d]
+    x2 = x[..., d:]
+    return torch.cat((-x2, x1), dim=-1)
+
+
+def invert_rope(rotated: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    return rotated * cos - rotate_half(rotated) * sin
+
+
+def pool_pairs(pairs: torch.Tensor, pool: int) -> torch.Tensor:
+    if pool <= 1:
+        return pairs
+    seq_len = pairs.size(0)
+    pad = (pool - seq_len % pool) % pool
+    if pad:
+        pad_tensor = torch.zeros(pad, pairs.size(1), pairs.size(2), device=pairs.device, dtype=pairs.dtype)
+        pairs = torch.cat([pairs, pad_tensor], dim=0)
+    grouped = pairs.view(-1, pool, pairs.size(1), pairs.size(2))
+    return grouped.mean(dim=1)
+
+
+def angle_statistics(q_pairs: torch.Tensor, k_pairs: torch.Tensor, pool: int) -> tuple[torch.Tensor, torch.Tensor]:
+    eps = 1e-8
+    q_pooled = pool_pairs(q_pairs, pool)
+    k_pooled = pool_pairs(k_pairs, pool)
+    groups = q_pooled.size(0)
+    freq_count = q_pooled.size(1)
+    mask = torch.tril(torch.ones(groups, groups, device=q_pairs.device, dtype=torch.bool))
+
+    mean_angles = []
+    var_angles = []
+    for f in range(freq_count):
+        q_vec = q_pooled[:, f, :]
+        k_vec = k_pooled[:, f, :]
+        q_norm = q_vec.norm(dim=-1).clamp_min(eps)
+        k_norm = k_vec.norm(dim=-1).clamp_min(eps)
+        q_unit = q_vec / q_norm.unsqueeze(-1)
+        k_unit = k_vec / k_norm.unsqueeze(-1)
+
+        dots = torch.matmul(q_unit, k_unit.T).clamp(-1.0, 1.0)
+        cross = (
+            q_unit[:, 0].unsqueeze(1) * k_unit[:, 1].unsqueeze(0)
+            - q_unit[:, 1].unsqueeze(1) * k_unit[:, 0].unsqueeze(0)
+        )
+
+        causal_dots = dots[mask]
+        causal_cross = cross[mask]
+        if causal_dots.numel() == 0:
+            mean_angles.append(torch.tensor(0.0, device=q_pairs.device, dtype=q_pairs.dtype))
+            var_angles.append(torch.tensor(0.0, device=q_pairs.device, dtype=q_pairs.dtype))
+            continue
+
+        angles = torch.atan2(causal_cross, causal_dots)
+        mean_angles.append(angles.mean())
+        var_angles.append(angles.var(unbiased=False))
+
+    return torch.stack(mean_angles), torch.stack(var_angles)
+
+
 def plot_frequency_diagnostics(
     freq_values: torch.Tensor,
     titles: list[str],
     periods: torch.Tensor,
     distances: torch.Tensor,
-    reconstructed: torch.Tensor,
+    reconstructed_plain: torch.Tensor,
+    reconstructed_phased: torch.Tensor,
     out_path: Path,
     dpi: int,
     figsize: tuple[float, float],
@@ -136,10 +183,14 @@ def plot_frequency_diagnostics(
     freq_count = freq_values[0].numel()
     freq_axis = periods[:freq_count].cpu().numpy()
 
-    fig, axes = plt.subplots(1, len(freq_values) + 1, figsize=figsize, dpi=dpi, sharex=False)
-    axes = list(axes.flatten())
+    total_plots = len(freq_values) + 2
+    cols = 4
+    rows = (total_plots + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=figsize, dpi=dpi, sharex=False)
+    axes = axes.flatten().tolist() if hasattr(axes, "flatten") else [axes]
+    axes = axes[:total_plots]
 
-    for ax, values, title in zip(axes[:-1], freq_values, titles):
+    for ax, values, title in zip(axes[: len(freq_values)], freq_values, titles):
         ax.plot(freq_axis, values.cpu().numpy(), marker="o", markersize=2, linewidth=1.2)
         ax.set_title(title)
         ax.set_xscale("log")
@@ -147,13 +198,21 @@ def plot_frequency_diagnostics(
         ax.set_ylabel("Magnitude")
         ax.grid(alpha=0.3, linestyle="--")
 
-    ax_recon = axes[-1]
-    ax_recon.plot(distances.cpu().numpy(), reconstructed.cpu().numpy(), linewidth=1.2)
-    ax_recon.set_title("Reconstructed avg cos kernel")
-    ax_recon.set_xlabel("Token distance Δ")
-    ax_recon.set_ylabel("Σ_f |Q||K| cos(ω_f Δ)")
-    ax_recon.set_xscale("log")
-    ax_recon.grid(alpha=0.3, linestyle="--")
+    ax_plain = axes[-2]
+    ax_plain.plot(distances.cpu().numpy(), reconstructed_plain.cpu().numpy(), linewidth=1.2)
+    ax_plain.set_title("Σ_f |Q||K| cos(ω_f Δ)")
+    ax_plain.set_xlabel("Token distance Δ")
+    ax_plain.set_ylabel("Value")
+    ax_plain.set_xscale("log")
+    ax_plain.grid(alpha=0.3, linestyle="--")
+
+    ax_phase = axes[-1]
+    ax_phase.plot(distances.cpu().numpy(), reconstructed_phased.cpu().numpy(), linewidth=1.2)
+    ax_phase.set_title("Σ_f |Q||K| cos(ω_f Δ + φ_f)")
+    ax_phase.set_xlabel("Token distance Δ")
+    ax_phase.set_ylabel("Value")
+    ax_phase.set_xscale("log")
+    ax_phase.grid(alpha=0.3, linestyle="--")
 
     fig.tight_layout()
     fig.savefig(out_path)
@@ -166,7 +225,11 @@ def write_trace_readme(trace_dir: Path) -> None:
 - 图 1：对所有 key token 的 |K| 取平均，展示各频段幅值变化（未取对数）。
 - 图 2：对所有 query token 的 |Q| 取平均。
 - 图 3：按自回归遮罩聚合 `|Q|_i * |K|_j` 的平均值，其中 i≥j。
-- 横轴为 RoPE 频段对应的周期（单位：token），并采用对数坐标便于观察；纵轴为直接幅值大小。
+- 图 4：每个频段的平均夹角 φ_f（仅考虑 i≥j）。
+- 图 5：对应夹角的方差 σ²_f。
+- 图 6：未考虑夹角偏移的 Σ_f |Q||K| cos(ω_f Δ) 曲线。
+- 图 7：考虑平均夹角偏移的 Σ_f |Q||K| cos(ω_f Δ + φ_f) 曲线。
+- 前五幅横轴为 RoPE 周期（token），后两幅横轴为 token 距离 Δ（log 刻度）。
 """
     (trace_dir / "README.md").write_text(content, encoding="utf-8")
 
@@ -177,6 +240,7 @@ def process_trace(
     device: torch.device,
     dtype: torch.dtype,
     periods: torch.Tensor,
+    rotary: Qwen3RotaryEmbedding,
     args: argparse.Namespace,
 ) -> None:
     qk_path = trace_dir / "qk.pt"
@@ -200,14 +264,18 @@ def process_trace(
 
     write_trace_readme(trace_out_dir)
 
-    for layer in range(layer_limit):
-        head_idx = 0
-        while head_idx < head_limit:
-            q_block = q_tensor[layer, head_idx : head_idx + 1].to(device=device, dtype=dtype)[0]
-            k_block = k_tensor[layer, head_idx : head_idx + 1].to(device=device, dtype=dtype)[0]
+    position_ids = torch.arange(token_count, device=device).unsqueeze(0)
+    base = torch.zeros(1, token_count, head_dim, device=device, dtype=dtype)
+    cos_table, sin_table = rotary(base, position_ids)
+    cos_table = cos_table[0]
+    sin_table = sin_table[0]
 
-            q_block = q_block[:token_count]
-            k_block = k_block[:token_count]
+    periods = periods.to(device=device, dtype=dtype)
+
+    for layer in range(layer_limit):
+        for head in range(head_limit):
+            q_block = q_tensor[layer, head].to(device=device, dtype=dtype)[:token_count]
+            k_block = k_tensor[layer, head].to(device=device, dtype=dtype)[:token_count]
 
             q_mag = magnitude_pairs(q_block)
             k_mag = magnitude_pairs(k_block)
@@ -216,35 +284,50 @@ def process_trace(
             mean_q = mean_magnitude(q_mag)
             causal_mean = causal_product_average(q_mag, k_mag)
 
+            # Restore pre-RoPE Q/K to compute angles
+            q_orig = invert_rope(q_block, cos_table, sin_table)
+            k_orig = invert_rope(k_block, cos_table, sin_table)
+            q_pairs = q_orig.view(token_count, head_dim // 2, 2)
+            k_pairs = k_orig.view(token_count, head_dim // 2, 2)
+
+            mean_angles, var_angles = angle_statistics(q_pairs, k_pairs, pool=args.pool_size)
+
             freq_count = mean_k.numel()
             omega = (periods[:freq_count] ** -1) * (2 * math.pi)
             distance_limit = min(args.max_distance, token_count)
-            step_count = min(distance_limit, 1024)
-            distance_axis = torch.logspace(
-                start=0.0,
-                end=math.log10(distance_limit),
-                steps=step_count,
+            steps = min(distance_limit, 1024)
+            distance_vals = torch.logspace(
+                0.0,
+                math.log10(float(distance_limit)),
+                steps=max(2, steps),
                 device=device,
-                dtype=mean_k.dtype,
+                dtype=dtype,
             )
-            omega = omega.to(device=distance_axis.device, dtype=distance_axis.dtype)
-            cos_matrix = torch.cos(distance_axis.unsqueeze(1) * omega.unsqueeze(0))
-            reconstructed = cos_matrix @ causal_mean[:freq_count]
+            omega = omega.to(device=device, dtype=dtype)
+            cos_matrix = torch.cos(distance_vals.unsqueeze(1) * omega.unsqueeze(0))
+            reconstructed_plain = cos_matrix @ causal_mean[:freq_count]
 
-            values = [mean_k, mean_q, causal_mean]
+            phase_shift = mean_angles[:freq_count]
+            cos_matrix_phase = torch.cos(distance_vals.unsqueeze(1) * omega.unsqueeze(0) + phase_shift.unsqueeze(0))
+            reconstructed_phase = cos_matrix_phase @ causal_mean[:freq_count]
+
+            freq_values = [mean_k, mean_q, causal_mean, mean_angles, var_angles]
             titles = [
                 "Avg |K| per frequency",
                 "Avg |Q| per frequency",
                 "Avg |Q||K| over causal pairs",
+                "Mean angle φ_f",
+                "Angle variance σ²_f",
             ]
 
-            out_path = trace_out_dir / f"layer_{layer:02d}_head_{head_idx:02d}_freq.png"
+            out_path = trace_out_dir / f"layer_{layer:02d}_head_{head:02d}_freq.png"
             plot_frequency_diagnostics(
-                values,
+                freq_values,
                 titles,
                 periods,
-                distance_axis,
-                reconstructed,
+                distance_vals,
+                reconstructed_plain,
+                reconstructed_phase,
                 out_path,
                 args.dpi,
                 tuple(args.figsize),
@@ -253,8 +336,6 @@ def process_trace(
             if args.verbose:
                 rel = out_path.relative_to(out_root)
                 print(f"Saved {rel}")
-
-            head_idx += 1
 
     del q_tensor, k_tensor, data
     if device.type == "cuda":
@@ -265,9 +346,7 @@ def main() -> None:
     args = parse_args()
     mask_process_command("PD-L1_binder_freq")
 
-    trace_dirs = sorted(
-        p for p in args.input_root.iterdir() if p.is_dir() and p.name.startswith("qid")
-    )
+    trace_dirs = sorted(p for p in args.input_root.iterdir() if p.is_dir() and p.name.startswith("qid"))
     if not trace_dirs:
         raise SystemExit(f"No trace directories found under {args.input_root}")
 
@@ -275,16 +354,16 @@ def main() -> None:
     dtype = select_dtype(args.dtype)
 
     config = AutoConfig.from_pretrained(args.model_path, trust_remote_code=True)
-    rotary = Qwen3RotaryEmbedding(config=config, device="cpu")
+    rotary = Qwen3RotaryEmbedding(config=config, device=device)
     inv_freq = rotary.inv_freq.to(torch.float64)
-    periods = (2 * math.pi) / inv_freq
+    periods = ((2 * math.pi) / inv_freq).to(device=device, dtype=dtype)
 
     args.output_root.mkdir(parents=True, exist_ok=True)
 
     for trace_dir in trace_dirs:
         if args.verbose:
             print(f"Processing {trace_dir}")
-        process_trace(trace_dir, args.output_root, device, dtype, periods, args)
+        process_trace(trace_dir, args.output_root, device, dtype, periods, rotary, args)
 
 
 if __name__ == "__main__":
