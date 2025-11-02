@@ -8,6 +8,7 @@
 - `build_manifest.py`：从 JSON 离线结果中随机抽样题目与 trace。
 - `trace_manifest.json`：最新一次抽样生成的任务清单（默认 8 条）。
 - `capture_qk_distributed.py`：多 GPU 分发执行，捕获并落盘每条 trace 的 Q/K 与元数据。
+- `visualize_attention_maps.py`：基于捕获的 Q/K 生成逐层逐头的高分辨率注意力热图。
 
 ## 运行环境
 
@@ -64,6 +65,18 @@ outputs/deepseek_r1_qwen3_8b/qk_bf16_traces/
 ```
 
 > 仓库的 `.gitignore` 已忽略 `outputs/`，请勿尝试将上述产物纳入版本控制；`AGENTS.md` 已记录该约束。
+
+## 注意力热图（可选）
+
+若需要可视化注意力权重，可在捕获完成后运行：
+
+```bash
+scripts/run_attention_maps.sh
+```
+
+- 默认在每个 `qidXXXX_traceYY` 目录下创建 `attention_maps/` 子目录，按 `layer_##_head_##.png` 生成 4K 级 PNG。脚本默认参数为 `patch_size=32`、`head_batch=8`、`q_tile=4096`、`dtype=float32`，如需覆盖可在命令后追加参数。
+- 计算过程中先对 `Q·K^T` 分块并完成 softmax，然后对 key/ query 维度分别做 max pooling，最后在概率域执行线性 min-max 归一化（全局最小值映射到 0、最大值映射到 1）；若序列过长，可通过 `--patch-size` 直接指定窗口大小，或使用 `--target-size` 自动推断。绘制时保持 Key 轴从左到右、Query 轴从上到下，便于对照原始 token 顺序。
+- `attention_maps/README.md` 会记录池化倍数、图片尺寸以及生成脚本参数。
 
 ## 性能与资源提示
 
