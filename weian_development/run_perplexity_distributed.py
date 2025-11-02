@@ -20,15 +20,15 @@ from process_utils import mask_process_command
 
 def worker_main(
     worker_id: int,
-    gpu_id: str,
+    gpu_label: str,
     task_queue: "mp.Queue[str]",
     report_queue: "mp.Queue[Dict[str, str]]",
     config_dict: Dict[str, Optional[str]],
     output_dir: Path,
 ) -> None:
-    alias = f"PD-L1_binder_{gpu_id}"[:15]
+    alias = f"PD-L1_binder_{gpu_label.replace(',', '')}"[:15]
     mask_process_command(alias)
-    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_label
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
     config = PerplexityConfig(
@@ -58,7 +58,7 @@ def worker_main(
                 summary = record["summary"]  # type: ignore[index]
                 report_queue.put(
                     {
-                        "gpu": gpu_id,
+                        "gpu": gpu_label,
                         "file": file_path.name,
                         "output": tensor_path.name,
                         "tokens": str(summary.get("token_count", 0)),
@@ -67,7 +67,7 @@ def worker_main(
             except RuntimeError as exc:
                 report_queue.put(
                     {
-                        "gpu": gpu_id,
+                        "gpu": gpu_label,
                         "file": file_path.name,
                         "output": "__error__",
                         "tokens": str(exc),
@@ -78,7 +78,7 @@ def worker_main(
         evaluator.shutdown()
         report_queue.put(
             {
-                "gpu": gpu_id,
+                "gpu": gpu_label,
                 "file": "__worker_done__",
                 "output": "",
                 "tokens": "0",
@@ -103,6 +103,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit-files", type=int, default=None)
     parser.add_argument("--limit-traces", type=int, default=None)
     parser.add_argument("--device", default=None)
+    parser.add_argument(
+        "--tensor-parallel",
+        action="store_true",
+        help="Pair GPUs sequentially (tensor_parallel_size=2)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
@@ -133,7 +138,19 @@ def main() -> None:
     for file_path in files:
         task_queue.put(str(file_path))
 
-    for _ in gpus:
+    if args.tensor_parallel:
+        if len(gpus) % 2 != 0:
+            raise SystemExit("Tensor parallel mode requires an even number of GPUs")
+        groups: List[str] = []
+        iterator = iter(gpus)
+        for first in iterator:
+            second = next(iterator)
+            groups.append(f"{first},{second}")
+        worker_devices = groups
+    else:
+        worker_devices = gpus
+
+    for _ in worker_devices:
         task_queue.put(None)
 
     config_dict = {
@@ -147,10 +164,10 @@ def main() -> None:
     }
 
     workers: List[mp.Process] = []
-    for worker_id, gpu in enumerate(gpus):
+    for worker_id, group in enumerate(worker_devices):
         proc = mp.Process(
             target=worker_main,
-            args=(worker_id, gpu, task_queue, report_queue, config_dict, args.output_dir),
+            args=(worker_id, group, task_queue, report_queue, config_dict, args.output_dir),
             daemon=False,
         )
         proc.start()
