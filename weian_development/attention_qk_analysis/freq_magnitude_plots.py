@@ -327,8 +327,6 @@ def process_trace(
                 prod = torch.conj(k_fft) * q_fft
                 corr = torch.fft.irfft(prod.sum(dim=1), n=fft_len, dim=0)
                 corr = corr[: limit + 1]
-                scale = 1.0 / math.sqrt(head_dim)
-                corr = corr * scale
                 counts = (token_count - torch.arange(0, limit + 1, device=device, dtype=dtype)).clamp_min(1.0)
                 gt_scores = corr[1: limit + 1] / counts[1: limit + 1]
                 gt_distances = torch.arange(1, limit + 1, device=device, dtype=dtype)
