@@ -154,12 +154,14 @@ def angle_statistics(q_pairs: torch.Tensor, k_pairs: torch.Tensor) -> tuple[torc
 
 
 def plot_frequency_diagnostics(
-    freq_values: torch.Tensor,
+    freq_values: list[torch.Tensor],
     titles: list[str],
     periods: torch.Tensor,
     distances: torch.Tensor,
     reconstructed_plain: torch.Tensor,
     reconstructed_phased: torch.Tensor,
+    gt_distances: torch.Tensor,
+    gt_scores: torch.Tensor,
     out_path: Path,
     dpi: int,
     figsize: tuple[float, float],
@@ -167,7 +169,7 @@ def plot_frequency_diagnostics(
     freq_count = freq_values[0].numel()
     freq_axis = periods[:freq_count].cpu().numpy()
 
-    total_plots = len(freq_values) + 2
+    total_plots = len(freq_values) + 3
     cols = 4
     rows = (total_plots + cols - 1) // cols
     fig, axes = plt.subplots(rows, cols, figsize=figsize, dpi=dpi, sharex=False)
@@ -190,13 +192,21 @@ def plot_frequency_diagnostics(
     ax_plain.set_xscale("log")
     ax_plain.grid(alpha=0.3, linestyle="--")
 
-    ax_phase = axes[-1]
+    ax_phase = axes[-2]
     ax_phase.plot(distances.cpu().numpy(), reconstructed_phased.cpu().numpy(), linewidth=1.2)
     ax_phase.set_title("Σ_f |Q||K| cos(ω_f Δ + φ_f)")
     ax_phase.set_xlabel("Token distance Δ")
     ax_phase.set_ylabel("Value")
     ax_phase.set_xscale("log")
     ax_phase.grid(alpha=0.3, linestyle="--")
+
+    ax_gt = axes[-1]
+    ax_gt.plot(gt_distances.cpu().numpy(), gt_scores.cpu().numpy(), linewidth=1.2)
+    ax_gt.set_title("Ground-truth avg Q·K (pre-softmax)")
+    ax_gt.set_xlabel("Token distance Δ")
+    ax_gt.set_ylabel("Value")
+    ax_gt.set_xscale("log")
+    ax_gt.grid(alpha=0.3, linestyle="--")
 
     fig.tight_layout()
     fig.savefig(out_path)
@@ -304,6 +314,24 @@ def process_trace(
                 "Angle variance σ²_f",
             ]
 
+            # Ground-truth pre-softmax averages per distance
+            limit = min(args.max_distance, token_count - 1)
+            if limit >= 1:
+                fft_len = 1 << (2 * token_count - 1).bit_length()
+                q_fft = torch.fft.rfft(q_block, n=fft_len, dim=0)
+                k_fft = torch.fft.rfft(k_block, n=fft_len, dim=0)
+                prod = torch.conj(k_fft) * q_fft
+                corr = torch.fft.irfft(prod.sum(dim=1), n=fft_len, dim=0)
+                corr = corr[: limit + 1]
+                scale = 1.0 / math.sqrt(head_dim)
+                corr = corr * scale
+                counts = (token_count - torch.arange(0, limit + 1, device=device, dtype=dtype)).clamp_min(1.0)
+                gt_scores = corr[1: limit + 1] / counts[1: limit + 1]
+                gt_distances = torch.arange(1, limit + 1, device=device, dtype=dtype)
+            else:
+                gt_distances = torch.arange(1, 2, device=device, dtype=dtype)
+                gt_scores = torch.zeros(1, device=device, dtype=dtype)
+
             out_path = trace_out_dir / f"layer_{layer:02d}_head_{head:02d}_freq.png"
             plot_frequency_diagnostics(
                 freq_values,
@@ -312,6 +340,8 @@ def process_trace(
                 distance_vals,
                 reconstructed_plain,
                 reconstructed_phase,
+                gt_distances,
+                gt_scores,
                 out_path,
                 args.dpi,
                 tuple(args.figsize),

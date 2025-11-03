@@ -104,6 +104,6 @@ python weian_development/attention_qk_analysis/freq_magnitude_plots.py \
     --device cuda:0 --dtype float32 --max-distance 10000 --verbose
 ```
 
-- 每个 trace 会在输出目录生成 `layer_##_head_##_freq.png`，包含七幅子图：`|K|` 平均、`|Q|` 平均、自回归遮罩下的 `|Q||K|` 平均、平均夹角 φ_f（有符号、范围 [-π, π]）、夹角方差 σ²_f，以及两条重构曲线（未考虑夹角的 Σ_f |Q||K| cos(ω_f Δ) 与考虑平均夹角偏移的 Σ_f |Q||K| cos(ω_f Δ + φ_f)；Δ 在 logspace 中采样，最大值可通过 `--max-distance` 控制，默认 10k token）。
+- 每个 trace 会在输出目录生成 `layer_##_head_##_freq.png`，包含八幅子图：`|K|` 平均、`|Q|` 平均、自回归遮罩下的 `|Q||K|` 平均、平均夹角 φ_f（有符号、范围 [-π, π]）、夹角方差 σ²_f、两条重构曲线（未考虑夹角的 Σ_f |Q||K| cos(ω_f Δ) 与考虑平均夹角偏移的 Σ_f |Q||K| cos(ω_f Δ + φ_f)），以及 Ground-truth 预 softmax 平均值。Δ 在 logspace 中采样，最大值可通过 `--max-distance` 控制（默认 10k token）。
 - 横轴为 RoPE 频段索引，纵轴为聚合后的幅值。
 - 附带 `README.md` 说明统计口径，便于后续复现。
