@@ -184,7 +184,11 @@ def plot_frequency_diagnostics(
         ax.set_ylabel("Magnitude")
         ax.grid(alpha=0.3, linestyle="--")
 
-    ax_plain = axes[-2]
+    idx_plain = len(freq_values)
+    idx_phase = idx_plain + 1
+    idx_gt = idx_phase + 1
+
+    ax_plain = axes[idx_plain]
     ax_plain.plot(distances.cpu().numpy(), reconstructed_plain.cpu().numpy(), linewidth=1.2)
     ax_plain.set_title("Σ_f |Q||K| cos(ω_f Δ)")
     ax_plain.set_xlabel("Token distance Δ")
@@ -192,7 +196,7 @@ def plot_frequency_diagnostics(
     ax_plain.set_xscale("log")
     ax_plain.grid(alpha=0.3, linestyle="--")
 
-    ax_phase = axes[-2]
+    ax_phase = axes[idx_phase]
     ax_phase.plot(distances.cpu().numpy(), reconstructed_phased.cpu().numpy(), linewidth=1.2)
     ax_phase.set_title("Σ_f |Q||K| cos(ω_f Δ + φ_f)")
     ax_phase.set_xlabel("Token distance Δ")
@@ -200,7 +204,7 @@ def plot_frequency_diagnostics(
     ax_phase.set_xscale("log")
     ax_phase.grid(alpha=0.3, linestyle="--")
 
-    ax_gt = axes[-1]
+    ax_gt = axes[idx_gt]
     ax_gt.plot(gt_distances.cpu().numpy(), gt_scores.cpu().numpy(), linewidth=1.2)
     ax_gt.set_title("Ground-truth avg Q·K (pre-softmax)")
     ax_gt.set_xlabel("Token distance Δ")
