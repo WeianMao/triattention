@@ -15,12 +15,18 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
+from transformers import AutoConfig
+from transformers.models.qwen3.modeling_qwen3 import Qwen3RotaryEmbedding
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from weian_development.process_utils import mask_process_command
+from weian_development.attention_qk_analysis.freq_magnitude_plots import invert_rope
+from weian_development.attention_qk_analysis.freq_magnitude_single_plot_meanvec import (
+    to_complex_pairs,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -107,6 +113,24 @@ def parse_args() -> argparse.Namespace:
         help="Skip saving the baseline heatmap that mirrors visualize_attention_maps.py output.",
     )
     parser.add_argument(
+        "--model-path",
+        type=Path,
+        default=Path("/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B"),
+        help="Model directory for recovering RoPE parameters.",
+    )
+    parser.add_argument(
+        "--topk",
+        type=int,
+        default=30,
+        help="Number of key tokens to highlight per scoring mechanism.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Random seed used when sampling negative key examples.",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Log detailed progress information.",
@@ -150,8 +174,18 @@ def compute_attention_and_keymax(
     patch_size: int,
     q_tile: int,
     device: torch.device,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Return pooled heatmaps, key-group maxima/means, and their top-30 highlight masks."""
+    topk: int,
+) -> Tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    List[torch.Tensor],
+    List[torch.Tensor],
+    torch.Tensor,
+]:
+    """Return pooled heatmaps, key-group statistics, and token-level top-k selections."""
 
     head_count, seq_q, head_dim = q_block.shape
     _, seq_k, _ = k_block.shape
@@ -269,79 +303,89 @@ def compute_attention_and_keymax(
 
     key_max_tokens = key_max_tokens[:, :seq_len]
     key_sum_tokens = key_sum_tokens[:, :seq_len]
-    key_count_tokens = key_count_tokens[:, :seq_len]
+    key_count_trimmed = key_count_tokens[:, :seq_len]
 
     if seq_len > 500:
         drop_start = seq_len - 500
         key_sum_tokens[:, drop_start:] = 0.0
-        key_count_tokens[:, drop_start:] = 0.0
+        key_count_trimmed[:, drop_start:] = 0.0
 
-    key_avg_tokens = key_sum_tokens / key_count_tokens.clamp_min(1e-12)
+    key_avg_tokens = key_sum_tokens / key_count_trimmed.clamp_min(1e-12)
 
     total_keys = num_k_groups * patch_size
-    if key_max_tokens.shape[1] < total_keys:
-        pad = torch.zeros(
-            head_count,
-            total_keys - key_max_tokens.shape[1],
-            device=device,
-            dtype=key_max_tokens.dtype,
-        )
-        key_max_tokens = torch.cat([key_max_tokens, pad], dim=1)
-    if key_avg_tokens.shape[1] < total_keys:
-        pad = torch.zeros(
-            head_count,
-            total_keys - key_avg_tokens.shape[1],
-            device=device,
-            dtype=key_avg_tokens.dtype,
-        )
-        key_avg_tokens = torch.cat([key_avg_tokens, pad], dim=1)
-    if key_count_tokens.shape[1] < total_keys:
-        pad = torch.zeros(
-            head_count,
-            total_keys - key_count_tokens.shape[1],
-            device=device,
-            dtype=key_count_tokens.dtype,
-        )
-        key_count_tokens = torch.cat([key_count_tokens, pad], dim=1)
+
+    def pad_to_total(tensor: torch.Tensor) -> torch.Tensor:
+        if tensor.shape[1] < total_keys:
+            pad = torch.zeros(
+                head_count,
+                total_keys - tensor.shape[1],
+                device=device,
+                dtype=tensor.dtype,
+            )
+            tensor = torch.cat([tensor, pad], dim=1)
+        return tensor
+
+    key_max_tokens = pad_to_total(key_max_tokens)
+    key_avg_tokens = pad_to_total(key_avg_tokens)
+    key_count_tokens = pad_to_total(key_count_trimmed.clone())
 
     token_positions = torch.arange(total_keys, device=device)
+    valid_max_mask = token_positions < seq_len
+    mean_cutoff = seq_len - 500 if seq_len > 500 else seq_len
+    valid_mean_base = token_positions < mean_cutoff
 
-    # Top-30 keys by max attention weight
-    valid_max_tokens = token_positions < seq_len
-    topk_max = min(30, total_keys)
     key_max_top_tokens = torch.zeros(
         (head_count, total_keys), device=device, dtype=torch.bool
     )
-    if valid_max_tokens.any():
-        max_scores = key_max_tokens.clone()
-        max_scores = max_scores.masked_fill(~valid_max_tokens.unsqueeze(0), float("-inf"))
-        topk_indices = max_scores.topk(k=topk_max, dim=1).indices
-        key_max_top_tokens.scatter_(1, topk_indices, True)
-        key_max_top_tokens &= valid_max_tokens.unsqueeze(0)
-
-    # Top-30 keys by mean attention weight (excluding last 500 tokens)
-    mean_cutoff = seq_len - 500 if seq_len > 500 else seq_len
-    valid_mean_tokens = token_positions < mean_cutoff
-    attended_mean = key_count_tokens > 0.0
-    mean_valid_mask = valid_mean_tokens.unsqueeze(0) & attended_mean
-    topk_mean = min(30, total_keys)
     key_avg_top_tokens = torch.zeros(
         (head_count, total_keys), device=device, dtype=torch.bool
     )
-    if mean_valid_mask.any():
-        mean_scores = key_avg_tokens.clone()
-        mean_scores = mean_scores.masked_fill(~mean_valid_mask, float("-inf"))
-        topk_indices_mean = mean_scores.topk(k=topk_mean, dim=1).indices
-        key_avg_top_tokens.scatter_(1, topk_indices_mean, True)
-        key_avg_top_tokens &= mean_valid_mask
+    max_index_list: List[torch.Tensor] = []
+    mean_index_list: List[torch.Tensor] = []
+
+    for head_idx in range(head_count):
+        head_max_scores = key_max_tokens[head_idx].clone()
+        head_valid_max = valid_max_mask.clone()
+        head_max_scores[~head_valid_max] = float("-inf")
+        valid_max_count = int(head_valid_max.sum().item())
+        select_max = min(topk, valid_max_count)
+        if select_max > 0 and head_valid_max.any():
+            max_vals, max_idx = torch.topk(head_max_scores, k=select_max)
+            finite_mask = torch.isfinite(max_vals)
+            max_idx = max_idx[finite_mask]
+            if max_idx.numel() > 0:
+                key_max_top_tokens[head_idx, max_idx] = True
+        else:
+            max_idx = head_max_scores.new_empty(0, dtype=torch.long)
+        max_index_list.append(max_idx.detach().cpu())
+
+        head_mean_counts = key_count_tokens[head_idx]
+        head_mean_valid = (head_mean_counts > 0.0) & valid_mean_base
+        head_mean_scores = key_avg_tokens[head_idx].clone()
+        head_mean_scores[~head_mean_valid] = float("-inf")
+        valid_mean_count = int(head_mean_valid.sum().item())
+        select_mean = min(topk, valid_mean_count)
+        if select_mean > 0 and head_mean_valid.any():
+            mean_vals, mean_idx = torch.topk(head_mean_scores, k=select_mean)
+            finite_mask = torch.isfinite(mean_vals)
+            mean_idx = mean_idx[finite_mask]
+            if mean_idx.numel() > 0:
+                key_avg_top_tokens[head_idx, mean_idx] = True
+        else:
+            mean_idx = head_mean_scores.new_empty(0, dtype=torch.long)
+        mean_index_list.append(mean_idx.detach().cpu())
 
     key_max_groups = key_max_tokens.view(head_count, num_k_groups, patch_size).amax(dim=2)
     key_avg_groups = key_avg_tokens.view(head_count, num_k_groups, patch_size).amax(dim=2)
     key_max_top_groups = (
-        key_max_top_tokens.view(head_count, num_k_groups, patch_size).amax(dim=2).to(torch.float32)
+        key_max_top_tokens.view(head_count, num_k_groups, patch_size)
+        .any(dim=2)
+        .to(torch.float32)
     )
     key_avg_top_groups = (
-        key_avg_top_tokens.view(head_count, num_k_groups, patch_size).amax(dim=2).to(torch.float32)
+        key_avg_top_tokens.view(head_count, num_k_groups, patch_size)
+        .any(dim=2)
+        .to(torch.float32)
     )
 
     key_min = key_max_groups.amin(dim=1, keepdim=True)
@@ -366,6 +410,9 @@ def compute_attention_and_keymax(
         key_avg_norm.detach().cpu(),
         key_max_top_groups.detach().cpu(),
         key_avg_top_groups.detach().cpu(),
+        [idx.clone() for idx in max_index_list],
+        [idx.clone() for idx in mean_index_list],
+        key_count_trimmed.detach().cpu(),
     )
 
 
@@ -383,6 +430,7 @@ def save_baseline_heatmap(
     ax.set_xlabel("Key group index")
     ax.set_ylabel("Query group index")
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(out_path)
     plt.close(fig)
@@ -461,6 +509,230 @@ def save_case_study_figure(
     plt.close(fig)
 
 
+def sample_negative_indices(
+    valid_indices: torch.Tensor,
+    positives: torch.Tensor,
+    sample_size: int,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    if valid_indices.numel() == 0:
+        return torch.empty(0, dtype=torch.long)
+
+    positive_set = set(positives.tolist()) if positives.numel() > 0 else set()
+    remaining = [idx for idx in valid_indices.tolist() if idx not in positive_set]
+    if not remaining:
+        return torch.empty(0, dtype=torch.long)
+
+    remaining_tensor = torch.tensor(remaining, dtype=torch.long)
+    if remaining_tensor.numel() <= sample_size:
+        return remaining_tensor
+
+    perm = torch.randperm(remaining_tensor.numel(), generator=generator)[:sample_size]
+    return remaining_tensor[perm]
+
+
+def compute_weighted_series(
+    q_mean_abs: torch.Tensor,
+    k_abs: torch.Tensor,
+    k_mean_abs: torch.Tensor,
+    token_indices: torch.Tensor,
+) -> torch.Tensor:
+    if token_indices.numel() == 0:
+        return torch.zeros_like(q_mean_abs)
+
+    subset = k_abs.index_select(0, token_indices)
+    delta = subset - k_mean_abs.unsqueeze(0)
+    values = q_mean_abs.unsqueeze(0) * delta
+    return values.mean(dim=0)
+
+
+def compute_weighted_series_matrix(
+    q_mean_abs: torch.Tensor,
+    k_abs: torch.Tensor,
+    k_mean_abs: torch.Tensor,
+    token_indices: torch.Tensor,
+) -> torch.Tensor:
+    if token_indices.numel() == 0:
+        return torch.zeros(0, q_mean_abs.shape[0], dtype=q_mean_abs.dtype)
+    subset = k_abs.index_select(0, token_indices)
+    delta = subset - k_mean_abs.unsqueeze(0)
+    return q_mean_abs.unsqueeze(0) * delta
+
+
+def sample_subset(
+    indices: torch.Tensor,
+    sample_size: int,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    if indices.numel() <= sample_size:
+        return indices
+    perm = torch.randperm(indices.numel(), generator=generator)[:sample_size]
+    return indices[perm]
+
+
+def save_frequency_overlay_figure(
+    freq_axis: torch.Tensor,
+    q_mean_abs: torch.Tensor,
+    max_pos: torch.Tensor,
+    max_neg: torch.Tensor,
+    mean_pos: torch.Tensor,
+    mean_neg: torch.Tensor,
+    counts: Dict[str, int],
+    out_path: Path,
+    dpi: int,
+) -> None:
+    freq_np = freq_axis.cpu().numpy()
+    fig, axes = plt.subplots(5, 1, figsize=(12.0, 14.0), dpi=dpi, sharex=True)
+
+    axes[0].plot(freq_np, q_mean_abs.cpu().numpy(), color="tab:blue", linewidth=1.5)
+    axes[0].set_title("|E[q_f]|")
+    axes[0].set_ylabel("Magnitude")
+    axes[0].grid(alpha=0.3, linestyle="--")
+
+    axes[1].plot(freq_np, max_pos.cpu().numpy(), color="tab:orange", linewidth=1.5)
+    axes[1].axhline(0.0, color="gray", linewidth=0.8, alpha=0.7)
+    axes[1].set_title(f"Top-{counts['max_pos']} max-attention keys")
+    axes[1].set_ylabel("Value")
+    axes[1].grid(alpha=0.3, linestyle="--")
+
+    axes[2].plot(freq_np, max_neg.cpu().numpy(), color="tab:green", linewidth=1.5)
+    axes[2].axhline(0.0, color="gray", linewidth=0.8, alpha=0.7)
+    axes[2].set_title(f"Random {counts['max_neg']} non-top keys (max-attention)")
+    axes[2].set_ylabel("Value")
+    axes[2].grid(alpha=0.3, linestyle="--")
+
+    axes[3].plot(freq_np, mean_pos.cpu().numpy(), color="tab:red", linewidth=1.5)
+    axes[3].axhline(0.0, color="gray", linewidth=0.8, alpha=0.7)
+    axes[3].set_title(f"Top-{counts['mean_pos']} mean-attention keys")
+    axes[3].set_ylabel("Value")
+    axes[3].grid(alpha=0.3, linestyle="--")
+
+    axes[4].plot(freq_np, mean_neg.cpu().numpy(), color="tab:purple", linewidth=1.5)
+    axes[4].axhline(0.0, color="gray", linewidth=0.8, alpha=0.7)
+    axes[4].set_title(f"Random {counts['mean_neg']} non-top keys (mean-attention)")
+    axes[4].set_ylabel("Value")
+    axes[4].set_xlabel("Frequency index f")
+    axes[4].grid(alpha=0.3, linestyle="--")
+
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
+def save_frequency_overlay_matrix(
+    freq_axis: torch.Tensor,
+    q_mean_abs: torch.Tensor,
+    matrices: Dict[str, torch.Tensor],
+    out_path: Path,
+    dpi: int,
+) -> None:
+    freq_np = freq_axis.cpu().numpy()
+    fig, axes = plt.subplots(5, 1, figsize=(12.0, 18.0), dpi=dpi, sharex=True)
+
+    axes[0].plot(freq_np, q_mean_abs.cpu().numpy(), color="tab:blue", linewidth=1.5)
+    axes[0].set_title("|E[q_f]|")
+    axes[0].set_ylabel("Magnitude")
+    axes[0].grid(alpha=0.3, linestyle="--")
+
+    def plot_matrix(ax, matrix: torch.Tensor, title: str) -> None:
+        if matrix.numel() == 0:
+            ax.set_title(f"{title} (no samples)")
+            ax.set_ylabel("Value")
+            ax.grid(alpha=0.3, linestyle="--")
+            return
+        arr = matrix.cpu().numpy()
+        for row in arr:
+            ax.plot(freq_np, row, linewidth=0.8, alpha=0.6)
+        ax.axhline(0.0, color="gray", linewidth=0.8, alpha=0.7)
+        ax.set_title(title)
+        ax.set_ylabel("Value")
+        ax.grid(alpha=0.3, linestyle="--")
+
+    plot_matrix(
+        axes[1],
+        matrices["max_pos"],
+        f"Top-{matrices['max_pos'].shape[0]} max-attention keys",
+    )
+    plot_matrix(
+        axes[2],
+        matrices["max_neg"],
+        f"Random {matrices['max_neg'].shape[0]} non-top keys (max-attention)",
+    )
+    plot_matrix(
+        axes[3],
+        matrices["mean_pos"],
+        f"Top-{matrices['mean_pos'].shape[0]} mean-attention keys",
+    )
+    plot_matrix(
+        axes[4],
+        matrices["mean_neg"],
+        f"Random {matrices['mean_neg'].shape[0]} non-top keys (mean-attention)",
+    )
+    axes[4].set_xlabel("Frequency index f")
+
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
+def save_frequency_overlay_subset(
+    freq_axis: torch.Tensor,
+    q_mean_abs: torch.Tensor,
+    subset: Dict[str, torch.Tensor],
+    out_path: Path,
+    dpi: int,
+) -> None:
+    freq_np = freq_axis.cpu().numpy()
+    fig, axes = plt.subplots(5, 1, figsize=(12.0, 14.0), dpi=dpi, sharex=True)
+
+    axes[0].plot(freq_np, q_mean_abs.cpu().numpy(), color="tab:blue", linewidth=1.5)
+    axes[0].set_title("|E[q_f]|")
+    axes[0].set_ylabel("Magnitude")
+    axes[0].grid(alpha=0.3, linestyle="--")
+
+    def plot_subset(ax, matrix: torch.Tensor, title: str) -> None:
+        if matrix.numel() == 0:
+            ax.set_title(f"{title} (no samples)")
+            ax.set_ylabel("Value")
+            ax.grid(alpha=0.3, linestyle="--")
+            return
+        arr = matrix.cpu().numpy()
+        for row in arr:
+            ax.plot(freq_np, row, linewidth=1.1, alpha=0.75)
+        ax.axhline(0.0, color="gray", linewidth=0.8, alpha=0.7)
+        ax.set_title(title)
+        ax.set_ylabel("Value")
+        ax.grid(alpha=0.3, linestyle="--")
+
+    plot_subset(
+        axes[1],
+        subset["max_pos"],
+        f"Random {subset['max_pos'].shape[0]} from max-top30",
+    )
+    plot_subset(
+        axes[2],
+        subset["max_neg"],
+        f"Random {subset['max_neg'].shape[0]} non-top (max attention)",
+    )
+    plot_subset(
+        axes[3],
+        subset["mean_pos"],
+        f"Random {subset['mean_pos'].shape[0]} from mean-top30",
+    )
+    plot_subset(
+        axes[4],
+        subset["mean_neg"],
+        f"Random {subset['mean_neg'].shape[0]} non-top (mean attention)",
+    )
+    axes[4].set_xlabel("Frequency index f")
+
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
 def main() -> None:
     args = parse_args()
     mask_process_command("PD-L1_binder_case")
@@ -506,6 +778,23 @@ def main() -> None:
     q_tensor = data["q"]
     k_tensor = data["k"]
 
+    config = AutoConfig.from_pretrained(args.model_path, trust_remote_code=True)
+    rope_scaling = dict(config.rope_scaling or {})
+    if "attn_factor" in rope_scaling and "attention_factor" not in rope_scaling:
+        rope_scaling["attention_factor"] = rope_scaling["attn_factor"]
+    rope_scaling.pop("attn_factor", None)
+    config.rope_scaling = rope_scaling
+    rotary = Qwen3RotaryEmbedding(config=config, device=device)
+    attention_scale = float(getattr(rotary, "attention_scaling", 1.0))
+
+    head_dim = q_tensor.shape[-1]
+    position_ids = torch.arange(seq_len, device=device).unsqueeze(0)
+    base = torch.zeros(1, seq_len, head_dim, device=device, dtype=compute_dtype)
+    cos_table, sin_table = rotary(base, position_ids)
+    cos_table = cos_table[0].to(dtype=compute_dtype)
+    sin_table = sin_table[0].to(dtype=compute_dtype)
+
+
     for layer, heads in layer_to_heads.items():
         unique_heads = sorted(set(heads))
         if args.verbose:
@@ -520,6 +809,9 @@ def main() -> None:
                 key_avg_groups,
                 key_max_top_groups,
                 key_avg_top_groups,
+                max_token_lists,
+                mean_token_lists,
+                key_count_valid,
             ) = compute_attention_and_keymax(
                 q_block,
                 k_block,
@@ -527,6 +819,7 @@ def main() -> None:
                 patch_size,
                 args.q_tile,
                 device,
+                args.topk,
             )
 
         for idx, head in enumerate(unique_heads):
@@ -562,6 +855,171 @@ def main() -> None:
             if args.verbose:
                 print(f"Saved case study {case_path.relative_to(output_root)}")
 
+            q_head = q_block[idx, :seq_len, :]
+            k_head = k_block[idx, :seq_len, :]
+
+            q_unrot = invert_rope(q_head, cos_table, sin_table, attention_scale)
+            k_unrot = invert_rope(k_head, cos_table, sin_table, attention_scale)
+
+            q_complex = to_complex_pairs(q_unrot.detach().cpu())
+            k_complex = to_complex_pairs(k_unrot.detach().cpu())
+
+            q_mean_abs = torch.abs(q_complex.mean(dim=0))
+            k_mean_abs = torch.abs(k_complex.mean(dim=0))
+            k_abs = torch.abs(k_complex)
+
+            max_pos_tokens = max_token_lists[idx]
+            max_pos_tokens = max_pos_tokens[max_pos_tokens < seq_len]
+            if max_pos_tokens.numel() > 0:
+                max_pos_tokens = torch.unique(max_pos_tokens.to(torch.long))
+            else:
+                max_pos_tokens = torch.empty(0, dtype=torch.long)
+
+            valid_max_indices = torch.arange(seq_len, dtype=torch.long)
+            gen_max = torch.Generator(device="cpu")
+            gen_max.manual_seed(args.seed + layer * 1000 + head)
+            max_neg_tokens = sample_negative_indices(
+                valid_max_indices, max_pos_tokens, args.topk, gen_max
+            )
+
+            key_counts_head = key_count_valid[idx]
+            mean_valid_mask = key_counts_head > 0
+            mean_valid_indices = mean_valid_mask.nonzero(as_tuple=False).squeeze(-1)
+
+            mean_pos_tokens = mean_token_lists[idx]
+            mean_pos_tokens = mean_pos_tokens[mean_pos_tokens < seq_len]
+            if mean_pos_tokens.numel() > 0:
+                mean_pos_tokens = mean_pos_tokens.to(torch.long)
+                valid_mask = mean_valid_mask[mean_pos_tokens]
+                mean_pos_tokens = mean_pos_tokens[valid_mask]
+                mean_pos_tokens = torch.unique(mean_pos_tokens)
+            else:
+                mean_pos_tokens = torch.empty(0, dtype=torch.long)
+
+            gen_mean = torch.Generator(device="cpu")
+            gen_mean.manual_seed(args.seed + layer * 1000 + head + 1)
+            mean_neg_tokens = sample_negative_indices(
+                mean_valid_indices, mean_pos_tokens, args.topk, gen_mean
+            )
+
+            freq_axis = torch.arange(q_mean_abs.shape[0], dtype=torch.float32)
+
+            max_pos_series = compute_weighted_series(
+                q_mean_abs, k_abs, k_mean_abs, max_pos_tokens
+            )
+            max_neg_series = compute_weighted_series(
+                q_mean_abs, k_abs, k_mean_abs, max_neg_tokens
+            )
+            mean_pos_series = compute_weighted_series(
+                q_mean_abs, k_abs, k_mean_abs, mean_pos_tokens
+            )
+            mean_neg_series = compute_weighted_series(
+                q_mean_abs, k_abs, k_mean_abs, mean_neg_tokens
+            )
+
+            max_pos_matrix = compute_weighted_series_matrix(
+                q_mean_abs, k_abs, k_mean_abs, max_pos_tokens
+            )
+            max_neg_matrix = compute_weighted_series_matrix(
+                q_mean_abs, k_abs, k_mean_abs, max_neg_tokens
+            )
+            mean_pos_matrix = compute_weighted_series_matrix(
+                q_mean_abs, k_abs, k_mean_abs, mean_pos_tokens
+            )
+            mean_neg_matrix = compute_weighted_series_matrix(
+                q_mean_abs, k_abs, k_mean_abs, mean_neg_tokens
+            )
+
+            freq_path = output_root / f"layer_{layer:02d}_head_{head:02d}_freq_overlays.png"
+            counts = {
+                "max_pos": int(max_pos_tokens.numel()),
+                "max_neg": int(max_neg_tokens.numel()),
+                "mean_pos": int(mean_pos_tokens.numel()),
+                "mean_neg": int(mean_neg_tokens.numel()),
+            }
+            save_frequency_overlay_figure(
+                freq_axis,
+                q_mean_abs,
+                max_pos_series,
+                max_neg_series,
+                mean_pos_series,
+                mean_neg_series,
+                counts,
+                freq_path,
+                args.dpi,
+            )
+            if args.verbose:
+                print(f"Saved frequency overlays {freq_path.relative_to(output_root)}")
+
+            freq_matrix_path = (
+                output_root
+                / f"layer_{layer:02d}_head_{head:02d}_freq_overlays_multi.png"
+            )
+            matrix_dict = {
+                "max_pos": max_pos_matrix,
+                "max_neg": max_neg_matrix,
+                "mean_pos": mean_pos_matrix,
+                "mean_neg": mean_neg_matrix,
+            }
+            save_frequency_overlay_matrix(
+                freq_axis,
+                q_mean_abs,
+                matrix_dict,
+                freq_matrix_path,
+                args.dpi,
+            )
+            if args.verbose:
+                print(
+                    f"Saved frequency overlay matrix {freq_matrix_path.relative_to(output_root)}"
+                )
+
+            subset_path = (
+                output_root
+                / f"layer_{layer:02d}_head_{head:02d}_freq_overlays_subset.png"
+            )
+            gen_subset = torch.Generator(device="cpu")
+            gen_subset.manual_seed(args.seed + layer * 1000 + head + 2)
+
+            subset_max_pos = sample_subset(
+                max_pos_tokens, min(6, max_pos_tokens.numel()), gen_subset
+            )
+            subset_max_neg = sample_subset(
+                max_neg_tokens, min(6, max_neg_tokens.numel()), gen_subset
+            )
+            subset_mean_pos = sample_subset(
+                mean_pos_tokens, min(6, mean_pos_tokens.numel()), gen_subset
+            )
+            subset_mean_neg = sample_subset(
+                mean_neg_tokens, min(6, mean_neg_tokens.numel()), gen_subset
+            )
+
+            subset_matrices = {
+                "max_pos": compute_weighted_series_matrix(
+                    q_mean_abs, k_abs, k_mean_abs, subset_max_pos
+                ),
+                "max_neg": compute_weighted_series_matrix(
+                    q_mean_abs, k_abs, k_mean_abs, subset_max_neg
+                ),
+                "mean_pos": compute_weighted_series_matrix(
+                    q_mean_abs, k_abs, k_mean_abs, subset_mean_pos
+                ),
+                "mean_neg": compute_weighted_series_matrix(
+                    q_mean_abs, k_abs, k_mean_abs, subset_mean_neg
+                ),
+            }
+
+            save_frequency_overlay_subset(
+                freq_axis,
+                q_mean_abs,
+                subset_matrices,
+                subset_path,
+                args.dpi,
+            )
+            if args.verbose:
+                print(
+                    f"Saved frequency overlay subset {subset_path.relative_to(output_root)}"
+                )
+
         del (
             q_block,
             k_block,
@@ -570,6 +1028,9 @@ def main() -> None:
             key_avg_groups,
             key_max_top_groups,
             key_avg_top_groups,
+            max_token_lists,
+            mean_token_lists,
+            key_count_valid,
         )
 
     del q_tensor, k_tensor, data
