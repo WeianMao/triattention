@@ -84,9 +84,12 @@ def select_dtype(name: str) -> torch.dtype:
 def to_complex_pairs(tensor: torch.Tensor) -> torch.Tensor:
     if tensor.size(-1) % 2 != 0:
         raise ValueError("Head dimension must be even to form complex pairs")
+    freq_count = tensor.shape[1] // 2
     real_dtype = torch.float32 if tensor.dtype in (torch.bfloat16, torch.float16) else tensor.dtype
-    reshaped = tensor.to(real_dtype).view(tensor.shape[0], tensor.shape[1] // 2, 2).contiguous()
-    return torch.view_as_complex(reshaped)
+    tensor_real = tensor.to(dtype=real_dtype)
+    real = tensor_real[:, :freq_count].contiguous()
+    imag = tensor_real[:, freq_count:].contiguous()
+    return torch.complex(real, imag)
 
 
 def phase_shift_from_rotated(
