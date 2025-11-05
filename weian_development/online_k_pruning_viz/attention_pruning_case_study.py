@@ -265,7 +265,9 @@ def compute_pooled_attention(
     q_tile: int,
     device: torch.device,
     prune_mask: torch.Tensor | None = None,
-) -> torch.Tensor:
+    return_argmax: bool = False,
+    return_query_argmax: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
     head_count, seq_q, head_dim = q_block.shape
     _, seq_k, _ = k_block.shape
     scale = head_dim ** -0.5
@@ -293,6 +295,19 @@ def compute_pooled_attention(
         device=device,
         dtype=torch.float32,
     )
+
+    argmax_groups = None
+    if return_argmax:
+        argmax_groups = torch.zeros_like(pooled_groups)
+
+    query_argmax = None
+    if return_query_argmax:
+        query_argmax = torch.full(
+            (head_count, seq_len),
+            -1,
+            device=device,
+            dtype=torch.long,
+        )
 
     if prune_mask is not None and prune_mask.shape[1] < seq_k_padded:
         pad = torch.zeros(
@@ -336,6 +351,27 @@ def compute_pooled_attention(
 
         pooled_k = weights.max(dim=-1).values
 
+        if return_argmax:
+            weights_flat = weights.view(head_count, -1, num_k_groups * patch_size)
+            top_indices = weights_flat.argmax(dim=-1, keepdim=True)
+            top_mask = torch.zeros_like(weights_flat)
+            top_mask.scatter_(dim=-1, index=top_indices, value=1.0)
+            top_mask = top_mask.view(head_count, -1, num_k_groups, patch_size)
+            top_mask = top_mask * key_mask
+            argmax_tile = top_mask.max(dim=-1).values
+
+        if return_query_argmax:
+            finite = torch.isfinite(scores)
+            has_valid = finite.any(dim=-1)
+            local_argmax = scores.argmax(dim=-1)
+            local_argmax = torch.where(
+                has_valid,
+                local_argmax,
+                torch.zeros_like(local_argmax),
+            )
+            tile_len = q_end - q_start
+            query_argmax[:, q_start:q_end] = local_argmax[:, :tile_len]
+
         query_groups = indices // patch_size
         base_group = int(query_groups.min().item())
         local_groups = (query_groups - base_group).to(torch.int64)
@@ -359,6 +395,22 @@ def compute_pooled_attention(
             pooled_groups[:, base_group:end_group], tile_max
         )
 
+        if return_argmax:
+            argmax_tile_groups = torch.zeros(
+                (head_count, groups_in_tile, num_k_groups),
+                device=device,
+                dtype=torch.float32,
+            )
+            argmax_tile_groups.scatter_reduce_(
+                dim=1,
+                index=expanded_index,
+                src=argmax_tile,
+                reduce="amax",
+            )
+            argmax_groups[:, base_group:end_group] = torch.maximum(
+                argmax_groups[:, base_group:end_group], argmax_tile_groups
+            )
+
     valid_query_groups = math.ceil(seq_len / patch_size)
     valid_key_groups = math.ceil(seq_len / patch_size)
     if valid_query_groups < num_q_groups:
@@ -366,11 +418,17 @@ def compute_pooled_attention(
     if valid_key_groups < num_k_groups:
         pooled_groups[:, :, valid_key_groups:] = 0.0
 
+    if return_argmax and argmax_groups is not None:
+        if valid_query_groups < num_q_groups:
+            argmax_groups[:, valid_query_groups:, :] = 0.0
+        if valid_key_groups < num_k_groups:
+            argmax_groups[:, :, valid_key_groups:] = 0.0
+
     row_min = pooled_groups.amin(dim=2, keepdim=True)
     row_max = pooled_groups.amax(dim=2, keepdim=True)
     denom = (row_max - row_min).clamp_min(1e-12)
     norm = torch.clamp((pooled_groups - row_min) / denom, 0.0, 1.0)
-    return norm
+    return norm, argmax_groups, query_argmax
 
 
 def save_comparison_figure(
@@ -493,7 +551,7 @@ def main() -> None:
             q_block = q_head.unsqueeze(0)
             k_block = k_head.unsqueeze(0)
 
-            baseline_heatmap = compute_pooled_attention(
+            baseline_heatmap, baseline_argmax, baseline_query_argmax = compute_pooled_attention(
                 q_block,
                 k_block,
                 seq_len,
@@ -501,9 +559,18 @@ def main() -> None:
                 args.q_tile,
                 device,
                 prune_mask=None,
-            ).detach().cpu()
+                return_argmax=True,
+                return_query_argmax=True,
+            )
+            baseline_heatmap = baseline_heatmap.detach().cpu()
+            baseline_argmax = baseline_argmax.detach().cpu() if baseline_argmax is not None else None
+            baseline_query_argmax = (
+                baseline_query_argmax.detach().cpu()
+                if baseline_query_argmax is not None
+                else None
+            )
 
-            pruned_heatmap = compute_pooled_attention(
+            pruned_heatmap, pruned_argmax, _ = compute_pooled_attention(
                 q_block,
                 k_block,
                 seq_len,
@@ -511,7 +578,17 @@ def main() -> None:
                 args.q_tile,
                 device,
                 prune_mask=prune_mask,
-            ).detach().cpu()
+                return_argmax=True,
+            )
+            pruned_heatmap = pruned_heatmap.detach().cpu()
+            pruned_argmax = pruned_argmax.detach().cpu() if pruned_argmax is not None else None
+
+            hit_rate = None
+            if baseline_query_argmax is not None:
+                indices = baseline_query_argmax[0, :seq_len].clamp(0, seq_len - 1)
+                prune_cpu = prune_mask[:seq_len, :seq_len].to(torch.bool).cpu()
+                hits = prune_cpu[torch.arange(seq_len), indices]
+                hit_rate = hits.to(torch.float32).mean().item()
 
             title = f"Layer {layer:02d} Head {head:02d} (keep {args.keep_keys})"
             out_path = (
@@ -528,9 +605,32 @@ def main() -> None:
                 title=title,
             )
 
+            if baseline_argmax is not None and pruned_argmax is not None:
+                argmax_path = (
+                    output_root
+                    / f"layer_{layer:02d}_head_{head:02d}_pruning_argmax.png"
+                )
+                save_comparison_figure(
+                    baseline_argmax,
+                    pruned_argmax,
+                    argmax_path,
+                    cmap="binary",
+                    figsize=tuple(args.figsize),
+                    dpi=args.dpi,
+                    title=f"Argmax coverage {title}",
+                )
+
             if args.verbose:
                 rel = out_path.relative_to(output_root)
-                print(f"Saved comparison figure {rel}")
+                msg = f"Saved comparison figure {rel}"
+                if baseline_argmax is not None:
+                    rel_arg = argmax_path.relative_to(output_root)
+                    msg += f" and {rel_arg}"
+                print(msg)
+            if hit_rate is not None:
+                print(
+                    f"Layer {layer:02d} Head {head:02d} baseline argmax retention rate: {hit_rate:.4f}"
+                )
 
             if device.type == "cuda":
                 torch.cuda.empty_cache()
