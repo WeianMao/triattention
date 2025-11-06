@@ -1,0 +1,31 @@
+HuggingFace 离线脚本最近一次测试摘要（2025-11-06）
+------------------------------------------------------------
+调度命令：
+weian_development/hf_offline_runner/run_offline_deepseek_hf_msgpack.sh --gpus 7 --max-workers 1 --qids 0,1
+
+运行要点：
+- GPU: 7（单 worker）
+- 模型: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B
+- 数据集: /data/rbg/users/weian/project/rl/deepconf/aime25.jsonl
+- 输出目录: outputs/deepseek_r1_qwen3_8b/offline_hf_single
+
+问题级结果：
+1. QID 0
+   - 预测答案: 70
+   - Ground Truth: 70
+   - 是否正确: 是
+   - Prompt tokens: 62
+   - 生成 tokens: 18666
+   - 耗时: 672.05 s
+   - 输出文件: outputs/deepseek_r1_qwen3_8b/offline_hf_single/deepthink_offline_qid0_rid0_20251106_164447.msgpack.gz
+
+2. QID 1
+   - 预测答案: 588
+   - Ground Truth: 588
+   - 是否正确: 是
+   - Prompt tokens: 672
+   - 生成 tokens: 39008
+   - 耗时: 1682.95 s
+   - 输出文件: outputs/deepseek_r1_qwen3_8b/offline_hf_single/deepthink_offline_qid1_rid0_20251106_171308.msgpack.gz
+
+备注：生成长度默认匹配模型上下文上限；日志中进程名均已伪装为 PD-L1_binder。
