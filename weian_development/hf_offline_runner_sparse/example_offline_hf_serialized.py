@@ -305,17 +305,17 @@ def main() -> None:
     parser.add_argument("--compression_level", type=int, default=3, help="压缩等级")
     parser.add_argument("--gpu_memory_utilization", type=float, default=None, help="兼容旧参数")
     parser.add_argument(
-        "--enable_sparse_pruning",
+        "--disable_sparse_pruning",
         action="store_true",
-        help="启用轮次 KV 稀疏裁剪 (需要预计算统计文件)",
+        help="禁用轮次 KV 稀疏裁剪 (默认开启)",
     )
     parser.add_argument(
         "--sparse-stats-path",
         type=Path,
-        default=None,
+        default=Path("weian_development/hf_offline_runner_sparse/stats/qid0008_trace46_stats.pt"),
         help="export_round_pruning_stats.py 生成的统计文件路径",
     )
-    parser.add_argument("--sparse-max-keys", type=int, default=2048, help="每层最多保留的 KV 数 M")
+    parser.add_argument("--sparse-max-keys", type=int, default=3072, help="每层最多保留的 KV 数 M")
     parser.add_argument("--sparse-round-window", type=int, default=64, help="每轮解码 token 数 W")
     parser.add_argument(
         "--sparse-offset-max-length",
@@ -372,7 +372,7 @@ def main() -> None:
     device = torch.device("cuda:0" if cuda_available else "cpu")
 
     sparse_pruner: Optional[SparseRoundPruner] = None
-    if args.enable_sparse_pruning:
+    if not args.disable_sparse_pruning:
         if args.sparse_stats_path is None:
             raise ValueError("--sparse-stats-path is required when enabling sparse pruning")
         stats_path = args.sparse_stats_path

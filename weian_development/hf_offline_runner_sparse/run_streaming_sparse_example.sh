@@ -25,7 +25,7 @@ conda run -n dc python "$SCRIPT_DIR/example_offline_hf_serialized_streaming.py" 
   --top_k 0 \
   --enable_sparse_pruning \
   --sparse-stats-path "$STATS_PATH" \
-  --sparse-max-keys 2048 \
+  --sparse-max-keys 3072 \
   --sparse-round-window 64 \
   --sparse-offset-max-length 65536 \
   --output_dir "$ROOT_DIR/tmp_eval" \

@@ -7,12 +7,12 @@
   - 打分重用 `docs/online_k_pruning_round_based.md` 的方案，包含 `mean/max` 聚合、几何 offset、cross-trace 统计。
   - 频段需要乘上实际 RoPE scaling（YaRN `attention_scaling` + per-frequency 放大），否则与模型前向不一致。
 - **统计来源**：使用 `weian_development/hf_offline_runner_sparse/export_round_pruning_stats.py` 预先从指定 trace（例如 `qid0008_trace46`）导出 `|E[q]|`, `E[|q|]`。
-- **KV 上限**：实验关注 `max_keys = 2048`，确保在真实推理中也只保留 2048 个 token 的 KV。
+- **KV 上限**：默认 `max_keys = 3072`，每轮仍只在 `max_keys - round_window` 的窗口内保留旧 KV。
 - **日志/命名**：长任务进程名需为 `PD-L1_binder`，以便在 htop 中统一识别。
 
 ## 目录结构
 - `example_offline_hf_serialized.py`：复制原 HF runner 并加入：
-  - CLI 开关 `--enable_sparse_pruning` 与各项稀疏参数。
+  - 稀疏裁剪默认开启（需提供 stats 文件）；如需关闭可传 `--disable_sparse_pruning`。
   - 手写采样/生成循环 `run_sparse_generation`，在每个 round 触发 `SparseRoundPruner` 切 KV，并按 head 取并集后裁剪。
   - **仅支持单卡**：`tensor_parallel_size` 必须为 1，避免多卡下的 KV 复制导致额外显存。
 - `example_offline_hf_serialized_streaming.py`：与上面脚本共享逻辑，但会把实时新增的文本打印到终端，并可选通过 `--stream-log-path` 同步写入文件，便于长回答过程中观察模型状态。
@@ -28,7 +28,7 @@
     --model /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B \
     --dataset aime25.jsonl --qid 1 --rid sparse_verify --model_type deepseek \
     --max_tokens 64 --temperature 0 --top_p 1 --top_k 0 \
-    --enable_sparse_pruning --sparse-stats-path weian_development/hf_offline_runner_sparse/stats/qid0008_trace46_stats.pt \
+    --sparse-stats-path weian_development/hf_offline_runner_sparse/stats/qid0008_trace46_stats.pt \
     --sparse-max-keys 512 --sparse-round-window 64 --sparse-offset-max-length 65536 --sparse-head-limit 8 \
     --output_dir tmp_eval
   ```

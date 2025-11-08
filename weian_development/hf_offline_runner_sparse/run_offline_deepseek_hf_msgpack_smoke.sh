@@ -15,7 +15,7 @@ python3 "${PROJECT_ROOT}/weian_development/hf_offline_runner_sparse/run_dispatch
   --mode offline \
   --config "${PROJECT_ROOT}/scripts/configs/deepseek_r1_qwen3_8b_64trace.yaml" \
   --rid "${RID}" \
-  --gpus 0 \
+  --gpus 6,7 \
   --qids "${QID_LIST}" \
   --output-dir "${OUTPUT_DIR}" \
   --serializer msgpack_gzip "$@"
