@@ -29,7 +29,7 @@
     --dataset aime25.jsonl --qid 1 --rid sparse_verify --model_type deepseek \
     --max_tokens 64 --temperature 0 --top_p 1 --top_k 0 \
     --enable_sparse_pruning --sparse-stats-path weian_development/hf_offline_runner_sparse/stats/qid0008_trace46_stats.pt \
-    --sparse-max-keys 512 --sparse-round-window 64 --sparse-offset-max-length 2048 --sparse-head-limit 8 \
+    --sparse-max-keys 512 --sparse-round-window 64 --sparse-offset-max-length 65536 --sparse-head-limit 8 \
     --output_dir tmp_eval
   ```
   - 输出：`tmp_eval/deepthink_offline_qid1_ridsparse_verify_20251106_232334.msgpack`
@@ -61,8 +61,9 @@
    - 实时日志（可选）：`run_streaming_sparse_example.sh` / `*_default.sh` 会把 stdout 同步写入 `--stream-log-path` 指定文件，可随时 `tail -f`。
 
 ## 批量运行脚本
-- `run_offline_deepseek_hf_msgpack.sh`：一键跑完整个 AIME（或 YAML 中配置的离线数据集），内部调用 `run_dispatch_hf_serialized.py`，会将稀疏 runner 分发到多张 GPU 上，每题只生成一个回答，输出目录为 `outputs/deepseek_r1_qwen3_8b/offline_hf_sparse`。
-- `run_streaming_sparse_example.sh`：单题调试脚本，支持通过 `STREAM_LOG_PATH=/path/to/log` 把实时输出写入文件；`run_streaming_sparse_example_default.sh` 则提供零参数默认值。
+- `run_offline_deepseek_hf_msgpack.sh`：一键跑完整个 AIME（或 YAML 中配置的离线数据集），内部调用 `run_dispatch_hf_serialized.py`，会将稀疏 runner 分发到多张 GPU 上，每题只生成一个回答，输出目录为 `outputs/deepseek_r1_qwen3_8b/offline_hf_sparse`。运行结束后会自动调用 `weian_development/hf_offline_runner/offline_accuracy_report.py`，把正确率写入 `outputs/deepseek_r1_qwen3_8b/offline_hf_sparse/accuracy_rid*.json`。
+- `run_offline_deepseek_hf_msgpack_smoke.sh`：快速冒烟脚本，只跑 qid 0 和 1，其余参数与完整实验一致，方便在小样本上验证稀疏实现。完成后同样生成准确率日志。
+- `run_streaming_sparse_example.sh`：单题调试脚本，支持通过 `STREAM_LOG_PATH=/path/to/log` 把实时输出写入文件；`run_streaming_sparse_example_default.sh` 则提供零参数默认值（已对齐 0.6/0.95 的采样策略）。
 
 ## 注意事项
 - `--max_tokens -1` 表示“不限制新 token 数”，真实生成长度上限由模型上下文决定。

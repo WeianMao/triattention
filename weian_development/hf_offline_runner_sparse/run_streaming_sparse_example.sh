@@ -20,13 +20,13 @@ conda run -n dc python "$SCRIPT_DIR/example_offline_hf_serialized_streaming.py" 
   --rid "${RID:-stream_live}" \
   --model_type deepseek \
   --max_tokens -1 \
-  --temperature 0 \
-  --top_p 1 \
+  --temperature 0.6 \
+  --top_p 0.95 \
   --top_k 0 \
   --enable_sparse_pruning \
   --sparse-stats-path "$STATS_PATH" \
   --sparse-max-keys 2048 \
   --sparse-round-window 64 \
-  --sparse-offset-max-length 2048 \
+  --sparse-offset-max-length 65536 \
   --output_dir "$ROOT_DIR/tmp_eval" \
   "${EXTRA_ARGS[@]}"

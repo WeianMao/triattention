@@ -225,6 +225,16 @@ print(f"Traces above threshold: {len(above_threshold)}")
 
 see examples folder for more detailed examples.
 
+## HF Offline Runner Helpers
+
+We expose HuggingFace-based offline pipelines for full-benchmark sweeps (e.g., AIME) under `weian_development/hf_offline_runner/` and `weian_development/hf_offline_runner_sparse/`:
+
+- `run_offline_deepseek_hf_msgpack.sh`（以及稀疏版 `..._sparse/run_offline_deepseek_hf_msgpack.sh`）按 `scripts/configs/deepseek_r1_qwen3_8b_64trace.yaml` 的设定运行：`max_tokens=-1`、`temperature=0.6`、`top_p=0.95`、`top_k=0`，并坚持“一题一答”。脚本结束后会自动调用 `weian_development/hf_offline_runner/offline_accuracy_report.py`，统计准确率并写入 `outputs/.../accuracy_rid*.json`。
+- `run_offline_deepseek_hf_msgpack_smoke.sh` 与稀疏目录的同名脚本仅跑 qid `0,1`，方便上线前冒烟验证，其余参数完全一致。
+- 稀疏目录提供 `run_streaming_sparse_example.sh`/`run_streaming_sparse_example_default.sh`，可通过 `STREAM_LOG_PATH` 实时写日志，默认把 `--sparse-offset-max-length` 设为 65536，以便保持与文档一致的几何 offset 范围。
+
+所有脚本遵循 `PD-L1_binder` 进程命名，可通过环境变量 `RID`、`CUDA_VISIBLE_DEVICES` 或 `--qids` 覆盖默认配置。
+
 ## Citation
 
 ```
