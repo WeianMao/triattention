@@ -400,7 +400,8 @@ def main() -> None:
     device = torch.device("cuda:0" if cuda_available else "cpu")
 
     sparse_pruner: Optional[SparseRoundPruner] = None
-    if not args.disable_sparse_pruning:
+    sparse_enabled = not args.disable_sparse_pruning
+    if sparse_enabled:
         if args.sparse_stats_path is None:
             raise ValueError("--sparse-stats-path is required when enabling sparse pruning")
         stats_path = args.sparse_stats_path
@@ -608,11 +609,11 @@ def main() -> None:
             "budget": args.budget,
             "window_size": args.window_size,
         },
-        "sparse_pruning": args.enable_sparse_pruning,
+        "sparse_pruning": sparse_enabled,
         "timestamp": timestamp,
     }
 
-    if args.enable_sparse_pruning:
+    if sparse_enabled:
         result_data["sparse_config"] = {
             "stats_path": str(args.sparse_stats_path),
             "max_keys": args.sparse_max_keys,
