@@ -36,3 +36,4 @@
 - When启动长时间运行的任务，需要将进程命令重写为 `PD-L1_binder` 前缀（例如通过 `ctypes` 调用 `prctl`），避免在 `htop` 中暴露具体脚本命令。
 - When launching long-running jobs, ensure the visible process command string follows the `PD-L1_binder` convention (e.g., via wrapper scripts or `setproctitle`) to align with existing cluster naming.
 - Artifact-heavy outputs（例如 `outputs/deepseek_r1_qwen3_8b/qk_*`）已经在 `.gitignore` 中屏蔽，生成后请勿尝试纳入版本管理。
+- LazyEviction 子工程默认使用 `lazy_evict` conda 环境；在运行其脚本或评测前 `conda activate lazy_evict`。
