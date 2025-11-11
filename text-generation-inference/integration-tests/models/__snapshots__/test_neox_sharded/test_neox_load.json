@@ -1,0 +1,290 @@
+[
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 510,
+          "logprob": -0.5878906,
+          "special": false,
+          "text": "The"
+        },
+        {
+          "id": 3159,
+          "logprob": -0.5498047,
+          "special": false,
+          "text": " word"
+        },
+        {
+          "id": 346,
+          "logprob": -0.04815674,
+          "special": false,
+          "text": " \""
+        },
+        {
+          "id": 6441,
+          "logprob": -0.002313614,
+          "special": false,
+          "text": "mem"
+        },
+        {
+          "id": 70,
+          "logprob": -1.2636185e-05,
+          "special": false,
+          "text": "e"
+        },
+        {
+          "id": 3,
+          "logprob": -0.0010147095,
+          "special": false,
+          "text": "\""
+        },
+        {
+          "id": 369,
+          "logprob": -0.0859375,
+          "special": false,
+          "text": " was"
+        },
+        {
+          "id": 806,
+          "logprob": -0.12609863,
+          "special": false,
+          "text": " first"
+        },
+        {
+          "id": 908,
+          "logprob": -0.016601562,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 275,
+          "logprob": -0.38256836,
+          "special": false,
+          "text": " in"
+        }
+      ]
+    },
+    "generated_text": "The word \"meme\" was first used in"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 510,
+          "logprob": -0.6201172,
+          "special": false,
+          "text": "The"
+        },
+        {
+          "id": 3159,
+          "logprob": -0.546875,
+          "special": false,
+          "text": " word"
+        },
+        {
+          "id": 346,
+          "logprob": -0.051879883,
+          "special": false,
+          "text": " \""
+        },
+        {
+          "id": 6441,
+          "logprob": -0.0020179749,
+          "special": false,
+          "text": "mem"
+        },
+        {
+          "id": 70,
+          "logprob": -9.059906e-06,
+          "special": false,
+          "text": "e"
+        },
+        {
+          "id": 3,
+          "logprob": -0.00096797943,
+          "special": false,
+          "text": "\""
+        },
+        {
+          "id": 369,
+          "logprob": -0.07940674,
+          "special": false,
+          "text": " was"
+        },
+        {
+          "id": 806,
+          "logprob": -0.12182617,
+          "special": false,
+          "text": " first"
+        },
+        {
+          "id": 908,
+          "logprob": -0.017227173,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 275,
+          "logprob": -0.44482422,
+          "special": false,
+          "text": " in"
+        }
+      ]
+    },
+    "generated_text": "The word \"meme\" was first used in"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 510,
+          "logprob": -0.6201172,
+          "special": false,
+          "text": "The"
+        },
+        {
+          "id": 3159,
+          "logprob": -0.546875,
+          "special": false,
+          "text": " word"
+        },
+        {
+          "id": 346,
+          "logprob": -0.051879883,
+          "special": false,
+          "text": " \""
+        },
+        {
+          "id": 6441,
+          "logprob": -0.0020179749,
+          "special": false,
+          "text": "mem"
+        },
+        {
+          "id": 70,
+          "logprob": -9.059906e-06,
+          "special": false,
+          "text": "e"
+        },
+        {
+          "id": 3,
+          "logprob": -0.00096797943,
+          "special": false,
+          "text": "\""
+        },
+        {
+          "id": 369,
+          "logprob": -0.07940674,
+          "special": false,
+          "text": " was"
+        },
+        {
+          "id": 806,
+          "logprob": -0.12182617,
+          "special": false,
+          "text": " first"
+        },
+        {
+          "id": 908,
+          "logprob": -0.017227173,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 275,
+          "logprob": -0.44482422,
+          "special": false,
+          "text": " in"
+        }
+      ]
+    },
+    "generated_text": "The word \"meme\" was first used in"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 510,
+          "logprob": -0.6201172,
+          "special": false,
+          "text": "The"
+        },
+        {
+          "id": 3159,
+          "logprob": -0.546875,
+          "special": false,
+          "text": " word"
+        },
+        {
+          "id": 346,
+          "logprob": -0.051879883,
+          "special": false,
+          "text": " \""
+        },
+        {
+          "id": 6441,
+          "logprob": -0.0020179749,
+          "special": false,
+          "text": "mem"
+        },
+        {
+          "id": 70,
+          "logprob": -1.04904175e-05,
+          "special": false,
+          "text": "e"
+        },
+        {
+          "id": 3,
+          "logprob": -0.0009560585,
+          "special": false,
+          "text": "\""
+        },
+        {
+          "id": 369,
+          "logprob": -0.08557129,
+          "special": false,
+          "text": " was"
+        },
+        {
+          "id": 806,
+          "logprob": -0.12084961,
+          "special": false,
+          "text": " first"
+        },
+        {
+          "id": 908,
+          "logprob": -0.01737976,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 275,
+          "logprob": -0.4025879,
+          "special": false,
+          "text": " in"
+        }
+      ]
+    },
+    "generated_text": "The word \"meme\" was first used in"
+  }
+]

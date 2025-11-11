@@ -1,0 +1,73 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "length",
+    "generated_tokens": 10,
+    "prefill": [],
+    "seed": 0,
+    "tokens": [
+      {
+        "id": 25,
+        "logprob": -0.88183594,
+        "special": false,
+        "text": ":"
+      },
+      {
+        "id": 2209,
+        "logprob": -2.6699219,
+        "special": false,
+        "text": " Is"
+      },
+      {
+        "id": 279,
+        "logprob": -0.61083984,
+        "special": false,
+        "text": " the"
+      },
+      {
+        "id": 734,
+        "logprob": -2.6660156,
+        "special": false,
+        "text": " function"
+      },
+      {
+        "id": 330,
+        "logprob": -0.35498047,
+        "special": false,
+        "text": " \""
+      },
+      {
+        "id": 4110,
+        "logprob": -2.4101562,
+        "special": false,
+        "text": "Create"
+      },
+      {
+        "id": 7575,
+        "logprob": -2.2304688,
+        "special": false,
+        "text": "Process"
+      },
+      {
+        "id": 1,
+        "logprob": -0.080078125,
+        "special": false,
+        "text": "\""
+      },
+      {
+        "id": 304,
+        "logprob": -0.75439453,
+        "special": false,
+        "text": " in"
+      },
+      {
+        "id": 12468,
+        "logprob": -1.8769531,
+        "special": false,
+        "text": " Win"
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "Test request: Is the function \"CreateProcess\" in Win"
+}

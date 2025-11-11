@@ -1,0 +1,79 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "length",
+    "generated_tokens": 10,
+    "prefill": [
+      {
+        "id": 0,
+        "logprob": null,
+        "text": "<pad>"
+      }
+    ],
+    "seed": 0,
+    "tokens": [
+      {
+        "id": 16017,
+        "logprob": 0.0,
+        "special": false,
+        "text": " blue"
+      },
+      {
+        "id": 20495,
+        "logprob": 0.0,
+        "special": false,
+        "text": " sky"
+      },
+      {
+        "id": 259,
+        "logprob": -0.47070312,
+        "special": false,
+        "text": " "
+      },
+      {
+        "id": 261,
+        "logprob": -0.15307617,
+        "special": false,
+        "text": ","
+      },
+      {
+        "id": 35622,
+        "logprob": -0.796875,
+        "special": false,
+        "text": " cloud"
+      },
+      {
+        "id": 263,
+        "logprob": -1.2958984,
+        "special": false,
+        "text": "s"
+      },
+      {
+        "id": 305,
+        "logprob": 0.0,
+        "special": false,
+        "text": " and"
+      },
+      {
+        "id": 35622,
+        "logprob": -1.2998047,
+        "special": false,
+        "text": " cloud"
+      },
+      {
+        "id": 263,
+        "logprob": 0.0,
+        "special": false,
+        "text": "s"
+      },
+      {
+        "id": 1,
+        "logprob": 0.0,
+        "special": true,
+        "text": "</s>"
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "Why is the sky blue?blue sky , clouds and clouds"
+}

@@ -1,0 +1,9 @@
+{
+  "question": "What is 1+1?",
+  "traces": [
+    {
+      "index": 1,
+      "text": " \nLet's think step by step. 1+1 is 2."
+    }
+  ]
+}

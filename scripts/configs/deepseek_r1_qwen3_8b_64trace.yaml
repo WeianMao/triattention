@@ -34,6 +34,5 @@ offline:
   reasoning_effort: high
   max_tokens: 64000
   sampling:
-    temperature: 0.6
-    top_p: 0.95
-    top_k: 0
+    temperature: 0.0
+    top_k: 1

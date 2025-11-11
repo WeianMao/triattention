@@ -1,0 +1,38 @@
+{
+  "choices": [
+    {
+      "finish_reason": "length",
+      "index": 1,
+      "logprobs": null,
+      "text": " This is a question that has puzzled many people for"
+    },
+    {
+      "finish_reason": "length",
+      "index": 0,
+      "logprobs": null,
+      "text": " A Beginner’s Guide\nDeep learning is a subset"
+    },
+    {
+      "finish_reason": "length",
+      "index": 3,
+      "logprobs": null,
+      "text": "usculas_minusculas(s):\n    \"\"\"\n"
+    },
+    {
+      "finish_reason": "length",
+      "index": 2,
+      "logprobs": null,
+      "text": " Paris\nWhat is the capital of France?\nThe"
+    }
+  ],
+  "created": 1741264813,
+  "id": "",
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "object": "text_completion",
+  "system_fingerprint": "3.1.2-dev0-native",
+  "usage": {
+    "completion_tokens": 40,
+    "prompt_tokens": 22,
+    "total_tokens": 62
+  }
+}

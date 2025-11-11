@@ -1,0 +1,1135 @@
+<think>
+I need to find the sum of all integer bases \( b > 9 \) for which \( 17_b \) is a divisor of \( 97_b \). First, I need to understand what these subscripts mean. They're indicating that the numbers are in base b. So, \( 17_b \) means \( 1 \times b^1 + 7 \times b^0 = b + 7 \), and \( 97_b \) means \( 9 \times b^1 + 7 \times b^0 = 9b + 7 \).
+
+Now, \( 17_b \) is a divisor of \( 97_b \), so \( b + 7 \) divides \( 9b + 7 \). In other words, \( (9b + 7) \mod (b + 7) = 0 \).
+
+I can use the concept of modular arithmetic here. So, I need \( 9b + 7 \equiv 0 \pmod{b+7} \).
+
+But b is the base, so I should express everything in terms of b. Let me denote d = b + 7, then b = d - 7.
+
+Now, \( 97_b = 9b + 7 = 9(d - 7) + 7 = 9d - 63 + 7 = 9d - 56 \).
+
+Since d divides \( 97_b \), and \( 97_b = 9d - 56 \), so d divides 9d - 56.
+
+But d divides 9d obviously, since 9d is a multiple of d. So, d must divide 56, because if d divides 9d - 56 and d divides 9d, then d divides their difference, which is 56.
+
+If d divides A and d divides B, then d divides A - B. Here, d divides 9d (since 9d / d = 9, integer), and d divides 9d - 56, so yes, d divides (9d - 56) - 9d = -56, or equivalently, d divides 56.
+
+So, b + 7 divides 56.
+
+Now, b is an integer greater than 9, and since it's a base, it should be greater than the digits used. In \( 17_b \) and \( 97_b \), the digits are 1,7,9, so b must be greater than 9, which is already given, but also, for the number to be valid, b should be greater than the highest digit, which is 9, so b > 9, and b is integer, so b ≥ 10.
+
+Now, d = b + 7, and d divides 56.
+
+56 can be factored as ±1, ±2, ±4, ±7, ±8, ±14, ±28, ±56.
+
+But since b > 9, d = b + 7 > 16, so d is positive and greater than 16.
+
+b ≥ 10, so d ≥ 17.
+
+b > 9, integer, so b ≥ 10, d = b + 7 ≥ 17.
+
+Now, the positive divisors of 56 that are at least 17.
+
+List the divisors: 1,2,4,7,8,14,28,56.
+
+Which of these are ≥17? 28 and 56.
+
+14 is less than 17, so only 28 and 56.
+
+But d divides 56, and d ≥17, so d could be 28 or 56.
+
+But d could also be negative, but since b is base greater than 9, d = b+7 >0, so only positive divisors.
+
+b>9, so d>16, but since d is integer, d≥17, and divisors are positive, so yes, d≥17.
+
+So d=28 or d=56.
+
+Then b = d - 7, so if d=28, b=21; if d=56, b=49.
+
+Now, I need to check if in these bases, \( 17_b \) indeed divides \( 97_b \).
+
+First, b=21, \( 17_{21} = 21 + 7 = 28 \), \( 97_{21} = 9*21 + 7 = 189 + 7 = 196 \).
+
+Does 28 divide 196? 196 / 28 = 7, yes, exactly.
+
+Second, b=49, \( 17_{49} = 49 + 7 = 56 \), \( 97_{49} = 9*49 + 7 = 441 + 7 = 448 \).
+
+Does 56 divide 448? 448 / 56 = 8, yes.
+
+Now, are there any other divisors? 56 has divisors like 14, but 14 <17, so b=14-7=7, but b=7 is not greater than 9, and also in base 7, the digit 9 is not allowed since digits must be less than the base. So invalid.
+
+Similarly, smaller divisors give smaller b, which are not greater than 9.
+
+But is that all? d divides 56, and d≥17, so only 28 and 56.
+
+But 56's divisors are only those, and 28 and 56 are the only ones ≥17.
+
+But let me confirm: 56 divided by 17 is not integer, 18? 56/18 not integer, 19? no, 20? no, 21? 56/21 not integer, 22? no, 23? no, 24? no, 25? no, 26? no, 27? 56/27 not integer, 28 yes, 29? no, etc. So yes, only 28 and 56.
+
+But in the division, when I said d divides 9d -56, and d divides 9d, so d divides 56, that seems correct.
+
+But is there a possibility that b+7 divides 9b+7, but b+7 does not divide 56? According to this, no, because the difference is 56.
+
+Let me verify with the condition.
+
+We have \( 97_b = 9b + 7 \), \( 17_b = b + 7 \).
+
+We need \( 9b + 7 \) to be divisible by \( b + 7 \).
+
+So, \( 9b + 7 = k (b + 7) \) for some integer k.
+
+Then, \( 9b + 7 = k b + 7k \), so \( 9b - k b = 7k - 7 \), so b(9 - k) = 7(k - 1).
+
+Since b is integer, the right side must be divisible by the left side, but better to write:
+
+b(9 - k) = 7(k - 1)
+
+Now, b is integer greater than 9, and k is some integer, probably positive since \( 97_b \) is larger than \( 17_b \) for b>9.
+
+Let me solve for b:
+
+b = \frac{7(k - 1)}{9 - k}
+
+Since denominator is 9 - k, and k is integer, I can write it as b = \frac{7(k - 1)}{-(k - 9)} = -\frac{7(k - 1)}{k - 9}
+
+Now, k - 9 is negative if k < 9, but b must be positive, so let's see.
+
+b = \frac{7(k - 1)}{9 - k}
+
+For b to be positive, since numerator and denominator are integers, we need to consider the sign.
+
+9 - k must be positive because if 9 - k is negative, then k - 1 is likely negative or positive, but let's see.
+
+If k < 9, then 9 - k > 0, and k - 1 could be positive or negative depending on k.
+
+k is the quotient, so since \( 97_b \) is about 9b, and \( 17_b \) is b+7, for large b, \( 97_b \) is roughly 9b, \( 17_b \) is roughly b, so quotient is roughly 9, but could be less or more.
+
+In our earlier solution, for b=21, \( 97_b =196 \), \( 17_b=28 \), 196/28=7, so k=7.
+
+For b=49, 448/56=8, so k=8.
+
+Now, are there other k?
+
+b = \frac{7(k - 1)}{9 - k}
+
+And b must be integer greater than 9.
+
+Also, since \( 17_b \) is a divisor, and in base b, \( 17_b \) represents a number, and for it to divide \( 97_b \), but also, in base b, the number \( 17_b \) must be valid, which it is as long as b>7, but we have b>9, so digits are fine.
+
+Now, from b(9 - k) = 7(k - 1)
+
+So, b = \frac{7(k - 1)}{9 - k}
+
+Now, 9 - k must divide 7(k - 1).
+
+Since b >9, and b is positive integer, \frac{7(k - 1)}{9 - k} >9.
+
+Now, 9 - k is an integer, and it divides 7(k - 1).
+
+Note that 9 - k and k - 1 are related.
+
+Set d = 9 - k, then k = 9 - d, and k - 1 = 8 - d.
+
+Then b = \frac{7(8 - d)}{d} = \frac{56 - 7d}{d} = \frac{56}{d} - 7
+
+Now, since b is integer, \frac{56}{d} must be integer, so d must be a divisor of 56.
+
+And b = \frac{56}{d} - 7 >9.
+
+Also, since b is base, and \( 17_b \) is given, but in this case, d = 9 - k, and k is the quotient, which should be positive integer, and since \( 97_b \) is larger than \( 17_b \) for b>9, k should be at least 1, but probably more.
+
+From earlier, b = \frac{56}{d} - 7, and d divides 56, and b >9.
+
+So, \frac{56}{d} - 7 >9, so \frac{56}{d} >16, so 56 > 16d, so d < 56/16 = 3.5.
+
+Since d is integer, d ≤ 3.
+
+But d is divisor of 56, and d = 9 - k, and k is quotient.
+
+b = \frac{56}{d} - 7 >9, so \frac{56}{d} >16, yes, d < 3.5, so d ≤ 3.
+
+Divisors of 56 are ±1,±2,±4,±7,±8,±14,±28,±56.
+
+d ≤ 3, so positive divisors: 1,2.
+
+But earlier we had b=21 and 49, which correspond to d=9-k.
+
+For b=21, k=7, d=9-7=2.
+
+For b=49, k=8, d=9-8=1.
+
+Oh, so d=1 or 2.
+
+But d ≤3, and divisors are 1,2,4,... but 4 is greater than 3, so d=1,2.
+
+But what about negative divisors? d could be negative.
+
+If d is negative divisor, then b = \frac{56}{d} -7.
+
+d <0, and d divides 56, so d is negative divisor.
+
+b >9, so \frac{56}{d} -7 >9.
+
+Since d<0, \frac{56}{d} is negative, so b is negative, but base b must be positive integer greater than the digits, so b>9>0, so b positive, so \frac{56}{d} must be positive, hence d must be positive.
+
+So only positive divisors, and d≤3, so d=1 or 2.
+
+Then b= \frac{56}{d} -7.
+
+If d=1, b=56/1 -7=56-7=49.
+
+If d=2, b=56/2 -7=28-7=21.
+
+Same as before.
+
+But earlier I thought d=b+7≥17, but that was incorrect because d here is different.
+
+In this notation, d is 9-k, not b+7.
+
+I confused the variables.
+
+In the first approach, I set d=b+7, and found d divides 56, and d≥17, so d=28 or 56, b=21 or 49.
+
+In the second approach, I set d=9-k, and found d divides 56, d≤3, so d=1 or 2, b=49 or 21.
+
+Same thing, just different variables.
+
+But is that all? The problem asks for sum of all such bases, so 21 and 49.
+
+Sum is 21+49=70.
+
+But let me check if there are other possibilities.
+
+In the equation b(9-k)=7(k-1), and b>9 integer, k integer.
+
+Now, 9-k and k-1 are integers, and their product is 7(k-1).
+
+b(9-k)=7(k-1)
+
+Now, since b is integer, 9-k must divide 7(k-1).
+
+But 9-k and k-1 are related.
+
+Note that 9-k and k-1 differ by a constant.
+
+Set m = k - 1, then k = m + 1, and 9 - k = 9 - (m + 1) = 8 - m.
+
+Then b(8 - m) = 7m.
+
+So b = \frac{7m}{8 - m}
+
+Now, b must be positive integer greater than 9, so \frac{7m}{8 - m} >9, and integer.
+
+Also, denominator 8 - m ≠0, so m ≠8.
+
+Now, b = \frac{7m}{8 - m} = - \frac{7m}{m - 8}
+
+Since b>0, and numerator 7m, denominator 8-m, so for b to be positive, either both numerator and denominator positive, or both negative.
+
+Case 1: 7m >0 and 8-m >0, so m>0 and m<8.
+
+Since m is integer (k is integer, m=k-1 integer), so m=1,2,3,4,5,6,7.
+
+Then b= \frac{7m}{8-m}
+
+m=1: b=7*1/(8-1)=7/7=1, but b=1<10, not greater than 9.
+
+m=2: b=14/(8-2)=14/6≈2.333, not integer.
+
+m=3: b=21/(8-3)=21/5=4.2, not integer.
+
+m=4: b=28/(8-4)=28/4=7, but b=7<10, and digit 9 not allowed.
+
+m=5: b=35/(8-5)=35/3≈11.666, not integer.
+
+m=6: b=42/(8-6)=42/2=21, which is greater than 9, and we have it.
+
+m=7: b=49/(8-7)=49/1=49, which we also have.
+
+Now, case 2: both numerator and denominator negative.
+
+7m <0 and 8-m <0.
+
+7m<0 implies m<0.
+
+8-m<0 implies m>8.
+
+But m<0 and m>8 is impossible.
+
+So only case is m>0 and m<8, and we get b=1,7,21,49.
+
+But b=1 and 7 are less than 10, so only b=21 and 49.
+
+But in the first approach, I only got d=28 and 56, but now I have more candidates.
+
+In this approach, when m=6, b=21; m=7, b=49.
+
+But earlier with d=9-k, when k=7, d=2, b=49? No.
+
+When k=7, d=9-7=2, b=56/d -7=56/2-7=28-7=21.
+
+When k=8, d=9-8=1, b=56/1-7=49.
+
+Now, are there other k? For example, if k=9, then d=9-9=0, but division by zero, invalid.
+
+k=10, d=9-10=-1, then b=56/(-1)-7=-56-7=-63, negative, invalid.
+
+But in the m approach, I only considered m<8, but when m=8, denominator zero, undefined.
+
+But what if k is less than 9? In the m approach, I assumed m>0 and m<8, but m could be negative.
+
+In the both negative case, I concluded it's impossible, but let me check.
+
+b= \frac{7m}{8-m}
+
+If m negative, then numerator 7m negative, denominator 8-m: if m negative, 8-m >8, positive, so b negative, but base must be positive, so indeed invalid.
+
+But is there a possibility that k is not integer? No, because we're dealing with integers, and division in integers, so k must be integer.
+
+But in the divisor condition, it has to be exact division, so yes.
+
+But in my m approach, I only got b=21 and 49, but let me see if there are other divisors.
+
+From b(9-k)=7(k-1), and b>9, k integer.
+
+Since b must divide 7(k-1), and b>9, and k-1 is integer.
+
+From b= \frac{7(k-1)}{9-k}
+
+9-k must divide 7(k-1).
+
+Now, 9-k and k-1, let me see the difference.
+
+Set d=9-k, then k=9-d, k-1=8-d, so b= \frac{7(8-d)}{d} = \frac{56}{d} -7, same as before.
+
+d must divide 56, and b>9, so \frac{56}{d} -7 >9, \frac{56}{d}>16, d<56/16=3.5, so d≤3.
+
+d positive divisor, so d=1,2.
+
+But earlier when I listed divisors, I only considered positive, but d could be negative?
+
+If d negative, then b= \frac{56}{d} -7, \frac{56}{d} negative, so b negative, invalid.
+
+But in the first approach, I set d=b, but that was different.
+
+In the first approach, I set d=b, then d divides 56, but b≥10, d≥10, but 56 has no divisors between 10 and 17 except possibly, wait no, d≥17, but 28 and 56 are larger.
+
+But according to this, d=9-k must be divisor of 56, and d≤3, so only 1 and 2.
+
+But when d=1, b=56-7=49? No, b=56/d -7=56/1 -7=49.
+
+d=2, b=56/2 -7=28-7=21.
+
+But is there a divisor larger than 3? For example, d=4, but d=4>3.5? 3.5 is the boundary.
+
+d≤3, but d=4, \frac{56}{4}=14, b=14-7=7, which is less than 10, and we already considered it, but it's invalid because b<10.
+
+Similarly, d=7, b=56/7 -7=8-7=1, invalid.
+
+d=8, b=56/8 -7=7-7=0, invalid.
+
+d=14, b=56/14 -7=4-7=-3, invalid.
+
+But what about when the quotient is different? For example, if b is larger, but k is smaller.
+
+In the equation, k is the quotient, so for larger b, the quotient should be smaller.
+
+For example, suppose b is very large, then \( 17_b = b + 7 \), \( 97_b = 9b + 7 \), so \( 9b + 7 \) divided by \( b + 7 \).
+
+The quotient when dividing 9b+7 by b+7.
+
+b+7 into 9b+7, 9 times, since 9*(b+7)=9b+63, then subtract: (9b+7)-(9b+63)= -56.
+
+So quotient is 9, remainder is -56, but in integer division, remainder should be non-negative, but here it's negative, which means that for large b, \( b+7 \) does not divide \( 9b+7 \) evenly.
+
+But according to the equation, b(9-k)=7(k-1), so for large b, k must be small, but let's see.
+
+From b= \frac{7(k-1)}{9-k}, and for b large, denominator 9-k must be small, but since b>9, and k integer, if k<9, denominator positive, so k<9, then b= \frac{7(k-1)}{9-k}
+
+Now, k-1 could be positive or negative.
+
+If k<9, and k integer, then denominator 9-k >0.
+
+Numerator 7(k-1), so for b positive, numerator must be positive, so k-1>0, k>1.
+
+k is integer, so k≥2.
+
+Then b= \frac{7(k-1)}{9-k}
+
+Now, 9-k is positive since k<9, and b must be integer greater than 9.
+
+So \frac{7(k-1)}{9-k} >9.
+
+Now, 9-k = -(k-9), so b= \frac{7(k-1)}{-(k-9)} = - \frac{7(k-1)}{k-9}
+
+Since k<9, k-9<0, so denominator negative, but numerator 7(k-1), for k≥2, k-1≥1>0, so b= - [positive number] / [negative number] = - [negative] = positive, yes.
+
+b= \frac{7(k-1)}{9-k}
+
+Now, \frac{7(k-1)}{9-k} >9.
+
+9-k is positive for k<9, so we can write:
+
+7(k-1) / (9-k) >9
+
+Since denominator positive, we can multiply both sides by it, but need to be careful.
+
+Set t=k, integer from 2 to 8.
+
+Then b= \frac{7(t-1)}{9-t}
+
+Now, 9-t is positive for t<9.
+
+b>9, so \frac{7(t-1)}{9-t} >9
+
+Then 7(t-1) >9(9-t) , since denominator positive.
+
+7t -7 >81 -9t
+
+7t +9t >81 +7
+
+16t >88
+
+t >88/16=5.5
+
+Since t integer, t≥6.
+
+t=k, and k<9, so t=6,7,8.
+
+Now, for each:
+
+t=6: b=7(6-1)/(9-6)=7*5/3=35/3≈11.666, not integer.
+
+t=7: b=7(7-1)/(9-7)=7*6/2=42/2=21, integer.
+
+t=8: b=7(8-1)/(9-8)=7*7/1=49/1=49, integer.
+
+Now, what about t=9? But t<9, if t=9, denominator zero, undefined.
+
+Now, but earlier when I set d=b, I only got these, but in the m approach, I got the same.
+
+But is there a case where k>9? Let's check.
+
+If k>9, then denominator 9-k<0.
+
+Then b= \frac{7(k-1)}{9-k}
+
+Now, denominator negative, so for b positive, numerator must be negative, so k-1<0, k<1.
+
+But k is quotient, and for k<1, but \( 17_b \) is positive, \( 97_b \) is larger, so quotient should be at least 1, probably.
+
+If k<1, but k integer, so k≤0.
+
+But if k=0, b= \frac{7(0-1)}{9-0}=7*(-1)/9=-7/9, negative, invalid.
+
+k negative, say k=-1, then b=7(-1-1)/(9-(-1))=7*(-2)/10=-14/10=-1.4, negative.
+
+So no.
+
+But in the divisor condition, when I set d=b, I thought d must divide 56, but is that correct?
+
+Let me recall.
+
+I had \( 97_b \) divided by \( 17_b \), so \( 9b+7 \) divided by \( b+7 \).
+
+And I said that since \( 9b+7 = k(b+7) \) for some integer k, then \( 9b+7 = k b + 7k \), so \( 9b - k b = 7k -7 \), so b(9-k)=7(k-1)
+
+Same as above.
+
+Then b= \frac{7(k-1)}{9-k}
+
+Now, 9-k must divide 7(k-1).
+
+But in this form, it's similar.
+
+Since b must be integer, \frac{7(k-1)}{9-k} must be integer.
+
+Note that 9-k and k-1 are integers, and their ratio must make b integer.
+
+But from earlier, we have t≥6, t<9, and only t=7,8 give integer b, which are 21 and 49.
+
+But is that all? What if k is larger, but b is still greater than 9.
+
+In the equation, when I set d=b, and d divides 56, but d=b, and b>9, but d must divide 56, but in the derivation, d=b must divide 56, but let me check that.
+
+From earlier: \( 97_b = 9b+7 \), \( 17_b = b+7 \).
+
+We need \( b+7 \) divides \( 9b+7 \).
+
+So, \( 9b+7 \) is divisible by \( b+7 \).
+
+We can write \( 9b+7 = q(b+7) \) for some integer q.
+
+But q is k in previous notation.
+
+We can use polynomial division or modular arithmetic.
+
+In modular arithmetic, \( 9b+7 \equiv 0 \pmod{b+7} \)
+
+Now, b � -7 \pmod{b+7}
+
+So, 9*(-7) +7 = -63 +7 = -56 � 0 \pmod{b+7}
+
+So, b+7 divides -56, or equivalently, b+7 divides 56.
+
+Since divisor can be positive or negative, but base b is positive and greater than 9, so b+7 >16>0, so we consider positive divisors.
+
+So, b+7 divides 56, and b+7 ≥17 (since b≥10).
+
+Divisors of 56: 1,2,4,7,8,14,28,56.
+
+Which are ≥17? 28 and 56.
+
+So b+7=28 or 56.
+
+If b+7=28, b=21.
+
+If b+7=56, b=49.
+
+Same as before.
+
+But earlier with k, I only got these two, but in the k approach, when k=7, b=21, and k=8, b=49.
+
+But are there other k? For example, if k=9, but k=9 gives denominator zero.
+
+What if k=6? But earlier t>5.5, so k=6 not satisfied, but let's check.
+
+If k=6, b= \frac{7(6-1)}{9-6} = \frac{7*5}{3} = 35/3 �11.666, not integer.
+
+k=5: b=7(5-1)/(9-5)=7*4/4=28/4=7, but b=7<10, and also digit 9 is not allowed in base 7.
+
+But just to verify, in base 7, \( 17_7 = 1*7 +7=14 \), but 7 is not a valid digit in base 7, since digits must be less than base. Base 7 digits are 0-6, so 7 is invalid. But in our case, b>9, so digits are valid as long as b>9, since digits are 1,7,9, all less than b if b>9.
+
+Now, but in the divisor condition, we have b+7 divides 56, but is that necessary and sufficient?
+
+From modular arithmetic, if b+7 divides 56, then since b≡-7 mod (b+7), and 9b+7 �9*(-7)+7=-63+7=-56≡0 mod (b+7), so yes, necessary and sufficient.
+
+But b+7 must be a divisor of 56.
+
+But divisors are positive, as b+7>0.
+
+Now, b>9, so b+7>16.
+
+Divisors of 56 greater than 16: 28,56.
+
+But 56 has other divisors, but they are smaller.
+
+But what if b+7 is negative? But b>9>0, so b+7>16>0, so no.
+
+But in the division, could there be negative quotients? But since the numbers are positive, quotient should be positive.
+
+But let me confirm with b=21 and b=49.
+
+b=21: \( 17_{21} = 1*21 +7=28 \)
+
+\( 97_{21} = 9*21 +7=189+7=196 \)
+
+196 / 28 =7, yes, integer.
+
+b=49: \( 17_{49}=1*49+7=56 \)
+
+\( 97_{49}=9*49+7=441+7=448 \)
+
+448 / 56 =8, yes, integer.
+
+Now, are there any other bases?
+
+What if b+7 is a divisor, but we missed some?
+
+56 has divisors 1,2,4,7,8,14,28,56. I missed 8 and 14 earlier.
+
+b+7>16, so 8<16, 14<16, so not included.
+
+But let me check if they could give integer b.
+
+If b+7=8, b=1, but b>9, invalid.
+
+b+7=14, b=7, but b=7<10, and also digit 9 is invalid.
+
+But just to be sure, if we consider bases where digits are valid, but b>9 is given, so no.
+
+But is the condition sufficient? In this case, when b+7 divides 56, then \( 97_b \) is divisible by \( 17_b \), but is that correct?
+
+In the modular arithmetic, we have \( 97_b \equiv 9*(-7) +7 = -63+7=-56 \equiv 0 \pmod{b+7} \), yes, so if b+7 divides 56, then it divides \( 97_b \).
+
+But \( 97_b \) is 9b+7, and we're saying it's congruent to -56 mod (b+7), so yes, if b+7 divides 56, then it divides \( 97_b \).
+
+But is this the only condition? In the division, the quotient must be an integer, which it is, but in the case of b=21, quotient is 7, which is integer, b=49, quotient is 8, integer.
+
+But are there cases where b+7 does not divide 56, but still divides \( 97_b \)?
+
+Suppose b+7 does not divide 56, but divides 9b+7.
+
+From the congruence, \( 9b+7 \equiv 0 \pmod{b+7} \), and since b≡-7 mod (b+7), then 9*(-7)+7=-56≡0 mod (b+7), so b+7 must divide -56, i.e., 56.
+
+So necessary and sufficient.
+
+But in the k approach, I only considered k from 6 to 8, but k could be larger or smaller.
+
+In the k approach, I set b = \frac{7(k-1)}{9-k} or something.
+
+Earlier I set b = \frac{7(t)}{9-t} no.
+
+From b = \frac{7(k-1)}{9-k}, let me write it properly.
+
+From earlier: b = \frac{7(k-1)}{9-k}
+
+Now, k is the quotient, which should be an integer.
+
+Now, b must be integer greater than 9.
+
+So, \frac{7(k-1)}{9-k} must be integer.
+
+Now, 9-k is in the denominator, and it must divide 7(k-1).
+
+Now, k is integer, and for b>9, let's see the range.
+
+If k>9, then denominator 9-k<0, and numerator 7(k-1)>0 if k>1, so b<0, but base can't be negative.
+
+If k<9, then denominator positive, and b>9, so numerator must be large enough.
+
+But k could be less than 1? If k=1, b= \frac{7(1-1)}{9-1}=0/8=0, not greater than 9.
+
+k=0, b= \frac{7(0-1)}{9-0}=7*(-1)/9=-7/9, invalid.
+
+k=2, b= \frac{7(2-1)}{9-2}=7*1/7=1, but b=1<9, and digits invalid.
+
+k=3, b= \frac{7(3-1)}{9-3}=7*2/6=14/6≈2.333, not integer.
+
+k=4, b= \frac{7(4-1)}{9-4}=7*3/5=21/5=4.2, not integer.
+
+k=5, b= \frac{7(5-1)}{9-4}=7*4/(-4)=28/-4=-7, invalid.
+
+k=6, as before, 35/3≈11.666, not integer.
+
+k=7, b= \frac{7(7-1)}{9-7}=7*6/2=42/2=21, good.
+
+k=8, b= \frac{7(8-1)}{9-8}=7*7/1=49, good.
+
+k=9, denominator zero, undefined.
+
+k=10, b= \frac{7(10-1)}{9-10}=7*9/(-1)=-63, invalid.
+
+Now, what if k is larger, say k=14, but b would be negative or fraction.
+
+But perhaps k can be negative.
+
+If k negative, say k=-1, b= \frac{7(-1-1)}{9-(-1)}= \frac{7*(-2)}{10}=-14/10=-1.4, invalid.
+
+k=-2, b= \frac{7(-2-1)}{9-(-2)}= \frac{7*(-3)}{11}=-21/11, invalid.
+
+So no negative quotients.
+
+But is there a possibility that the quotient is not integer, but still divisible? No, because we're dealing with integers, division must be exact.
+
+But in the expression, b must be integer, so only these two.
+
+But the problem asks for sum of all such bases, so 21+49=70.
+
+But earlier when I listed divisors, I thought only 28 and 56, but let me confirm if there are other divisors.
+
+56 divided by what? b+7 must divide 56, and b+7≥17.
+
+Divisors: 1,2,4,7,8,14,28,56.
+
+Now, b+7=17? But 17 is not a divisor of 56.
+
+b+7 must be a divisor, so only when b+7 is one of 1,2,4,7,8,14,28,56.
+
+So b=1-7=-6, invalid.
+
+b=2-7=-5, invalid.
+
+b=4-7=-3, invalid.
+
+b=7-7=0, invalid.
+
+b=8-7=1, invalid.
+
+b=14-7=7, but b=7<9, and digit 9 invalid.
+
+b=28-7=21, good.
+
+b=56-7=49, good.
+
+So only two possibilities.
+
+But the sum is 21+49=70.
+
+But the problem says b>9, and these are both greater than 9.
+
+But is there any other base where even if b+7 doesn't divide 56, but perhaps due to the way numbers are represented, but no, because the numbers are defined in base b, but the divisibility is in base 10, I think.
+
+Let me read the problem.
+
+"Find the sum of all bases b>9 for which 17_b is a divisor of 97_b."
+
+Now, 17_b and 97_b are numbers in base b, but when we say divisor, it probably means in the integers, so we interpret them as base 10 numbers.
+
+Yes, so we need to check if the integer value of 17_b divides the integer value of 97_b.
+
+Which is what I did.
+
+But just to be thorough, let me consider if b+7 could be a divisor in the sense of magnitude, but no, from the congruence, it must divide 56.
+
+Another way to think: \( 97_b = 9b + 7 \), \( 17_b = 1b + 7 = b+7 \).
+
+Now, \( b+7 \) divides \( 9b+7 \).
+
+Now, we can write \( 9b+7 = q(b+7) \) for some integer q.
+
+But q is the quotient, which is k.
+
+We can perform division: divide 9b+7 by b+7.
+
+Using polynomial division: 9b+7 divided by b+7.
+
+9b+7 / (b+7) = 9 - something, wait.
+
+b+7 into 9b+7: 9 times, 9(b+7)=9b+63, subtract from 9b+7: (9b+7)-(9b+63)= -56.
+
+So, quotient is 9, remainder is -56.
+
+But for exact division, remainder must be zero, so -56 must be divisible by b+7, but since remainder is -56, and it must be zero for division to be exact, but in integer division, the divisor must divide the dividend, so b+7 must divide 9b+7.
+
+But from the division, 9b+7 = 9*(b+7) - 56, so for this to be divisible by b+7, -56 must be divisible by b+7, i.e., b+7 divides 56.
+
+Same as before.
+
+Since the quotient is 9, but remainder is -56, so unless b+7 divides 56, it won't be exact.
+
+But in this case, the quotient is fixed to 9? No, in integer division, the quotient can be different.
+
+For example, when b=21, b+7=28, 9b+7=189+7=196, 196 / 28 =7, which is not 9.
+
+In that case, quotient is 7, not 9.
+
+But in the polynomial division, when we treat b as variable, the quotient is 9, but in integer context, b is fixed, so the quotient can vary.
+
+But in the congruence approach, it's clearer.
+
+So, we have that \( 9b+7 \equiv 0 \pmod{b+7} \), and since b � -7 mod (b+7), then 9*(-7)+7= -63+7= -56 �0 mod (b+7), so yes.
+
+Now, but in the k approach, I considered k from 6 to 8, but actually, for different b, the quotient k can be different.
+
+In fact, for b=21, k=7; for b=49, k=8? Let me check.
+
+b=49, \( 17_{49}=49+7=56 \), \( 97_{49}=9*49 +7=441+7=448 \), 448 / 56 =8, yes.
+
+Now, is there a base where quotient is different, say k=9.
+
+If k=9, then from earlier, b= \frac{7(9)}{9-9}, undefined, but as b increases, the quotient should decrease or something.
+
+Set the equation: b+7 divides 9b+7.
+
+So, 9b+7 = k(b+7) for some integer k.
+
+Then, 9b+7 = k b + 7k
+
+So, 9b - k b = 7k -7
+
+b(9-k) =7(k-1)
+
+So, b= \frac{7(k-1)}{9-k}
+
+Now, since denominator is 9-k, and b must be positive integer greater than 9.
+
+Now, k is the quotient, and since the numbers are positive, k should be positive.
+
+Now, b= \frac{7(k-1)}{9-k} = - \frac{7(k-1)}{k-9}
+
+Now, k-9 in denominator, so for b to be positive, since numerator 7(k-1) is positive for k>1, denominator k-9 must be negative, so k<9.
+
+k-9 <0, so k<9.
+
+But k is integer, and for b to be integer, \frac{7(k-1)}{9-k} must be integer.
+
+9-k is positive since k<9.
+
+Now, b= \frac{7(k-1)}{9-k}
+
+Now, k must be less than 9, and since b>9, \frac{7(k-1)}{9-k} >9.
+
+Now, also, k must be such that b is integer, and greater than 9.
+
+Now, from earlier, when k=7, b= \frac{7(7-1)}{9-7} = \frac{7*6}{2}=21, good.
+
+k=8, b= \frac{7(8-1)}{9-8} = \frac{7*7}{1}=49, good.
+
+Now, what about other k? k=6, b= \frac{7(6-1)}{9-6} = \frac{7*5}{3}=35/3≈11.666, not integer.
+
+k=5, b= \frac{7(5-1)}{9-5} = \frac{7*4}{4}=7, but b=7<9, and also digit 9 not valid in base 7.
+
+k=4, b= \frac{7(4-1)}{9-4} = \frac{7*3}{5}=21/5=4.2, not integer.
+
+k=3, b= \frac{7(3-1)}{9-3} = \frac{7*2}{6}=14/6≈2.333, not integer.
+
+k=2, b= \frac{7(2-1)}{9-2} = \frac{7*1}{7}=1, too small.
+
+k=1, b= \frac{7(1-1)}{9-1}=0, invalid.
+
+k=9, undefined.
+
+k=10, b= \frac{7(10-1)}{9-10} = \frac{7*9}{-1}=-63, negative.
+
+But what if k is larger, but less than 9? k=7 and 8 are the only integers between 1 and 8 that give integer b.
+
+k=9 is not allowed.
+
+But k could be less than 1? k=0, b= \frac{7(0-1)}{9-0}= \frac{-7}{9}, negative fraction.
+
+k negative, say k=-1, b= \frac{7(-1-1)}{9-(-1)} = \frac{7*(-2)}{10}=-14/10=-1.4, negative.
+
+k=-2, b= \frac{7(-2-1)}{9-(-2)} = \frac{7*(-3)}{11}=-21/11, negative fraction.
+
+So no.
+
+But is there a k greater than 9? But if k>9, then from b= \frac{7(k-1)}{9-k}, since 9-k<0, and k-1>0, b would be negative, which is invalid.
+
+But in the division, for larger b, the quotient might be different.
+
+For example, suppose b is very large, say b=100, then \( 17_{100}=100+7=107 \), \( 97_{100}=900+7=907 \), 907 / 107 �8.47, not integer.
+
+But according to the equation, if k is the quotient, but in this case, for b=100, \( 97_b / 17_b = (9b+7)/(b+7) \), which for large b is approximately 9, but not exactly.
+
+But from the equation b(9-k)=7(k-1), so for each k, we get a b, but only when b is integer.
+
+But in this case, for k=9, it's undefined, but for k close to 9, b becomes large.
+
+But b must be integer, so only specific k.
+
+Since b(9-k)=7(k-1), and b>9, k must be integer, so the right side 7(k-1) must be divisible by (9-k).
+
+Note that 9-k and k-1 are both integers, and b=7(k-1)/(9-k)
+
+Now, 9-k is negative if k>9, but b would be negative, so k<9.
+
+k must be less than 9.
+
+Now, b=7(k-1)/(9-k)
+
+Now, 9-k is positive since k<9, but denominator is 9-k, which is positive, numerator 7(k-1), for b>9, so 7(k-1)/(9-k)>9.
+
+Now, k is integer, k<9.
+
+Now, let me set d=9-k, then d>0, and k=9-d.
+
+Then b=7((9-d)-1)/d=7(8-d)/d=7*8/d -7=56/d -7
+
+Now, b must be integer, so 56/d must be integer, since 7 is integer.
+
+b=56/d -7, so for b to be integer, 56/d must be integer, so d divides 56.
+
+d=9-k, and k is quotient, but anyway.
+
+b=56/d -7, and b>9, so 56/d -7 >9, so 56/d >16, so d<56/16=3.5.
+
+Since d is positive integer (as divisor), d≤3.
+
+Now, d divides 56, and d≤3.
+
+Divisors of 56: 1,2,4,7,8,14,28,56.
+
+Those ≤3: 1,2.
+
+d=1, b=56/1 -7=56-7=49.
+
+d=2, b=56/2 -7=28-7=21.
+
+Same as before.
+
+But d=9-k, so for d=1, k=8; d=2, k=7.
+
+Now, are there any other d? d must divide 56, but d=3, 56/3 not integer, so b not integer.
+
+d=4, but d=4>3.5, and b=56/4 -7=14-7=7, but 7<9, and also not greater than 9.
+
+d=7, b=56/7 -7=8-7=1<9.
+
+So only d=1,2 give b>9 and integer.
+
+Thus, only two bases: 21 and 49.
+
+Sum is 21+49=70.
+
+The problem says b>9, and these are both greater than 9, and digits are valid since 9<21 and 9<49.
+
+But is there a possibility that in some base, the number 97_b is divisible by 17_b, but b is not integer? But no, base is assumed to be integer greater than the digits.
+
+Digits are 9 and 7, so base must be greater than 9, which is given.
+
+But just to be thorough, suppose b is not integer, but that doesn't make sense for base.
+
+Perhaps fractional bases, but no, bases are integers.
+
+Another thing: what if the divisor is negative? But in base representation, base is positive integer, and numbers are positive, so divisor should be positive.
+
+But just for curiosity, if d is negative divisor.
+
+56 has negative divisors: -1,-2,-4,-7,-8,-14,-28,-56.
+
+Now, b=56/d -7.
+
+If d negative, say d=-1, b=56/-1 -7=-56-7=-63, negative.
+
+d=-2, b=56/-2 -7=-28-7=-35, negative.
+
+d=-4, b=56/-4 -7=-14-7=-21, negative.
+
+All negative, so invalid.
+
+So no.
+
+Perhaps I missed some divisor.
+
+What if d=14, b=56/14 -7=4-7=-3, negative.
+
+d=28, b=2-7=-5, negative.
+
+d=56, b=1-7=-6, negative.
+
+d=-14, etc., all negative.
+
+So only positive d=1,2.
+
+Thus, bases are 21 and 49, sum is 70.
+
+The problem says "sum of all bases", implying there might be more, or perhaps not.
+
+But let me check if there are other possibilities.
+
+Suppose that 17_b divides 97_b, but perhaps in some bases, the quotient is different.
+
+For example, let me try b=10.
+
+17_10=17, 97_10=97, 97 / 17 �5.705, not integer.
+
+b=11, 17_11=17, 97_11=9*11+7=99+7=106, 106/17≈6.235, not integer.
+
+b=12, 17_12=17, 97_12=9*12+7=108+7=115, 115/17≈6.764, no.
+
+b=13, 17_13=17, 97_13=9*13+7=117+7=124, 124/17≈7.294, no.
+
+b=14, 17_14=17, 97_14=9*14+7=126+7=133, 133/17=7.823? 17*7=119, 133-119=14, not divisible.
+
+b=15, 17_15=17, 97_15=9*15+7=135+7=142, 142/17≈8.352, 17*8=136, 142-136=6, not divisible.
+
+b=16, 17_16=17, 97_16=9*16+7=144+7=151, 151/17≈8.882, 17*8=136, 151-136=15, not divisible.
+
+b=17, but base 17, digit 9 is ok, but 17_b when b=17, 17_17=1*17+7=24, 97_17=9*17+7=153+7=160, 160/24≈6.666, not integer.
+
+b=18, 17_18=1*18+7=25, 97_18=9*18+7=162+7=169, 169/25=6.76, no.
+
+b=19, 17_19=1*19+7=26, 97_19=9*19+7=171+7=178, 178/26≈6.846, no.
+
+b=20, 17_20=27, 97_20=180+7=187, 187/27≈6.925, no.
+
+b=21, as before, 28 divides 189? 189/28=6.75, no, earlier I calculated \( 97_b = 9b + 7 \), \( 17_b = b + 7 \).
+
+For b=21, \( 17_b = 21 + 7 = 28 \), \( 97_b = 9*21 + 7 = 189 + 7 = 196 \), 196 / 28 = 7, yes integer.
+
+In my initial calculation, I mistakenly said \( 97_b = 9b + 7 \), but for b=21, 9*21=189, plus 7 is 196, yes.
+
+Earlier I said 189+7=196, but I wrote 189+7=196, but in the division I said 189/28, no.
+
+In my first calculation, I said for b=21, \( 97_b = 9*21 + 7 = 189 + 7 = 196 \), and \( 17_b = 21 + 7 = 28 \), and 196 / 28 = 7, yes.
+
+But I wrote "97_b = 9b + 7", which is correct, but in the example I said "189 + 7 = 196", but then I said "189/28", no, I think I miscounted.
+
+In my very first response, I said: for b=21, \( 97_b = 9*21 + 7 = 189 + 7 = 196 \), and \( 17_b = 21 + 7 = 28 \), and 196 / 28 = 7, yes.
+
+But I mistakenly thought \( 97_b = 9b + 7 \) and for b=21, 9*21=189, but I said "189 + 7 = 196", but then I said "189/28", which is wrong, but anyway, it is divisible.
+
+Now, for b=49, \( 17_b = 49 + 7 = 56 \), \( 97_b = 9*49 + 7 = 441 + 7 = 448 \), 448 / 56 = 8, yes.
+
+Now, are there any other bases? What if b is larger, but still divides.
+
+For example, suppose b+7 divides 9b+7.
+
+We have the equation b+7 divides 9b+7.
+
+From earlier, b(9-k) = 7(k-1) or something, but we derived that d=b+7 divides 56.
+
+Since b+7 is the divisor, and it must divide 9b+7.
+
+Now, 9b+7 = 9(b+7) - 63 + 7 = 9(b+7) - 56.
+
+So, 9b+7 = 9(b+7) - 56.
+
+Therefore, for b+7 to divide 9b+7, it must divide 9(b+7) - 56, but since it divides 9(b+7), it must divide 56.
+
+Yes, same as before.
+
+So, b+7 is a positive divisor of 56, and since b>9, b+7>16.
+
+Divisors of 56 are ±1,±2,±4,±7,±8,±14,±28,±56.
+
+Positive divisors greater than 16: 28,56.
+
+28>16, 56>16.
+
+Now, b+7=28, so b=21.
+
+b+7=56, so b=49.
+
+Now, what about smaller divisors? But they are less than or equal to 16, so b≤9, but b>9, so not considered.
+
+But just to check, if b+7=14, b=7, but base 7, digit 9 is invalid since base must be greater than digits.
+
+Similarly, b+7=7, b=0, invalid.
+
+b+7=4, b=-3, invalid.
+
+So only these two.
+
+But 28 and 56 are the only positive divisors greater than 16.
+
+56 has divisors: 1,2,4,7,8,14,28,56.
+
+Yes, 28 and 56 are greater than 16.
+
+Now, sum is 21+49=70.
+
+But the problem says "bases", plural, and sum, so probably correct.
+
+But let me confirm if there are any other interpretations.
+
+Sometimes in some contexts, bases can be such that the number is interpreted differently, but I think in standard interpretation, it's fine.
+
+Perhaps when b+7 is negative, but then b negative, invalid.
+
+So, I think only two bases.
+
+But sum is 70.
+
+But let me see the answer.
+
+Perhaps I need to consider that the divisor could be 1 or something, but no.
+
+Another thought: is base 10 included? b>9, so base 10 is not considered, but just to see.
+
+But anyway.
+
+Perhaps b=9, but b>9, and digit 9 is not allowed in base 9, since digits must be less than base.
+
+But anyway.
+
+So, sum is 21+49=70.
+
+But 21 and 49, both greater than 9, and work.
+
+Now, is there a base where 17_b is smaller but still divides? But no, because if b+7 <16, but b>9, so for example b=10, b+7=17, which is greater than 16, but 17 does not divide 9*10+7=97, 97/17≈5.7, not integer.
+
+b=11, b+7=18, 9*11+7=106, 106/18≈5.888, no.
+
+But according to our divisor list, the divisors must be at least 17 (since b>9, b+7>16, but 17 is not a divisor of 56, so no.
+
+But is it necessary that b+7 divides 56? Yes, as we saw.
+
+But just to be thorough, let me see if there is a base where b+7 does not divide 56, but still divides 9b+7.
+
+Suppose b+7 divides 9b+7.
+
+Let d=b+7.
+
+Then b=d-7.
+
+Then 9b+7=9(d-7)+7=9d-63+7=9d-56.
+
+Now, d divides 9d-56.
+
+Since d divides 9d (obviously), then d must divide 56.
+
+Yes, so necessary.
+
+And sufficient because if d divides 56, then d divides 9d-56? 9d-56 = 9d - k d for some k, but 56 is multiple of d, say 56 = m d, then 9d - 56 = 9d - m d = d(9-m), so yes, if d divides 56, then d divides 9d-56.
+
+So, indeed, b+7 must be a divisor of 56.
+
+And b>9, so b+7>16, and positive divisor, so d=28 or 56.
+
+b+7=28, b=21.
+
+b+7=56, b=49.
+
+Sum is 21+49=70.
+
+Now, the problem asks for sum, so probably 70.
+
+But let me see if b+7 could be other divisors, but no.
+
+Perhaps negative bases, but typically bases are positive integers greater than the highest digit.
+
+And in negative bases, the representation might be different, but I think for this problem, it's standard positive bases.
+
+So, I think the answer is 70.
+
+But the title says "bases b>9", and sum, so.
+
+But just to make sure, is there a base b=14? b+7=21, does 21 divide 56? 56/21 not integer, so no.
+
+b=15, b+7=22, 22 does not divide 56.
+
+b=20, b+7=27, 27 does not divide 56.
+
+b=21, yes.
+
+b=22, b+7=29, 29 does not divide 56.
+
+...
+
+b=48, b+7=55, 55 does not divide 56.
+
+b=49, yes.
+
+b=50, b+7=57, 57 does not divide 56, and 9*50+7=457, 457/57≈7.97, not integer.
+
+So, only these two.
+
+Therefore, sum is 21+49=70.
+
+So, the answer should be 70.
+
+But the problem says "find the sum", and probably expects a boxed answer.
+
+But I recall that in the beginning, I thought maybe there are more, but no.
+
+Perhaps when b+7 is a divisor, but b is not integer, but no, base is integer.
+
+Or perhaps b=7, but invalid.
+
+Another thing: what if b+7 divides 9b+7, but b+7 is not positive? But in standard bases, it is positive.
+
+Suppose b+7 is negative, but then b negative, which doesn't make sense for base.
+
+For example, b+7=-1, b=-8, then numbers: 17_b, but base negative, and digits, in negative bases, digits are usually defined to be non-negative, but representation might allow negative digits, but typically for this kind of problem, bases are positive integers.
+
+Moreover, the problem specifies bases greater than 9, implying positive.
+
+So, no.
+
+Thus, I think it's correct.
+
+So, the sum is 70.
+</think>
+The bases \(b > 9\) for which \(17_b\) divides \(97_b\) are found by interpreting the numbers in base \(b\).
+
+In base \(b\), \(17_b = b + 7\) and \(97_b = 9b + 7\). The condition that \(b + 7\) divides \(9b + 7\) requires that \(b + 7\) is a positive divisor of 56 and greater than 16 (since \(b > 9\) implies \(b + 7 > 16\)).
+
+The positive divisors of 56 are 1, 2, 4, 7, 8, 14, 28, and 56. The divisors greater than 16 are 28 and 56.
+
+- If \(b + 7 = 28\), then \(b = 21\).
+- If \(b + 7 = 56\), then \(b = 49\).
+
+Both bases are greater than 9, and the digits 9 and 7 are valid in these bases (since the base is greater than the highest digit).
+
+Verification:
+- For \(b = 21\), \(17_{21} = 21 + 7 = 28\) and \(97_{21} = 9 \times 21 + 7 = 189 + 7 = 196\). Since \(196 / 28 = 7\), which is an integer, \(28\) divides \(196\).
+- For \(b = 49\), \(17_{49} = 49 + 7 = 56\) and \(97_{49} = 9 \times 49 + 7 = 441 + 7 = 448\). Since \(448 / 56 = 8\), which is an integer, \(56\) divides \(448\).
+
+No other bases satisfy the conditions, as other divisors of 56 are less than or equal to 16, and negative divisors or non-integer bases are not considered standard.
+
+The sum of the bases is \(21 + 49 = 70\).
+
+\boxed{70}

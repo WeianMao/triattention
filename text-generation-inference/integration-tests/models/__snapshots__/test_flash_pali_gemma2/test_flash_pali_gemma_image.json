@@ -1,0 +1,133 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "length",
+    "generated_tokens": 20,
+    "prefill": [],
+    "seed": null,
+    "tokens": [
+      {
+        "id": 108,
+        "logprob": -0.48046875,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 30234,
+        "logprob": -2.21875,
+        "special": false,
+        "text": "Brown"
+      },
+      {
+        "id": 108,
+        "logprob": -0.119140625,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 3726,
+        "logprob": -1.703125,
+        "special": false,
+        "text": "Car"
+      },
+      {
+        "id": 108,
+        "logprob": -0.0390625,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 2915,
+        "logprob": -1.8203125,
+        "special": false,
+        "text": "Color"
+      },
+      {
+        "id": 108,
+        "logprob": -0.035888672,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 19178,
+        "logprob": -2.015625,
+        "special": false,
+        "text": "Cool"
+      },
+      {
+        "id": 108,
+        "logprob": -0.08105469,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 40544,
+        "logprob": -2.09375,
+        "special": false,
+        "text": "Decor"
+      },
+      {
+        "id": 108,
+        "logprob": -0.038330078,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 108,
+        "logprob": -1.515625,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 108,
+        "logprob": -1.8671875,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 108,
+        "logprob": -1.6328125,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 108,
+        "logprob": -1.265625,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 108,
+        "logprob": -1.0078125,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 108,
+        "logprob": -1.03125,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 235336,
+        "logprob": -1.2109375,
+        "special": false,
+        "text": "?"
+      },
+      {
+        "id": 108,
+        "logprob": -0.29101562,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 235336,
+        "logprob": -0.08935547,
+        "special": false,
+        "text": "?"
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "\nBrown\nCar\nColor\nCool\nDecor\n\n\n\n\n\n\n?\n?"
+}

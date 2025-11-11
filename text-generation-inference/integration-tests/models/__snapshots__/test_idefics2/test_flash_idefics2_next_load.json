@@ -1,0 +1,294 @@
+[
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 330,
+          "logprob": -0.09289551,
+          "special": false,
+          "text": " A"
+        },
+        {
+          "id": 13088,
+          "logprob": -0.6743164,
+          "special": false,
+          "text": " chicken"
+        },
+        {
+          "id": 349,
+          "logprob": -0.31396484,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 6398,
+          "logprob": -0.051727295,
+          "special": false,
+          "text": " sitting"
+        },
+        {
+          "id": 356,
+          "logprob": -0.34448242,
+          "special": false,
+          "text": " on"
+        },
+        {
+          "id": 264,
+          "logprob": -0.1194458,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 17972,
+          "logprob": -0.03237915,
+          "special": false,
+          "text": " pile"
+        },
+        {
+          "id": 302,
+          "logprob": -0.00018751621,
+          "special": false,
+          "text": " of"
+        },
+        {
+          "id": 2445,
+          "logprob": -0.07043457,
+          "special": false,
+          "text": " money"
+        },
+        {
+          "id": 28723,
+          "logprob": -0.00422287,
+          "special": false,
+          "text": "."
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": " A chicken is sitting on a pile of money."
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 330,
+          "logprob": -0.09448242,
+          "special": false,
+          "text": " A"
+        },
+        {
+          "id": 13088,
+          "logprob": -0.6743164,
+          "special": false,
+          "text": " chicken"
+        },
+        {
+          "id": 349,
+          "logprob": -0.31201172,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 6398,
+          "logprob": -0.051635742,
+          "special": false,
+          "text": " sitting"
+        },
+        {
+          "id": 356,
+          "logprob": -0.34033203,
+          "special": false,
+          "text": " on"
+        },
+        {
+          "id": 264,
+          "logprob": -0.1194458,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 17972,
+          "logprob": -0.032562256,
+          "special": false,
+          "text": " pile"
+        },
+        {
+          "id": 302,
+          "logprob": -0.00018763542,
+          "special": false,
+          "text": " of"
+        },
+        {
+          "id": 2445,
+          "logprob": -0.07122803,
+          "special": false,
+          "text": " money"
+        },
+        {
+          "id": 28723,
+          "logprob": -0.0041007996,
+          "special": false,
+          "text": "."
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": " A chicken is sitting on a pile of money."
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 330,
+          "logprob": -0.09448242,
+          "special": false,
+          "text": " A"
+        },
+        {
+          "id": 13088,
+          "logprob": -0.6743164,
+          "special": false,
+          "text": " chicken"
+        },
+        {
+          "id": 349,
+          "logprob": -0.31201172,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 6398,
+          "logprob": -0.051635742,
+          "special": false,
+          "text": " sitting"
+        },
+        {
+          "id": 356,
+          "logprob": -0.34033203,
+          "special": false,
+          "text": " on"
+        },
+        {
+          "id": 264,
+          "logprob": -0.1194458,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 17972,
+          "logprob": -0.032562256,
+          "special": false,
+          "text": " pile"
+        },
+        {
+          "id": 302,
+          "logprob": -0.00018787384,
+          "special": false,
+          "text": " of"
+        },
+        {
+          "id": 2445,
+          "logprob": -0.07122803,
+          "special": false,
+          "text": " money"
+        },
+        {
+          "id": 28723,
+          "logprob": -0.0041007996,
+          "special": false,
+          "text": "."
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": " A chicken is sitting on a pile of money."
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 330,
+          "logprob": -0.09448242,
+          "special": false,
+          "text": " A"
+        },
+        {
+          "id": 13088,
+          "logprob": -0.6743164,
+          "special": false,
+          "text": " chicken"
+        },
+        {
+          "id": 349,
+          "logprob": -0.31201172,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 6398,
+          "logprob": -0.051635742,
+          "special": false,
+          "text": " sitting"
+        },
+        {
+          "id": 356,
+          "logprob": -0.34033203,
+          "special": false,
+          "text": " on"
+        },
+        {
+          "id": 264,
+          "logprob": -0.1194458,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 17972,
+          "logprob": -0.032562256,
+          "special": false,
+          "text": " pile"
+        },
+        {
+          "id": 302,
+          "logprob": -0.00018763542,
+          "special": false,
+          "text": " of"
+        },
+        {
+          "id": 2445,
+          "logprob": -0.07122803,
+          "special": false,
+          "text": " money"
+        },
+        {
+          "id": 28723,
+          "logprob": -0.0041007996,
+          "special": false,
+          "text": "."
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": " A chicken is sitting on a pile of money."
+  }
+]

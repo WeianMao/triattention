@@ -1,0 +1,49 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "stop_sequence",
+    "generated_tokens": 6,
+    "prefill": [],
+    "seed": 0,
+    "tokens": [
+      {
+        "id": 284,
+        "logprob": -0.28955078,
+        "special": false,
+        "text": " to"
+      },
+      {
+        "id": 3758,
+        "logprob": -0.7739258,
+        "special": false,
+        "text": " send"
+      },
+      {
+        "id": 1366,
+        "logprob": -0.85253906,
+        "special": false,
+        "text": " data"
+      },
+      {
+        "id": 625,
+        "logprob": -0.8984375,
+        "special": false,
+        "text": " over"
+      },
+      {
+        "id": 257,
+        "logprob": -1.0830078,
+        "special": false,
+        "text": " a"
+      },
+      {
+        "id": 3127,
+        "logprob": -1.9404297,
+        "special": false,
+        "text": " network"
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "Test request to send data over a network"
+}

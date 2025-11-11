@@ -1,0 +1,294 @@
+[
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 20910,
+          "logprob": -0.96484375,
+          "special": false,
+          "text": "Grad"
+        },
+        {
+          "id": 722,
+          "logprob": -0.003168106,
+          "special": false,
+          "text": "ient"
+        },
+        {
+          "id": 24871,
+          "logprob": -0.16369629,
+          "special": false,
+          "text": " descent"
+        },
+        {
+          "id": 349,
+          "logprob": -0.0881958,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 396,
+          "logprob": -0.76708984,
+          "special": false,
+          "text": " an"
+        },
+        {
+          "id": 18586,
+          "logprob": -0.57373047,
+          "special": false,
+          "text": " optimization"
+        },
+        {
+          "id": 9464,
+          "logprob": -0.11291504,
+          "special": false,
+          "text": " algorithm"
+        },
+        {
+          "id": 1307,
+          "logprob": -0.79589844,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 298,
+          "logprob": -0.1694336,
+          "special": false,
+          "text": " to"
+        },
+        {
+          "id": 26518,
+          "logprob": -0.34350586,
+          "special": false,
+          "text": " minimize"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "Gradient descent is an optimization algorithm used to minimize"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 20910,
+          "logprob": -0.9628906,
+          "special": false,
+          "text": "Grad"
+        },
+        {
+          "id": 722,
+          "logprob": -0.0032176971,
+          "special": false,
+          "text": "ient"
+        },
+        {
+          "id": 24871,
+          "logprob": -0.16540527,
+          "special": false,
+          "text": " descent"
+        },
+        {
+          "id": 349,
+          "logprob": -0.08898926,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 396,
+          "logprob": -0.765625,
+          "special": false,
+          "text": " an"
+        },
+        {
+          "id": 18586,
+          "logprob": -0.5708008,
+          "special": false,
+          "text": " optimization"
+        },
+        {
+          "id": 9464,
+          "logprob": -0.11401367,
+          "special": false,
+          "text": " algorithm"
+        },
+        {
+          "id": 1307,
+          "logprob": -0.7963867,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 298,
+          "logprob": -0.17028809,
+          "special": false,
+          "text": " to"
+        },
+        {
+          "id": 26518,
+          "logprob": -0.34326172,
+          "special": false,
+          "text": " minimize"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "Gradient descent is an optimization algorithm used to minimize"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 20910,
+          "logprob": -0.9580078,
+          "special": false,
+          "text": "Grad"
+        },
+        {
+          "id": 722,
+          "logprob": -0.0032176971,
+          "special": false,
+          "text": "ient"
+        },
+        {
+          "id": 24871,
+          "logprob": -0.16552734,
+          "special": false,
+          "text": " descent"
+        },
+        {
+          "id": 349,
+          "logprob": -0.08874512,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 396,
+          "logprob": -0.75878906,
+          "special": false,
+          "text": " an"
+        },
+        {
+          "id": 18586,
+          "logprob": -0.5703125,
+          "special": false,
+          "text": " optimization"
+        },
+        {
+          "id": 9464,
+          "logprob": -0.11236572,
+          "special": false,
+          "text": " algorithm"
+        },
+        {
+          "id": 1307,
+          "logprob": -0.79541016,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 298,
+          "logprob": -0.17102051,
+          "special": false,
+          "text": " to"
+        },
+        {
+          "id": 26518,
+          "logprob": -0.34326172,
+          "special": false,
+          "text": " minimize"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "Gradient descent is an optimization algorithm used to minimize"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 20910,
+          "logprob": -0.9609375,
+          "special": false,
+          "text": "Grad"
+        },
+        {
+          "id": 722,
+          "logprob": -0.003168106,
+          "special": false,
+          "text": "ient"
+        },
+        {
+          "id": 24871,
+          "logprob": -0.16601562,
+          "special": false,
+          "text": " descent"
+        },
+        {
+          "id": 349,
+          "logprob": -0.088134766,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 396,
+          "logprob": -0.7597656,
+          "special": false,
+          "text": " an"
+        },
+        {
+          "id": 18586,
+          "logprob": -0.5708008,
+          "special": false,
+          "text": " optimization"
+        },
+        {
+          "id": 9464,
+          "logprob": -0.11291504,
+          "special": false,
+          "text": " algorithm"
+        },
+        {
+          "id": 1307,
+          "logprob": -0.7944336,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 298,
+          "logprob": -0.17102051,
+          "special": false,
+          "text": " to"
+        },
+        {
+          "id": 26518,
+          "logprob": -0.34399414,
+          "special": false,
+          "text": " minimize"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "Gradient descent is an optimization algorithm used to minimize"
+  }
+]

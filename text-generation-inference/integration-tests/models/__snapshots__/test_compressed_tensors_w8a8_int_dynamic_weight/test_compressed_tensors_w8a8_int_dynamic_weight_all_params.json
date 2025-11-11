@@ -1,0 +1,73 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "length",
+    "generated_tokens": 10,
+    "prefill": [],
+    "seed": 0,
+    "tokens": [
+      {
+        "id": 5267,
+        "logprob": -1.1464844,
+        "special": false,
+        "text": "?\n"
+      },
+      {
+        "id": 33464,
+        "logprob": -0.83203125,
+        "special": false,
+        "text": "Deep"
+      },
+      {
+        "id": 20909,
+        "logprob": -0.5625,
+        "special": false,
+        "text": " Learning"
+      },
+      {
+        "id": 320,
+        "logprob": -2.1464844,
+        "special": false,
+        "text": " ("
+      },
+      {
+        "id": 16524,
+        "logprob": 0.0,
+        "special": false,
+        "text": "DL"
+      },
+      {
+        "id": 701,
+        "logprob": -2.2089844,
+        "special": false,
+        "text": "),"
+      },
+      {
+        "id": 476,
+        "logprob": -0.27368164,
+        "special": false,
+        "text": " or"
+      },
+      {
+        "id": 20443,
+        "logprob": -0.09442139,
+        "special": false,
+        "text": " artificial"
+      },
+      {
+        "id": 29728,
+        "logprob": 0.0,
+        "special": false,
+        "text": " neural"
+      },
+      {
+        "id": 14155,
+        "logprob": 0.0,
+        "special": false,
+        "text": " networks"
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "What is deep learning?\nDeep Learning (DL), or artificial neural networks"
+}

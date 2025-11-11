@@ -1,0 +1,12 @@
+commit_rocm := de990cd12537f78f74e40b5c8ee1a62d63d734dd
+
+build-vllm-rocm:
+	if [ ! -d 'vllm' ]; then \
+		pip install -U ninja packaging --no-cache-dir && \
+		git clone https://github.com/mht-sharma/vllm.git vllm; \
+	fi
+	cd vllm && git fetch && git checkout $(commit_rocm) &&  \
+	PYTORCH_ROCM_ARCH="gfx90a;gfx942" python3 setup.py bdist_wheel --dist-dir=dist
+
+install-vllm-rocm: build-vllm-rocm
+	cd vllm && git fetch && git checkout $(commit_rocm)

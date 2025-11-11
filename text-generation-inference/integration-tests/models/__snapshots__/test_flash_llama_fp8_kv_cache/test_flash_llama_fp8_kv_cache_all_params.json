@@ -1,0 +1,73 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "length",
+    "generated_tokens": 10,
+    "prefill": [],
+    "seed": 0,
+    "tokens": [
+      {
+        "id": 720,
+        "logprob": 0.0,
+        "special": false,
+        "text": " \n"
+      },
+      {
+        "id": 34564,
+        "logprob": -0.12512207,
+        "special": false,
+        "text": "Deep"
+      },
+      {
+        "id": 6975,
+        "logprob": 0.0,
+        "special": false,
+        "text": " learning"
+      },
+      {
+        "id": 320,
+        "logprob": -0.23840332,
+        "special": false,
+        "text": " ("
+      },
+      {
+        "id": 16931,
+        "logprob": -2.0175781,
+        "special": false,
+        "text": "DL"
+      },
+      {
+        "id": 8,
+        "logprob": 0.0,
+        "special": false,
+        "text": ")"
+      },
+      {
+        "id": 374,
+        "logprob": -0.8613281,
+        "special": false,
+        "text": " is"
+      },
+      {
+        "id": 264,
+        "logprob": 0.0,
+        "special": false,
+        "text": " a"
+      },
+      {
+        "id": 1207,
+        "logprob": -1.2451172,
+        "special": false,
+        "text": " sub"
+      },
+      {
+        "id": 2630,
+        "logprob": 0.0,
+        "special": false,
+        "text": "field"
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "What is deep learning? \nDeep learning (DL) is a subfield"
+}

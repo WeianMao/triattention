@@ -1,0 +1,73 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "length",
+    "generated_tokens": 10,
+    "prefill": [],
+    "seed": 0,
+    "tokens": [
+      {
+        "id": 7539,
+        "logprob": -0.609375,
+        "special": false,
+        "text": " forms"
+      },
+      {
+        "id": 708,
+        "logprob": 0.0,
+        "special": false,
+        "text": " are"
+      },
+      {
+        "id": 671,
+        "logprob": -1.5546875,
+        "special": false,
+        "text": " an"
+      },
+      {
+        "id": 8727,
+        "logprob": 0.0,
+        "special": false,
+        "text": " essential"
+      },
+      {
+        "id": 1702,
+        "logprob": 0.0,
+        "special": false,
+        "text": " part"
+      },
+      {
+        "id": 576,
+        "logprob": 0.0,
+        "special": false,
+        "text": " of"
+      },
+      {
+        "id": 573,
+        "logprob": 0.0,
+        "special": false,
+        "text": " the"
+      },
+      {
+        "id": 11859,
+        "logprob": -1.953125,
+        "special": false,
+        "text": " lab"
+      },
+      {
+        "id": 2185,
+        "logprob": -1.7734375,
+        "special": false,
+        "text": " process"
+      },
+      {
+        "id": 235265,
+        "logprob": 0.0,
+        "special": false,
+        "text": "."
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "Test request forms are an essential part of the lab process."
+}

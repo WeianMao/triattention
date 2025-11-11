@@ -1,0 +1,294 @@
+[
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 18183,
+          "logprob": -1.5195312,
+          "special": false,
+          "text": " Deep"
+        },
+        {
+          "id": 6832,
+          "logprob": -0.06817627,
+          "special": false,
+          "text": " learning"
+        },
+        {
+          "id": 374,
+          "logprob": -0.13122559,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 264,
+          "logprob": -0.13415527,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 25993,
+          "logprob": -0.87353516,
+          "special": false,
+          "text": " subset"
+        },
+        {
+          "id": 315,
+          "logprob": -0.0011396408,
+          "special": false,
+          "text": " of"
+        },
+        {
+          "id": 5662,
+          "logprob": -0.16442871,
+          "special": false,
+          "text": " machine"
+        },
+        {
+          "id": 6832,
+          "logprob": -0.0026416779,
+          "special": false,
+          "text": " learning"
+        },
+        {
+          "id": 429,
+          "logprob": -0.48754883,
+          "special": false,
+          "text": " that"
+        },
+        {
+          "id": 5711,
+          "logprob": -1.2294922,
+          "special": false,
+          "text": " uses"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": " Deep learning is a subset of machine learning that uses"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 18183,
+          "logprob": -1.5195312,
+          "special": false,
+          "text": " Deep"
+        },
+        {
+          "id": 6832,
+          "logprob": -0.06817627,
+          "special": false,
+          "text": " learning"
+        },
+        {
+          "id": 374,
+          "logprob": -0.13122559,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 264,
+          "logprob": -0.13415527,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 25993,
+          "logprob": -0.87353516,
+          "special": false,
+          "text": " subset"
+        },
+        {
+          "id": 315,
+          "logprob": -0.0011396408,
+          "special": false,
+          "text": " of"
+        },
+        {
+          "id": 5662,
+          "logprob": -0.16442871,
+          "special": false,
+          "text": " machine"
+        },
+        {
+          "id": 6832,
+          "logprob": -0.0026416779,
+          "special": false,
+          "text": " learning"
+        },
+        {
+          "id": 429,
+          "logprob": -0.48754883,
+          "special": false,
+          "text": " that"
+        },
+        {
+          "id": 5711,
+          "logprob": -1.2294922,
+          "special": false,
+          "text": " uses"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": " Deep learning is a subset of machine learning that uses"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 18183,
+          "logprob": -1.5195312,
+          "special": false,
+          "text": " Deep"
+        },
+        {
+          "id": 6832,
+          "logprob": -0.06817627,
+          "special": false,
+          "text": " learning"
+        },
+        {
+          "id": 374,
+          "logprob": -0.13122559,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 264,
+          "logprob": -0.13415527,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 25993,
+          "logprob": -0.87353516,
+          "special": false,
+          "text": " subset"
+        },
+        {
+          "id": 315,
+          "logprob": -0.0011396408,
+          "special": false,
+          "text": " of"
+        },
+        {
+          "id": 5662,
+          "logprob": -0.16442871,
+          "special": false,
+          "text": " machine"
+        },
+        {
+          "id": 6832,
+          "logprob": -0.0026416779,
+          "special": false,
+          "text": " learning"
+        },
+        {
+          "id": 429,
+          "logprob": -0.48754883,
+          "special": false,
+          "text": " that"
+        },
+        {
+          "id": 5711,
+          "logprob": -1.2294922,
+          "special": false,
+          "text": " uses"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": " Deep learning is a subset of machine learning that uses"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 18183,
+          "logprob": -1.5195312,
+          "special": false,
+          "text": " Deep"
+        },
+        {
+          "id": 6832,
+          "logprob": -0.06817627,
+          "special": false,
+          "text": " learning"
+        },
+        {
+          "id": 374,
+          "logprob": -0.13122559,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 264,
+          "logprob": -0.13415527,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 25993,
+          "logprob": -0.87353516,
+          "special": false,
+          "text": " subset"
+        },
+        {
+          "id": 315,
+          "logprob": -0.0011396408,
+          "special": false,
+          "text": " of"
+        },
+        {
+          "id": 5662,
+          "logprob": -0.16442871,
+          "special": false,
+          "text": " machine"
+        },
+        {
+          "id": 6832,
+          "logprob": -0.0026416779,
+          "special": false,
+          "text": " learning"
+        },
+        {
+          "id": 429,
+          "logprob": -0.48754883,
+          "special": false,
+          "text": " that"
+        },
+        {
+          "id": 5711,
+          "logprob": -1.2294922,
+          "special": false,
+          "text": " uses"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": " Deep learning is a subset of machine learning that uses"
+  }
+]

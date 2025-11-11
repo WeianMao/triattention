@@ -1,0 +1,99 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "length",
+    "generated_tokens": 10,
+    "prefill": [
+      {
+        "id": 15,
+        "logprob": null,
+        "text": ","
+      },
+      {
+        "id": 1669,
+        "logprob": -5.4453125,
+        "text": " il"
+      },
+      {
+        "id": 11580,
+        "logprob": -2.3378906,
+        "text": " faut"
+      },
+      {
+        "id": 3913,
+        "logprob": -4.3320312,
+        "text": " tout"
+      },
+      {
+        "id": 39261,
+        "logprob": -2.9160156,
+        "text": " d'abord"
+      }
+    ],
+    "seed": 0,
+    "tokens": [
+      {
+        "id": 408,
+        "logprob": -0.16687012,
+        "special": false,
+        "text": " que"
+      },
+      {
+        "id": 366,
+        "logprob": -1.5517578,
+        "special": false,
+        "text": " la"
+      },
+      {
+        "id": 8769,
+        "logprob": -0.16687012,
+        "special": false,
+        "text": " personne"
+      },
+      {
+        "id": 1479,
+        "logprob": -2.1035156,
+        "special": false,
+        "text": " qui"
+      },
+      {
+        "id": 143926,
+        "logprob": -2.8671875,
+        "special": false,
+        "text": " réalise"
+      },
+      {
+        "id": 578,
+        "logprob": 0.0,
+        "special": false,
+        "text": " le"
+      },
+      {
+        "id": 8138,
+        "logprob": -0.66748047,
+        "special": false,
+        "text": " projet"
+      },
+      {
+        "id": 795,
+        "logprob": -1.6279297,
+        "special": false,
+        "text": " ne"
+      },
+      {
+        "id": 9802,
+        "logprob": -0.47875977,
+        "special": false,
+        "text": " soit"
+      },
+      {
+        "id": 1230,
+        "logprob": 0.0,
+        "special": false,
+        "text": " pas"
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "Pour déguster un ortolan, il faut tout d'abord que la personne qui réalise le projet ne soit pas"
+}

@@ -1,0 +1,73 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "length",
+    "generated_tokens": 10,
+    "prefill": [],
+    "seed": 0,
+    "tokens": [
+      {
+        "id": 25584,
+        "logprob": 0.0,
+        "special": false,
+        "text": "Grad"
+      },
+      {
+        "id": 993,
+        "logprob": 0.0,
+        "special": false,
+        "text": "ient"
+      },
+      {
+        "id": 2726,
+        "logprob": 0.0,
+        "special": false,
+        "text": " Des"
+      },
+      {
+        "id": 1760,
+        "logprob": 0.0,
+        "special": false,
+        "text": "cent"
+      },
+      {
+        "id": 313,
+        "logprob": -0.12322998,
+        "special": false,
+        "text": " ("
+      },
+      {
+        "id": 29954,
+        "logprob": 0.0,
+        "special": false,
+        "text": "G"
+      },
+      {
+        "id": 29928,
+        "logprob": 0.0,
+        "special": false,
+        "text": "D"
+      },
+      {
+        "id": 29897,
+        "logprob": 0.0,
+        "special": false,
+        "text": ")"
+      },
+      {
+        "id": 338,
+        "logprob": -0.6040039,
+        "special": false,
+        "text": " is"
+      },
+      {
+        "id": 385,
+        "logprob": -0.1796875,
+        "special": false,
+        "text": " an"
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "What is gradient descent?\nGradient Descent (GD) is an"
+}

@@ -1,0 +1,95 @@
+- sections:
+  - local: index
+    title: Text Generation Inference
+  - local: quicktour
+    title: Quick Tour
+  - local: supported_models
+    title: Supported Models
+  - local: installation_nvidia
+    title: Using TGI with Nvidia GPUs
+  - local: installation_amd
+    title: Using TGI with AMD GPUs
+  - local: installation_gaudi
+    title: Using TGI with Intel Gaudi
+  - local: installation_inferentia
+    title: Using TGI with AWS Trainium and Inferentia
+  - local: installation_tpu
+    title: Using TGI with Google TPUs
+  - local: installation_intel
+    title: Using TGI with Intel GPUs
+  - local: installation
+    title: Installation from source
+  - local: multi_backend_support
+    title: Multi-backend support
+
+  - local: architecture
+    title: Internal Architecture
+  - local: usage_statistics
+    title: Usage Statistics
+  title: Getting started
+- sections:
+  - local: basic_tutorials/consuming_tgi
+    title: Consuming TGI
+  - local: basic_tutorials/preparing_model
+    title: Preparing Model for Serving
+  - local: basic_tutorials/gated_model_access
+    title: Serving Private & Gated Models
+  - local: basic_tutorials/using_cli
+    title: Using TGI CLI
+  - local: basic_tutorials/non_core_models
+    title: Non-core Model Serving
+  - local: basic_tutorials/safety
+    title: Safety
+  - local: basic_tutorials/using_guidance
+    title: Using Guidance, JSON, tools
+  - local: basic_tutorials/visual_language_models
+    title: Visual Language Models
+  - local: basic_tutorials/monitoring
+    title: Monitoring TGI with Prometheus and Grafana
+  - local: basic_tutorials/train_medusa
+    title: Train Medusa
+  title: Tutorials
+- sections:
+  - local: backends/neuron
+    title: Neuron
+  - local: backends/gaudi
+    title: Gaudi
+  - local: backends/trtllm
+    title: TensorRT-LLM
+  - local: backends/llamacpp
+    title: Llamacpp
+  title: Backends
+- sections:
+  - local: reference/launcher
+    title: All TGI CLI options
+  - local: reference/metrics
+    title: Exported Metrics
+  - local: reference/api_reference
+    title: API Reference
+  title: Reference
+- sections:
+  - local: conceptual/chunking
+    title: V3 update, caching and chunking
+  - local: conceptual/streaming
+    title: Streaming
+  - local: conceptual/quantization
+    title: Quantization
+  - local: conceptual/tensor_parallelism
+    title: Tensor Parallelism
+  - local: conceptual/paged_attention
+    title: PagedAttention
+  - local: conceptual/safetensors
+    title: Safetensors
+  - local: conceptual/flash_attention
+    title: Flash Attention
+  - local: conceptual/speculation
+    title: Speculation (Medusa, ngram)
+  - local: conceptual/guidance
+    title: How Guidance Works (via outlines)
+  - local: conceptual/lora
+    title: LoRA (Low-Rank Adaptation)
+  - local: conceptual/external
+    title: External Resources
+
+
+  title: Conceptual Guides

@@ -1,0 +1,290 @@
+[
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 23090,
+          "logprob": -1.828125,
+          "special": false,
+          "text": " Hello"
+        },
+        {
+          "id": 23,
+          "logprob": -0.3178711,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 8156,
+          "logprob": -0.23925781,
+          "special": false,
+          "text": " Daniel"
+        },
+        {
+          "id": 12,
+          "logprob": -0.5698242,
+          "special": false,
+          "text": "!"
+        },
+        {
+          "id": 193,
+          "logprob": -0.61279297,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 23626,
+          "logprob": -0.4177246,
+          "special": false,
+          "text": "Daniel"
+        },
+        {
+          "id": 37,
+          "logprob": -0.0023345947,
+          "special": false,
+          "text": ":"
+        },
+        {
+          "id": 1634,
+          "logprob": -2.0605469,
+          "special": false,
+          "text": " What"
+        },
+        {
+          "id": 18,
+          "logprob": -1.5283203,
+          "special": false,
+          "text": "'"
+        },
+        {
+          "id": 94,
+          "logprob": -0.007965088,
+          "special": false,
+          "text": "s"
+        }
+      ]
+    },
+    "generated_text": " Hello, Daniel!\nDaniel: What's"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 23090,
+          "logprob": -1.8251953,
+          "special": false,
+          "text": " Hello"
+        },
+        {
+          "id": 23,
+          "logprob": -0.31762695,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 8156,
+          "logprob": -0.2388916,
+          "special": false,
+          "text": " Daniel"
+        },
+        {
+          "id": 12,
+          "logprob": -0.5698242,
+          "special": false,
+          "text": "!"
+        },
+        {
+          "id": 193,
+          "logprob": -0.6152344,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 23626,
+          "logprob": -0.42211914,
+          "special": false,
+          "text": "Daniel"
+        },
+        {
+          "id": 37,
+          "logprob": -0.002336502,
+          "special": false,
+          "text": ":"
+        },
+        {
+          "id": 1634,
+          "logprob": -2.0605469,
+          "special": false,
+          "text": " What"
+        },
+        {
+          "id": 18,
+          "logprob": -1.5292969,
+          "special": false,
+          "text": "'"
+        },
+        {
+          "id": 94,
+          "logprob": -0.007926941,
+          "special": false,
+          "text": "s"
+        }
+      ]
+    },
+    "generated_text": " Hello, Daniel!\nDaniel: What's"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 23090,
+          "logprob": -1.8251953,
+          "special": false,
+          "text": " Hello"
+        },
+        {
+          "id": 23,
+          "logprob": -0.31762695,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 8156,
+          "logprob": -0.2388916,
+          "special": false,
+          "text": " Daniel"
+        },
+        {
+          "id": 12,
+          "logprob": -0.5698242,
+          "special": false,
+          "text": "!"
+        },
+        {
+          "id": 193,
+          "logprob": -0.6152344,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 23626,
+          "logprob": -0.42211914,
+          "special": false,
+          "text": "Daniel"
+        },
+        {
+          "id": 37,
+          "logprob": -0.002336502,
+          "special": false,
+          "text": ":"
+        },
+        {
+          "id": 1634,
+          "logprob": -2.0605469,
+          "special": false,
+          "text": " What"
+        },
+        {
+          "id": 18,
+          "logprob": -1.5292969,
+          "special": false,
+          "text": "'"
+        },
+        {
+          "id": 94,
+          "logprob": -0.007926941,
+          "special": false,
+          "text": "s"
+        }
+      ]
+    },
+    "generated_text": " Hello, Daniel!\nDaniel: What's"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 23090,
+          "logprob": -1.8251953,
+          "special": false,
+          "text": " Hello"
+        },
+        {
+          "id": 23,
+          "logprob": -0.31762695,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 8156,
+          "logprob": -0.2388916,
+          "special": false,
+          "text": " Daniel"
+        },
+        {
+          "id": 12,
+          "logprob": -0.5698242,
+          "special": false,
+          "text": "!"
+        },
+        {
+          "id": 193,
+          "logprob": -0.6152344,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 23626,
+          "logprob": -0.42211914,
+          "special": false,
+          "text": "Daniel"
+        },
+        {
+          "id": 37,
+          "logprob": -0.002336502,
+          "special": false,
+          "text": ":"
+        },
+        {
+          "id": 1634,
+          "logprob": -2.0605469,
+          "special": false,
+          "text": " What"
+        },
+        {
+          "id": 18,
+          "logprob": -1.5292969,
+          "special": false,
+          "text": "'"
+        },
+        {
+          "id": 94,
+          "logprob": -0.007926941,
+          "special": false,
+          "text": "s"
+        }
+      ]
+    },
+    "generated_text": " Hello, Daniel!\nDaniel: What's"
+  }
+]

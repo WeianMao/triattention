@@ -1,0 +1,73 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "length",
+    "generated_tokens": 10,
+    "prefill": [],
+    "seed": null,
+    "tokens": [
+      {
+        "id": 29946,
+        "logprob": -1.4765625,
+        "special": false,
+        "text": "4"
+      },
+      {
+        "id": 29906,
+        "logprob": -0.9199219,
+        "special": false,
+        "text": "2"
+      },
+      {
+        "id": 29889,
+        "logprob": 0.0,
+        "special": false,
+        "text": "."
+      },
+      {
+        "id": 29896,
+        "logprob": -1.1367188,
+        "special": false,
+        "text": "1"
+      },
+      {
+        "id": 29889,
+        "logprob": -1.4648438,
+        "special": false,
+        "text": "."
+      },
+      {
+        "id": 29896,
+        "logprob": -0.40722656,
+        "special": false,
+        "text": "1"
+      },
+      {
+        "id": 29889,
+        "logprob": -0.17419434,
+        "special": false,
+        "text": "."
+      },
+      {
+        "id": 29896,
+        "logprob": -0.20251465,
+        "special": false,
+        "text": "1"
+      },
+      {
+        "id": 29900,
+        "logprob": -1.5527344,
+        "special": false,
+        "text": "0"
+      },
+      {
+        "id": 29896,
+        "logprob": -1.3710938,
+        "special": false,
+        "text": "1"
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "42.1.1.101"
+}

@@ -1,0 +1,294 @@
+[
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 13,
+          "logprob": -0.007621765,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 13,
+          "logprob": -0.20812988,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 16114,
+          "logprob": -1.2587891,
+          "special": false,
+          "text": "Once"
+        },
+        {
+          "id": 3714,
+          "logprob": -0.20825195,
+          "special": false,
+          "text": " upon"
+        },
+        {
+          "id": 264,
+          "logprob": -0.0017709732,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 727,
+          "logprob": -0.011932373,
+          "special": false,
+          "text": " time"
+        },
+        {
+          "id": 28725,
+          "logprob": -0.17297363,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 736,
+          "logprob": -0.9057617,
+          "special": false,
+          "text": " there"
+        },
+        {
+          "id": 403,
+          "logprob": -0.05758667,
+          "special": false,
+          "text": " was"
+        },
+        {
+          "id": 264,
+          "logprob": -0.00970459,
+          "special": false,
+          "text": " a"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "\n\nOnce upon a time, there was a"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 13,
+          "logprob": -0.007621765,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 13,
+          "logprob": -0.20275879,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 16114,
+          "logprob": -1.2578125,
+          "special": false,
+          "text": "Once"
+        },
+        {
+          "id": 3714,
+          "logprob": -0.2084961,
+          "special": false,
+          "text": " upon"
+        },
+        {
+          "id": 264,
+          "logprob": -0.0017738342,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 727,
+          "logprob": -0.011932373,
+          "special": false,
+          "text": " time"
+        },
+        {
+          "id": 28725,
+          "logprob": -0.17297363,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 736,
+          "logprob": -0.9057617,
+          "special": false,
+          "text": " there"
+        },
+        {
+          "id": 403,
+          "logprob": -0.05758667,
+          "special": false,
+          "text": " was"
+        },
+        {
+          "id": 264,
+          "logprob": -0.00970459,
+          "special": false,
+          "text": " a"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "\n\nOnce upon a time, there was a"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 13,
+          "logprob": -0.007621765,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 13,
+          "logprob": -0.20275879,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 16114,
+          "logprob": -1.2578125,
+          "special": false,
+          "text": "Once"
+        },
+        {
+          "id": 3714,
+          "logprob": -0.2084961,
+          "special": false,
+          "text": " upon"
+        },
+        {
+          "id": 264,
+          "logprob": -0.0017738342,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 727,
+          "logprob": -0.011932373,
+          "special": false,
+          "text": " time"
+        },
+        {
+          "id": 28725,
+          "logprob": -0.17297363,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 736,
+          "logprob": -0.9057617,
+          "special": false,
+          "text": " there"
+        },
+        {
+          "id": 403,
+          "logprob": -0.05758667,
+          "special": false,
+          "text": " was"
+        },
+        {
+          "id": 264,
+          "logprob": -0.00970459,
+          "special": false,
+          "text": " a"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "\n\nOnce upon a time, there was a"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 13,
+          "logprob": -0.007621765,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 13,
+          "logprob": -0.20812988,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 16114,
+          "logprob": -1.2587891,
+          "special": false,
+          "text": "Once"
+        },
+        {
+          "id": 3714,
+          "logprob": -0.20825195,
+          "special": false,
+          "text": " upon"
+        },
+        {
+          "id": 264,
+          "logprob": -0.0017709732,
+          "special": false,
+          "text": " a"
+        },
+        {
+          "id": 727,
+          "logprob": -0.011932373,
+          "special": false,
+          "text": " time"
+        },
+        {
+          "id": 28725,
+          "logprob": -0.17297363,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 736,
+          "logprob": -0.9057617,
+          "special": false,
+          "text": " there"
+        },
+        {
+          "id": 403,
+          "logprob": -0.05758667,
+          "special": false,
+          "text": " was"
+        },
+        {
+          "id": 264,
+          "logprob": -0.00970459,
+          "special": false,
+          "text": " a"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "\n\nOnce upon a time, there was a"
+  }
+]

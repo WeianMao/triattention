@@ -1,0 +1,43 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "stop_sequence",
+    "generated_tokens": 5,
+    "prefill": [],
+    "seed": 0,
+    "tokens": [
+      {
+        "id": 5229,
+        "logprob": -2.5839844,
+        "special": false,
+        "text": " failed"
+      },
+      {
+        "id": 29901,
+        "logprob": -0.44970703,
+        "special": false,
+        "text": ":"
+      },
+      {
+        "id": 4829,
+        "logprob": -1.8339844,
+        "special": false,
+        "text": " Error"
+      },
+      {
+        "id": 297,
+        "logprob": -1.0556641,
+        "special": false,
+        "text": " in"
+      },
+      {
+        "id": 1243,
+        "logprob": 0.0,
+        "special": false,
+        "text": " test"
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "Test request failed: Error in test"
+}

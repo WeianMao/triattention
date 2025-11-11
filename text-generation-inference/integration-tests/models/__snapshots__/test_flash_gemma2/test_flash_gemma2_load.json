@@ -1,0 +1,294 @@
+[
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 688,
+          "logprob": -0.546875,
+          "special": false,
+          "text": "**"
+        },
+        {
+          "id": 103889,
+          "logprob": -0.49023438,
+          "special": false,
+          "text": "Hydrogen"
+        },
+        {
+          "id": 190213,
+          "logprob": -0.48632812,
+          "special": false,
+          "text": "**,"
+        },
+        {
+          "id": 2611,
+          "logprob": -0.58203125,
+          "special": false,
+          "text": " light"
+        },
+        {
+          "id": 578,
+          "logprob": -0.08886719,
+          "special": false,
+          "text": " and"
+        },
+        {
+          "id": 2223,
+          "logprob": -1.09375,
+          "special": false,
+          "text": " free"
+        },
+        {
+          "id": 235269,
+          "logprob": -0.024291992,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 108,
+          "logprob": -0.30664062,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 688,
+          "logprob": -0.0035552979,
+          "special": false,
+          "text": "**"
+        },
+        {
+          "id": 1949,
+          "logprob": -4.220009e-05,
+          "special": false,
+          "text": "He"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "**Hydrogen**, light and free,\n**He"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 688,
+          "logprob": -0.546875,
+          "special": false,
+          "text": "**"
+        },
+        {
+          "id": 103889,
+          "logprob": -0.49023438,
+          "special": false,
+          "text": "Hydrogen"
+        },
+        {
+          "id": 190213,
+          "logprob": -0.48632812,
+          "special": false,
+          "text": "**,"
+        },
+        {
+          "id": 2611,
+          "logprob": -0.58203125,
+          "special": false,
+          "text": " light"
+        },
+        {
+          "id": 578,
+          "logprob": -0.08886719,
+          "special": false,
+          "text": " and"
+        },
+        {
+          "id": 2223,
+          "logprob": -1.09375,
+          "special": false,
+          "text": " free"
+        },
+        {
+          "id": 235269,
+          "logprob": -0.024291992,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 108,
+          "logprob": -0.30664062,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 688,
+          "logprob": -0.0035552979,
+          "special": false,
+          "text": "**"
+        },
+        {
+          "id": 1949,
+          "logprob": -4.220009e-05,
+          "special": false,
+          "text": "He"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "**Hydrogen**, light and free,\n**He"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 688,
+          "logprob": -0.546875,
+          "special": false,
+          "text": "**"
+        },
+        {
+          "id": 103889,
+          "logprob": -0.49023438,
+          "special": false,
+          "text": "Hydrogen"
+        },
+        {
+          "id": 190213,
+          "logprob": -0.48632812,
+          "special": false,
+          "text": "**,"
+        },
+        {
+          "id": 2611,
+          "logprob": -0.58203125,
+          "special": false,
+          "text": " light"
+        },
+        {
+          "id": 578,
+          "logprob": -0.08984375,
+          "special": false,
+          "text": " and"
+        },
+        {
+          "id": 2223,
+          "logprob": -1.1015625,
+          "special": false,
+          "text": " free"
+        },
+        {
+          "id": 235269,
+          "logprob": -0.024291992,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 108,
+          "logprob": -0.30664062,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 688,
+          "logprob": -0.0038452148,
+          "special": false,
+          "text": "**"
+        },
+        {
+          "id": 1949,
+          "logprob": -4.1484833e-05,
+          "special": false,
+          "text": "He"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "**Hydrogen**, light and free,\n**He"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 688,
+          "logprob": -0.546875,
+          "special": false,
+          "text": "**"
+        },
+        {
+          "id": 103889,
+          "logprob": -0.49023438,
+          "special": false,
+          "text": "Hydrogen"
+        },
+        {
+          "id": 190213,
+          "logprob": -0.48632812,
+          "special": false,
+          "text": "**,"
+        },
+        {
+          "id": 2611,
+          "logprob": -0.58203125,
+          "special": false,
+          "text": " light"
+        },
+        {
+          "id": 578,
+          "logprob": -0.08886719,
+          "special": false,
+          "text": " and"
+        },
+        {
+          "id": 2223,
+          "logprob": -1.09375,
+          "special": false,
+          "text": " free"
+        },
+        {
+          "id": 235269,
+          "logprob": -0.024291992,
+          "special": false,
+          "text": ","
+        },
+        {
+          "id": 108,
+          "logprob": -0.30664062,
+          "special": false,
+          "text": "\n"
+        },
+        {
+          "id": 688,
+          "logprob": -0.0035552979,
+          "special": false,
+          "text": "**"
+        },
+        {
+          "id": 1949,
+          "logprob": -4.220009e-05,
+          "special": false,
+          "text": "He"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "**Hydrogen**, light and free,\n**He"
+  }
+]

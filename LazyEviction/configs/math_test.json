@@ -1,0 +1,10 @@
+{
+    "math-test": {
+        "test_path": "datasets/math-500/test.jsonl",
+        "language": "en",
+        "tasks": ["cot"],
+        "process_fn": "process_math_test",
+        "answer_extraction_fn": "extract_math_answer",
+        "eval_fn": "eval_math"
+    }
+}

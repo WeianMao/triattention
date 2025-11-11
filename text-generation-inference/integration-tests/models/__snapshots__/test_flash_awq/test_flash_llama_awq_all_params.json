@@ -1,0 +1,73 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "length",
+    "generated_tokens": 10,
+    "prefill": [],
+    "seed": 0,
+    "tokens": [
+      {
+        "id": 13,
+        "logprob": -0.19958496,
+        "special": false,
+        "text": "\n"
+      },
+      {
+        "id": 4013,
+        "logprob": -2.203125,
+        "special": false,
+        "text": "This"
+      },
+      {
+        "id": 1139,
+        "logprob": -0.23693848,
+        "special": false,
+        "text": " question"
+      },
+      {
+        "id": 756,
+        "logprob": 0.0,
+        "special": false,
+        "text": " has"
+      },
+      {
+        "id": 1063,
+        "logprob": -0.076538086,
+        "special": false,
+        "text": " been"
+      },
+      {
+        "id": 4433,
+        "logprob": 0.0,
+        "special": false,
+        "text": " asked"
+      },
+      {
+        "id": 1784,
+        "logprob": -1.1367188,
+        "special": false,
+        "text": " many"
+      },
+      {
+        "id": 3064,
+        "logprob": 0.0,
+        "special": false,
+        "text": " times"
+      },
+      {
+        "id": 322,
+        "logprob": -1.7460938,
+        "special": false,
+        "text": " and"
+      },
+      {
+        "id": 306,
+        "logprob": 0.0,
+        "special": false,
+        "text": " I"
+      }
+    ],
+    "top_tokens": null
+  },
+  "generated_text": "What is Deep Learning?\nThis question has been asked many times and I"
+}

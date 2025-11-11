@@ -1,0 +1,102 @@
+[
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "eos_token",
+      "generated_tokens": 2,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 284,
+          "logprob": -0.046844482,
+          "special": false,
+          "text": "\n   "
+        },
+        {
+          "id": 0,
+          "logprob": null,
+          "special": true,
+          "text": "<|endoftext|>"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "\n   "
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "eos_token",
+      "generated_tokens": 2,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 284,
+          "logprob": -0.046722412,
+          "special": false,
+          "text": "\n   "
+        },
+        {
+          "id": 0,
+          "logprob": null,
+          "special": true,
+          "text": "<|endoftext|>"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "\n   "
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "eos_token",
+      "generated_tokens": 2,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 284,
+          "logprob": -0.04650879,
+          "special": false,
+          "text": "\n   "
+        },
+        {
+          "id": 0,
+          "logprob": null,
+          "special": true,
+          "text": "<|endoftext|>"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "\n   "
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "eos_token",
+      "generated_tokens": 2,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 284,
+          "logprob": -0.046539307,
+          "special": false,
+          "text": "\n   "
+        },
+        {
+          "id": 0,
+          "logprob": null,
+          "special": true,
+          "text": "<|endoftext|>"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "\n   "
+  }
+]

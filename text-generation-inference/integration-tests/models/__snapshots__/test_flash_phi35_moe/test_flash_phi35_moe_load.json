@@ -1,0 +1,294 @@
+[
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 25584,
+          "logprob": -0.008979797,
+          "special": false,
+          "text": "Grad"
+        },
+        {
+          "id": 993,
+          "logprob": -8.34465e-07,
+          "special": false,
+          "text": "ient"
+        },
+        {
+          "id": 26815,
+          "logprob": -0.00097084045,
+          "special": false,
+          "text": " descent"
+        },
+        {
+          "id": 338,
+          "logprob": -0.0003838539,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 385,
+          "logprob": -0.23840332,
+          "special": false,
+          "text": " an"
+        },
+        {
+          "id": 13883,
+          "logprob": -0.010406494,
+          "special": false,
+          "text": " optimization"
+        },
+        {
+          "id": 5687,
+          "logprob": -0.0002501011,
+          "special": false,
+          "text": " algorithm"
+        },
+        {
+          "id": 15574,
+          "logprob": -0.6582031,
+          "special": false,
+          "text": " commonly"
+        },
+        {
+          "id": 1304,
+          "logprob": -0.00092840195,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 297,
+          "logprob": -0.18933105,
+          "special": false,
+          "text": " in"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "Gradient descent is an optimization algorithm commonly used in"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 25584,
+          "logprob": -0.009017944,
+          "special": false,
+          "text": "Grad"
+        },
+        {
+          "id": 993,
+          "logprob": -9.536743e-07,
+          "special": false,
+          "text": "ient"
+        },
+        {
+          "id": 26815,
+          "logprob": -0.00097084045,
+          "special": false,
+          "text": " descent"
+        },
+        {
+          "id": 338,
+          "logprob": -0.0003838539,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 385,
+          "logprob": -0.24499512,
+          "special": false,
+          "text": " an"
+        },
+        {
+          "id": 13883,
+          "logprob": -0.010406494,
+          "special": false,
+          "text": " optimization"
+        },
+        {
+          "id": 5687,
+          "logprob": -0.0002501011,
+          "special": false,
+          "text": " algorithm"
+        },
+        {
+          "id": 15574,
+          "logprob": -0.6435547,
+          "special": false,
+          "text": " commonly"
+        },
+        {
+          "id": 1304,
+          "logprob": -0.0009279251,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 297,
+          "logprob": -0.18933105,
+          "special": false,
+          "text": " in"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "Gradient descent is an optimization algorithm commonly used in"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 25584,
+          "logprob": -0.008956909,
+          "special": false,
+          "text": "Grad"
+        },
+        {
+          "id": 993,
+          "logprob": -8.34465e-07,
+          "special": false,
+          "text": "ient"
+        },
+        {
+          "id": 26815,
+          "logprob": -0.0009407997,
+          "special": false,
+          "text": " descent"
+        },
+        {
+          "id": 338,
+          "logprob": -0.0003721714,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 385,
+          "logprob": -0.24499512,
+          "special": false,
+          "text": " an"
+        },
+        {
+          "id": 13883,
+          "logprob": -0.010406494,
+          "special": false,
+          "text": " optimization"
+        },
+        {
+          "id": 5687,
+          "logprob": -0.0002501011,
+          "special": false,
+          "text": " algorithm"
+        },
+        {
+          "id": 15574,
+          "logprob": -0.6435547,
+          "special": false,
+          "text": " commonly"
+        },
+        {
+          "id": 1304,
+          "logprob": -0.00092601776,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 297,
+          "logprob": -0.19177246,
+          "special": false,
+          "text": " in"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "Gradient descent is an optimization algorithm commonly used in"
+  },
+  {
+    "details": {
+      "best_of_sequences": null,
+      "finish_reason": "length",
+      "generated_tokens": 10,
+      "prefill": [],
+      "seed": null,
+      "tokens": [
+        {
+          "id": 25584,
+          "logprob": -0.008979797,
+          "special": false,
+          "text": "Grad"
+        },
+        {
+          "id": 993,
+          "logprob": -9.536743e-07,
+          "special": false,
+          "text": "ient"
+        },
+        {
+          "id": 26815,
+          "logprob": -0.0009407997,
+          "special": false,
+          "text": " descent"
+        },
+        {
+          "id": 338,
+          "logprob": -0.00038409233,
+          "special": false,
+          "text": " is"
+        },
+        {
+          "id": 385,
+          "logprob": -0.24499512,
+          "special": false,
+          "text": " an"
+        },
+        {
+          "id": 13883,
+          "logprob": -0.010414124,
+          "special": false,
+          "text": " optimization"
+        },
+        {
+          "id": 5687,
+          "logprob": -0.00024354458,
+          "special": false,
+          "text": " algorithm"
+        },
+        {
+          "id": 15574,
+          "logprob": -0.6435547,
+          "special": false,
+          "text": " commonly"
+        },
+        {
+          "id": 1304,
+          "logprob": -0.0009279251,
+          "special": false,
+          "text": " used"
+        },
+        {
+          "id": 297,
+          "logprob": -0.19470215,
+          "special": false,
+          "text": " in"
+        }
+      ],
+      "top_tokens": null
+    },
+    "generated_text": "Gradient descent is an optimization algorithm commonly used in"
+  }
+]

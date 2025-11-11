@@ -1,0 +1,72 @@
+{
+  "details": {
+    "best_of_sequences": null,
+    "finish_reason": "length",
+    "generated_tokens": 10,
+    "prefill": [],
+    "seed": null,
+    "tokens": [
+      {
+        "id": 42,
+        "logprob": -0.86279297,
+        "special": false,
+        "text": "I"
+      },
+      {
+        "id": 1353,
+        "logprob": -0.94921875,
+        "special": false,
+        "text": "'m"
+      },
+      {
+        "id": 7016,
+        "logprob": -2.1835938,
+        "special": false,
+        "text": " sorry"
+      },
+      {
+        "id": 13,
+        "logprob": -0.074035645,
+        "special": false,
+        "text": ","
+      },
+      {
+        "id": 1394,
+        "logprob": -0.86376953,
+        "special": false,
+        "text": "You"
+      },
+      {
+        "id": 452,
+        "logprob": -1.2070312,
+        "special": false,
+        "text": " have"
+      },
+      {
+        "id": 247,
+        "logprob": -1.4365234,
+        "special": false,
+        "text": " a"
+      },
+      {
+        "id": 4327,
+        "logprob": -1.109375,
+        "special": false,
+        "text": " choice"
+      },
+      {
+        "id": 273,
+        "logprob": -0.93408203,
+        "special": false,
+        "text": " of"
+      },
+      {
+        "id": 752,
+        "logprob": -1.8808594,
+        "special": false,
+        "text": " what"
+      }
+    ]
+  },
+  "generated_text": "I'm sorry,You have a choice of what"
+}

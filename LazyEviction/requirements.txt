@@ -1,0 +1,13 @@
+auto_gptq==0.7.1
+flash_attn==2.8.3
+matplotlib==3.10.7
+multiprocess==0.70.16
+numpy==2.3.3
+Pebble==5.1.0
+peft==0.14.0
+regex==2024.11.6
+sympy==1.13.1
+timeout_decorator==0.5.0
+torch==2.5.1
+tqdm==4.67.1
+transformers==4.47.0
