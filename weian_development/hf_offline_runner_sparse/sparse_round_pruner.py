@@ -7,13 +7,15 @@ from typing import Dict, List, Sequence, Tuple
 
 import torch
 
-from weian_development.attention_qk_analysis.freq_magnitude_plots import invert_rope
+from transformers import AutoConfig
+
 from weian_development.hf_offline_runner_sparse.round_pruning_utils import (
     HeadFrequencyStats,
     build_geometric_offsets,
     build_rotary,
     compute_frequency_statistics_from_means,
     compute_frequency_scaling,
+    invert_rope,
     load_head_frequency_stats,
     score_keys_for_round,
 )
@@ -44,19 +46,32 @@ class SparseRoundPruner:
         sampled_heads = [tuple(item) for item in metadata.get("sampled_heads", [])]
         if not sampled_heads:
             raise ValueError("Stats file does not contain any sampled heads")
+        model_config = AutoConfig.from_pretrained(
+            str(config.model_path), trust_remote_code=True
+        )
+        layer_count = int(getattr(model_config, "num_hidden_layers", len(sampled_heads)))
+        filtered_heads = [
+            head for head in sampled_heads if 0 <= head[0] < layer_count
+        ]
         if config.head_limit is not None and config.head_limit > 0:
-            sampled_heads = sampled_heads[: config.head_limit]
-        self.sampled_heads: List[Tuple[int, int]] = sampled_heads
+            filtered_heads = filtered_heads[: config.head_limit]
+        if not filtered_heads:
+            raise ValueError(
+                f"No valid heads remain after filtering with layer_count={layer_count}"
+            )
+        self.sampled_heads: List[Tuple[int, int]] = filtered_heads
         self.head_stats: Dict[Tuple[int, int], HeadFrequencyStats] = {
             key: stats_map[key]
-            for key in sampled_heads
+            for key in filtered_heads
             if key in stats_map
         }
         if len(self.head_stats) != len(self.sampled_heads):
             missing = set(self.sampled_heads) - set(self.head_stats.keys())
             raise ValueError(f"Missing stats for heads: {sorted(missing)}")
 
-        self.rotary = build_rotary(config.device, config.model_path, config.dtype)
+        self.rotary = build_rotary(
+            config.device, config.model_path, config.dtype, config=model_config
+        )
         self.attention_scale = float(getattr(self.rotary, "attention_scaling", 1.0))
         inv_freq = self.rotary.inv_freq.to(device=config.device, dtype=torch.float32)
         self.head_dim = int(metadata.get("head_dim", inv_freq.numel() * 2))

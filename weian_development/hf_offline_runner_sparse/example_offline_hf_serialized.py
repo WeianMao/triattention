@@ -11,7 +11,11 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
-from dynasor.core.evaluator import math_equal
+try:
+    from dynasor.core.evaluator import math_equal
+except ImportError:  # fallback when dynasor is not installed
+    def math_equal(lhs, rhs):
+        return str(lhs).strip() == str(rhs).strip()
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.generation.logits_process import (
     InfNanRemoveLogitsProcessor,
@@ -25,8 +29,42 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from deepconf.utils import extract_answer
-from development.serialization_utils import SerializationError, dump_msgpack
+try:
+    from deepconf.utils import extract_answer
+except ImportError:
+    def extract_answer(text: str) -> Optional[str]:
+        """Simplified boxed-answer extractor when DeepConf isn't installed."""
+        if "boxed" not in text:
+            return None
+        ans = text.split("boxed")[-1]
+        if not ans:
+            return ""
+        if ans[0] != "{":
+            return ans.split("$")[0].strip()
+        stack = 1
+        collected = []
+        for char in ans[1:]:
+            if char == "{":
+                stack += 1
+                collected.append(char)
+            elif char == "}":
+                stack -= 1
+                if stack == 0:
+                    break
+                collected.append(char)
+            else:
+                collected.append(char)
+        return "".join(collected).strip()
+try:
+    from development.serialization_utils import SerializationError, dump_msgpack
+except Exception:  # pragma: no cover - fallback when msgpack or deps missing
+    class SerializationError(RuntimeError):
+        """Raised when fallback serialization fails."""
+
+    def dump_msgpack(data: Any, path: str, *, compression: str = "gzip", compression_level: int = 3) -> None:
+        """Fallback serializer writing JSON when msgpack isn't available."""
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False)
 from weian_development.process_utils import mask_process_command
 from weian_development.hf_offline_runner_sparse.sparse_round_pruner import (
     SparsePruningConfig,

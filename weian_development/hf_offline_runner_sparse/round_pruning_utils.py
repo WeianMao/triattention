@@ -4,22 +4,56 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
 from transformers import AutoConfig
-from transformers.models.qwen3.modeling_qwen3 import Qwen3RotaryEmbedding
-
-from weian_development.attention_qk_analysis.freq_magnitude_plots import invert_rope
-from weian_development.attention_qk_analysis.freq_magnitude_single_plot_meanvec_randomk import (
-    to_complex_pairs,
-)
+try:
+    from transformers.models.qwen3.modeling_qwen3 import Qwen3RotaryEmbedding
+except ImportError:  # Transformers build without Qwen3 modules
+    try:
+        from transformers.models.qwen2.modeling_qwen2 import Qwen2RotaryEmbedding as Qwen3RotaryEmbedding
+    except ImportError:
+        Qwen3RotaryEmbedding = None  # type: ignore[assignment]
 
 DTYPE_MAP = {
     "float32": torch.float32,
     "float16": torch.float16,
     "bfloat16": torch.bfloat16,
 }
+
+
+def rotate_half(x: torch.Tensor) -> torch.Tensor:
+    d = x.shape[-1] // 2
+    x1 = x[..., :d]
+    x2 = x[..., d:]
+    return torch.cat((-x2, x1), dim=-1)
+
+
+def invert_rope(
+    rotated: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    scale: float,
+) -> torch.Tensor:
+    if scale == 0:
+        raise ValueError("attention scaling factor must be non-zero")
+    scale_t = torch.tensor(scale, device=rotated.device, dtype=rotated.dtype)
+    base = rotated / scale_t
+    cos_unit = cos / scale_t
+    sin_unit = sin / scale_t
+    return base * cos_unit - rotate_half(base) * sin_unit
+
+
+def to_complex_pairs(tensor: torch.Tensor) -> torch.Tensor:
+    if tensor.size(-1) % 2 != 0:
+        raise ValueError("Head dimension must be even to form complex pairs")
+    freq_count = tensor.shape[1] // 2
+    real_dtype = torch.float32 if tensor.dtype in (torch.bfloat16, torch.float16) else tensor.dtype
+    tensor_real = tensor.to(dtype=real_dtype)
+    real = tensor_real[:, :freq_count].contiguous()
+    imag = tensor_real[:, freq_count:].contiguous()
+    return torch.complex(real, imag)
 
 
 @dataclass
@@ -60,12 +94,21 @@ def build_rotary(
     cache_device: torch.device,
     model_path: Path,
     dtype: torch.dtype,
+    config: Optional[AutoConfig] = None,
 ) -> Qwen3RotaryEmbedding:
-    config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+    if Qwen3RotaryEmbedding is None:
+        raise ImportError(
+            "Neither Qwen3 nor Qwen2 rotary embeddings are available in the installed transformers package."
+        )
+    if config is None:
+        config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
     rope_scaling = dict(config.rope_scaling or {})
     if "attn_factor" in rope_scaling and "attention_factor" not in rope_scaling:
         rope_scaling["attention_factor"] = rope_scaling["attn_factor"]
     rope_scaling.pop("attn_factor", None)
+    if "rope_type" not in rope_scaling:
+        rope_scaling["rope_type"] = rope_scaling.get("type", "default")
+    rope_scaling.pop("type", None)
     config.rope_scaling = rope_scaling
     rotary = Qwen3RotaryEmbedding(config=config, device=cache_device)
     rotary.to(dtype=dtype)
