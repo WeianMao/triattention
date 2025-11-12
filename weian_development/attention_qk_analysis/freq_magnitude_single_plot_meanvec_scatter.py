@@ -22,7 +22,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from weian_development.process_utils import mask_process_command
-from weian_development.attention_qk_analysis.freq_magnitude_plots import invert_rope
+from weian_development.attention_qk_analysis.visualization_archive.freq_magnitude_plots import (
+    invert_rope,
+)
 
 
 def parse_args() -> argparse.Namespace:
