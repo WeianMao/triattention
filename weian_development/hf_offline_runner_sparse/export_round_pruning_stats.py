@@ -9,11 +9,6 @@ from typing import Dict, Tuple
 import torch
 
 from weian_development.process_utils import mask_process_command
-from weian_development.attention_qk_analysis.freq_magnitude_plots import invert_rope
-from weian_development.attention_qk_analysis.freq_magnitude_single_plot_meanvec_randomk import (
-    to_complex_pairs,
-)
-
 from weian_development.hf_offline_runner_sparse.round_pruning_utils import (
     DTYPE_MAP,
     HeadFrequencyStats,
@@ -21,6 +16,8 @@ from weian_development.hf_offline_runner_sparse.round_pruning_utils import (
     compute_rotary_tables,
     load_or_create_sample,
     save_head_frequency_stats,
+    invert_rope,
+    to_complex_pairs,
 )
 
 

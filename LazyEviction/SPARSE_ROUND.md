@@ -42,7 +42,7 @@
 ## 关键参数
 
 - `max_kv_capacity` / `decoding_recent_size`：与 Window_LAZY 保持一致，确保比较公平。
-- `SPARSE_STATS_PATH`：默认指向 `weian_development/hf_offline_runner_sparse/stats/qid0008_trace46_stats.pt`，如需其他统计可通过环境变量覆盖。
+- `SPARSE_STATS_PATH`：默认指向 `weian_development/hf_offline_runner_sparse/stats/distill_qwen7b_qid9001_trace00_stats.pt`（与当前 `DeepSeek-R1-Distill-Qwen-7B` 对齐），如需在其他模型上复用请重新采集并通过环境变量覆盖。
 - `OUTPUT_ROOT`：用于隔离不同实验的结果目录，务必设置在 `LazyEviction/outputs/` 下以保持仓库整洁。
 
 ## 注意事项

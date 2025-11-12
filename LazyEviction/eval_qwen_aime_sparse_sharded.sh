@@ -29,7 +29,7 @@ SHARD_ID=${SHARD_ID:-0}
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 REPO_DIR="$( dirname "${SCRIPT_DIR}" )"
 PYTHON_RUNNER="${REPO_DIR}/weian_development/lazy_eviction_sparse_runner.py"
-DEFAULT_STATS="${REPO_DIR}/weian_development/hf_offline_runner_sparse/stats/qid0008_trace46_stats.pt"
+DEFAULT_STATS="${REPO_DIR}/weian_development/hf_offline_runner_sparse/stats/distill_qwen7b_qid9001_trace00_stats.pt"
 SPARSE_STATS_PATH="${SPARSE_STATS_PATH:-${DEFAULT_STATS}}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_DIR}/outputs/DeepSeek-R1-Distill-Qwen-7B/${BENCHMARK}}"
 

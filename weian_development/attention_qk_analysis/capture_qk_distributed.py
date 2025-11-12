@@ -24,8 +24,14 @@ from weian_development.process_utils import mask_process_command
 
 try:
     from transformers.models.qwen3.modeling_qwen3 import apply_rotary_pos_emb, repeat_kv
-except Exception as exc:  # pragma: no cover
-    raise SystemExit(f"无法导入 Qwen3 模型组件: {exc}")
+except Exception:
+    try:
+        from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb, repeat_kv
+    except Exception as exc:  # pragma: no cover
+        raise SystemExit(f"无法导入 Qwen 模型组件: {exc}")
+
+
+DEFAULT_SYSTEM_PROMPT = "该助手为DeepSeek-R1，由深度求索公司创造。\n今天是2025年5月28日，星期一。\n"
 
 
 @dataclass(frozen=True)
@@ -114,13 +120,15 @@ class QKCollector:
             # 复制 Qwen3Attention.forward 中的投影/归一化逻辑
             q_proj = module.q_proj(hidden_states)
             q_proj = q_proj.view(batch, seq_len, self.num_heads, self.head_dim)
-            q_normed = module.q_norm(q_proj)
-            q_states = q_normed.permute(0, 2, 1, 3).contiguous()
+            if hasattr(module, "q_norm") and module.q_norm is not None:
+                q_proj = module.q_norm(q_proj)
+            q_states = q_proj.permute(0, 2, 1, 3).contiguous()
 
             k_proj = module.k_proj(hidden_states)
             k_proj = k_proj.view(batch, seq_len, self.kv_heads, self.head_dim)
-            k_normed = module.k_norm(k_proj)
-            k_states = k_normed.permute(0, 2, 1, 3).contiguous()
+            if hasattr(module, "k_norm") and module.k_norm is not None:
+                k_proj = module.k_norm(k_proj)
+            k_states = k_proj.permute(0, 2, 1, 3).contiguous()
 
             q_rot, k_rot = apply_rotary_pos_emb(q_states, k_states, cos, sin)
             k_rot = repeat_kv(k_rot, module.num_key_value_groups)
@@ -128,7 +136,7 @@ class QKCollector:
             self.buffer.store(layer_idx, q_rot.detach(), k_rot.detach())
 
             # 释放 GPU 临时变量
-            del q_proj, q_normed, q_states, k_proj, k_normed, k_states, q_rot, k_rot
+            del q_proj, q_states, k_proj, k_states, q_rot, k_rot
 
         return hook
 
@@ -186,14 +194,26 @@ def load_trace_payload(task: TraceTask) -> Dict:
                 "question": data.get("question", ""),
                 "trace_text": candidate.get("text", ""),
                 "source": data,
+                "system_prompt": data.get("system_prompt"),
+                "prompt_override": candidate.get("prompt") or data.get("prompt"),
             }
     raise RuntimeError(f"未找到 qid={task.qid} trace_index={task.trace_index} 对应的文本")
 
 
-def prepare_input_text(tokenizer, question: str, trace_text: str, model_type: str = "deepseek") -> str:
-    system_prompt = "该助手为DeepSeek-R1，由深度求索公司创造。\n今天是2025年5月28日，星期一。\n"
+def prepare_input_text(
+    tokenizer,
+    question: str,
+    trace_text: str,
+    *,
+    system_prompt: str | None = None,
+    prompt_override: str | None = None,
+) -> str:
+    if prompt_override:
+        return prompt_override + trace_text
+
+    prompt_system = DEFAULT_SYSTEM_PROMPT if system_prompt is None else system_prompt
     messages = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": prompt_system},
         {"role": "user", "content": question},
     ]
     prompt = tokenizer.apply_chat_template(
@@ -213,7 +233,13 @@ def capture_single_trace(
     verbose: bool = False,
 ) -> CaptureResult:
     payload = load_trace_payload(task)
-    full_text = prepare_input_text(tokenizer, payload["question"], payload["trace_text"])
+    full_text = prepare_input_text(
+        tokenizer,
+        payload["question"],
+        payload["trace_text"],
+        system_prompt=payload.get("system_prompt"),
+        prompt_override=payload.get("prompt_override"),
+    )
 
     tokenized = tokenizer(
         full_text,
@@ -240,7 +266,13 @@ def capture_single_trace(
 
     tokens_total = int(attention_mask.sum().item())
     prompt_tokens = tokenizer(
-        prepare_input_text(tokenizer, payload["question"], ""),
+        prepare_input_text(
+            tokenizer,
+            payload["question"],
+            "",
+            system_prompt=payload.get("system_prompt"),
+            prompt_override=payload.get("prompt_override"),
+        ),
         add_special_tokens=False,
         return_length=True,
     )["length"][0]

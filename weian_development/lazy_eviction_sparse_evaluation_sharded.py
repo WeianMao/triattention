@@ -16,7 +16,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 LAZY_DIR = ROOT / "LazyEviction"
-DEFAULT_SPARSE_STATS = Path("weian_development/hf_offline_runner_sparse/stats/qid0008_trace46_stats.pt")
+DEFAULT_SPARSE_STATS = Path("weian_development/hf_offline_runner_sparse/stats/distill_qwen7b_qid9001_trace00_stats.pt")
 SPARSE_METHOD = "sparse_round"
 
 if str(LAZY_DIR) not in sys.path:

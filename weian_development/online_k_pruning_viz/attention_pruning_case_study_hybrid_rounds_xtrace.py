@@ -22,8 +22,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from weian_development.process_utils import mask_process_command
-from weian_development.attention_qk_analysis.freq_magnitude_plots import invert_rope
-from weian_development.attention_qk_analysis.freq_magnitude_single_plot_meanvec_randomk import (
+from weian_development.hf_offline_runner_sparse.round_pruning_utils import (
+    invert_rope,
     to_complex_pairs,
 )
 
