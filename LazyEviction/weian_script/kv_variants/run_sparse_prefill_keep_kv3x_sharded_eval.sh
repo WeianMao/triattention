@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Launch SparseRound (prefill-keep, KV×4) AIME evaluation across multiple GPUs.
+# Launch SparseRound (prefill-keep, KV×3) AIME evaluation across multiple GPUs.
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-LAZY_DIR="$( dirname "${SCRIPT_DIR}" )"
+WEIAN_DIR="$( dirname "${SCRIPT_DIR}" )"
+LAZY_DIR="$( dirname "${WEIAN_DIR}" )"
 REPO_DIR="$( dirname "${LAZY_DIR}" )"
-LOG_DIR="${REPO_DIR}/logs/lazy_eviction_sparse_round_prefill_kv4x"
+LOG_DIR="${REPO_DIR}/logs/lazy_eviction_sparse_round_prefill_kv3x"
 mkdir -p "${LOG_DIR}"
 
 if [ -z "${NUM_SHARDS+x}" ]; then
@@ -24,7 +25,7 @@ else
 fi
 
 OUTPUT_ROOT_ENV="${OUTPUT_ROOT:-}"
-EVAL_SCRIPT="${LAZY_DIR}/eval_qwen_aime_sparse_prefill_keep_kv4x_sharded.sh"
+EVAL_SCRIPT="${LAZY_DIR}/kv_variants/eval_qwen_aime_sparse_prefill_keep_kv3x_sharded.sh"
 
 if [ "${GPUS_WAS_DEFAULT}" -eq 1 ]; then
     if command -v nvidia-smi >/dev/null 2>&1; then
@@ -47,8 +48,8 @@ for gpu in ${GPUS}; do
     if [ "${shard_id}" -ge "${NUM_SHARDS}" ]; then
         break
     fi
-    log_path="${LOG_DIR}/sparse_prefill_kv4x_shard${shard_id}.log"
-    echo "Launching SparseRound-Prefix-KV4x shard ${shard_id}/${NUM_SHARDS} on GPU ${gpu}, logging to ${log_path}"
+    log_path="${LOG_DIR}/sparse_prefill_kv3x_shard${shard_id}.log"
+    echo "Launching SparseRound-Prefix-KV3x shard ${shard_id}/${NUM_SHARDS} on GPU ${gpu}, logging to ${log_path}"
     if [ -n "${OUTPUT_ROOT_ENV}" ]; then
         CONDA_CMD="nohup env OUTPUT_ROOT=${OUTPUT_ROOT_ENV} CUDA_VISIBLE_DEVICES=${gpu} NUM_SHARDS=${NUM_SHARDS} SHARD_ID=${shard_id} bash ${EVAL_SCRIPT} > ${log_path} 2>&1 &"
     else

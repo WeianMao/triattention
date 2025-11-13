@@ -14,7 +14,7 @@ TEMPERATURE=${TEMPERATURE:-0.0}
 SEED=${SEED:-42}
 
 method="sparse_round_prefill"
-max_kv_capacity=${MAX_KV_CAPACITY:-7460}
+max_kv_capacity=${MAX_KV_CAPACITY:-2984}
 attn_implementation="${ATTN_IMPLEMENTATION:-sdpa}"
 decoding_recent_size=${DECODING_RECENT_SIZE:-363}
 SPARSE_OFFSET_MAX_LENGTH=${SPARSE_OFFSET_MAX_LENGTH:-65536}
@@ -27,11 +27,12 @@ NUM_SHARDS=${NUM_SHARDS:-1}
 SHARD_ID=${SHARD_ID:-0}
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-REPO_DIR="$( dirname "${SCRIPT_DIR}" )"
+LAZY_DIR="$( dirname "${SCRIPT_DIR}" )"
+REPO_DIR="$( dirname "${LAZY_DIR}" )"
 PYTHON_RUNNER="${REPO_DIR}/weian_development/lazy_eviction_sparse_prefill_keep_runner.py"
 DEFAULT_STATS="${REPO_DIR}/weian_development/hf_offline_runner_sparse/stats/distill_qwen7b_qid9001_trace00_stats.pt"
 SPARSE_STATS_PATH="${SPARSE_STATS_PATH:-${DEFAULT_STATS}}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_DIR}/outputs/DeepSeek-R1-Distill-Qwen-7B/${BENCHMARK}_prefill_keep_kv5x}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_DIR}/outputs/DeepSeek-R1-Distill-Qwen-7B/${BENCHMARK}_prefill_keep_kv2x}"
 
 python "${PYTHON_RUNNER}" --output-dir "${OUTPUT_ROOT}" \
     --model-path "${MODEL_PATH}" --tokenizer-path "${MODEL_PATH}" \

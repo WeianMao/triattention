@@ -2,7 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-LAZY_DIR="$( dirname "${SCRIPT_DIR}" )"
+WEIAN_DIR="$( dirname "${SCRIPT_DIR}" )"
+LAZY_DIR="$( dirname "${WEIAN_DIR}" )"
 REPO_DIR="$( dirname "${LAZY_DIR}" )"
 
 python "${REPO_DIR}/weian_development/merge_lazy_eviction_shards.py" \

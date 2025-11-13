@@ -5,9 +5,10 @@ set -euo pipefail
 # sharded helper we just set up. Mirrors the manual commands we have been running.
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-LAZY_DIR="$( dirname "${SCRIPT_DIR}" )"
+WEIAN_DIR="$( dirname "${SCRIPT_DIR}" )"
+LAZY_DIR="$( dirname "${WEIAN_DIR}" )"
 REPO_DIR="$( dirname "${LAZY_DIR}" )"
-LOG_DIR="${REPO_DIR}/logs/lazy_eviction_kv3x"
+LOG_DIR="${REPO_DIR}/logs/lazy_eviction_kv4x"
 mkdir -p "${LOG_DIR}"
 
 NUM_SHARDS=${NUM_SHARDS:-8}
@@ -19,7 +20,7 @@ for gpu in ${GPUS}; do
         break
     fi
     log_path="${LOG_DIR}/shard${shard_id}.log"
-    echo "Launching KV3x shard ${shard_id}/${NUM_SHARDS} on GPU ${gpu}, logging to ${log_path}"
-    conda run -n lazy_evict bash -lc "nohup env CUDA_VISIBLE_DEVICES=${gpu} NUM_SHARDS=${NUM_SHARDS} SHARD_ID=${shard_id} bash ${LAZY_DIR}/eval_qwen_aime_sharded_kv3x.sh > ${log_path} 2>&1 &"
+    echo "Launching KV4x shard ${shard_id}/${NUM_SHARDS} on GPU ${gpu}, logging to ${log_path}"
+    conda run -n lazy_evict bash -lc "nohup env CUDA_VISIBLE_DEVICES=${gpu} NUM_SHARDS=${NUM_SHARDS} SHARD_ID=${shard_id} bash ${LAZY_DIR}/kv_variants/eval_qwen_aime_sharded_kv4x.sh > ${log_path} 2>&1 &"
     shard_id=$((shard_id + 1))
 done

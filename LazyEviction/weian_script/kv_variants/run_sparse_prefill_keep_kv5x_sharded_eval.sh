@@ -4,7 +4,8 @@ set -euo pipefail
 # Launch SparseRound (prefill-keep, KV×5) AIME evaluation across multiple GPUs.
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-LAZY_DIR="$( dirname "${SCRIPT_DIR}" )"
+WEIAN_DIR="$( dirname "${SCRIPT_DIR}" )"
+LAZY_DIR="$( dirname "${WEIAN_DIR}" )"
 REPO_DIR="$( dirname "${LAZY_DIR}" )"
 LOG_DIR="${REPO_DIR}/logs/lazy_eviction_sparse_round_prefill_kv5x"
 mkdir -p "${LOG_DIR}"
@@ -24,7 +25,7 @@ else
 fi
 
 OUTPUT_ROOT_ENV="${OUTPUT_ROOT:-}"
-EVAL_SCRIPT="${LAZY_DIR}/eval_qwen_aime_sparse_prefill_keep_kv5x_sharded.sh"
+EVAL_SCRIPT="${LAZY_DIR}/kv_variants/eval_qwen_aime_sparse_prefill_keep_kv5x_sharded.sh"
 
 if [ "${GPUS_WAS_DEFAULT}" -eq 1 ]; then
     if command -v nvidia-smi >/dev/null 2>&1; then

@@ -13,7 +13,7 @@ SEED=42
 
 # KV Compression Settings
 method=Window_LAZY
-max_kv_capacity=5968
+max_kv_capacity=2984
 attn_implementation="sdpa"
 decoding_recent_size=363
 
@@ -22,10 +22,11 @@ NUM_SHARDS=${NUM_SHARDS:-1}
 SHARD_ID=${SHARD_ID:-0}
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-REPO_DIR="$( dirname "${SCRIPT_DIR}" )"
+LAZY_DIR="$( dirname "${SCRIPT_DIR}" )"
+REPO_DIR="$( dirname "${LAZY_DIR}" )"
 PYTHON_RUNNER="${REPO_DIR}/weian_development/lazy_eviction_sharded_runner.py"
 
-OUPTUT_DIR="${REPO_DIR}/outputs/DeepSeek-R1-Distill-Qwen-7B/${BENCHMARK}_kv4x"
+OUPTUT_DIR="${REPO_DIR}/outputs/DeepSeek-R1-Distill-Qwen-7B/${BENCHMARK}_kv2x"
 
 python "${PYTHON_RUNNER}" --output-dir ${OUPTUT_DIR} \
     --model-path ${MODEL_PATH} --tokenizer-path ${MODEL_PATH} \
