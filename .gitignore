@@ -3,3 +3,6 @@ aime25.jsonl
 brumo_2025.jsonl
 __pycache__
 deepconf_old
+tmp_eval
+logs
+outputs
