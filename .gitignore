@@ -6,3 +6,5 @@ deepconf_old
 tmp_eval
 logs
 outputs
+vllm
+kvpress
