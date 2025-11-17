@@ -318,6 +318,8 @@ def main() -> None:
     run_shards(gpus, total_shards, base_cmd, base_env, log_dir, args.dry_run, runner_args["output_dir"])
     merge_outputs(runner_args["output_dir"], merged_dir_name, args.skip_merge, args.dry_run)
     merged_dir = runner_args["output_dir"].parent / merged_dir_name
+    if not eval_output_dir:
+        eval_output_dir = merged_dir.parent / "eval"
     if not args.no_eval:
         exp_name = experiment.get("name", merged_dir_name)
         run_evaluation(merged_dir, args.dataset, exp_name, eval_output_dir, conda_env, args.dry_run)

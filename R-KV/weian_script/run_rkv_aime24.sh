@@ -4,9 +4,9 @@ set -euo pipefail
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_PATH="${REPO_ROOT}/HuggingFace/data/aime24.jsonl"
 MODEL_PATH="/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B"
-OUTPUT_PATH="${REPO_ROOT}/HuggingFace/outputs/aime24_rkv.jsonl"
+OUTPUT_PATH="${REPO_ROOT}/R-KV/outputs/aime24_rkv.jsonl"
 
-mkdir -p "${REPO_ROOT}/HuggingFace/outputs"
+mkdir -p "${REPO_ROOT}/R-KV/outputs"
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
