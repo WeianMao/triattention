@@ -19,6 +19,7 @@ from weian_development.process_utils import mask_process_command
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = PROJECT_ROOT / "R-KV" / "weian_script" / "configs" / "rkv_aime24_sharded.yaml"
 MERGE_SCRIPT = PROJECT_ROOT / "R-KV" / "weian_development" / "merge_rkv_shards.py"
+EVAL_SCRIPT = PROJECT_ROOT / "R-KV" / "HuggingFace" / "evaluation" / "eval_math.py"
 PATH_ARG_KEYS = {"output_dir", "dataset_path", "model_path", "tokenizer_path"}
 
 
@@ -41,6 +42,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--method-output-dir", type=str, help="Override merge target directory")
     parser.add_argument("--gpu-memory-threshold", type=int, help="Override GPU memory threshold for auto selection")
     parser.add_argument("--skip-merge", action="store_true", help="Skip shard merge step")
+    parser.add_argument("--run-eval", action="store_true", help="Run eval_math.py on merged outputs")
+    parser.add_argument("--eval-output-dir", type=str, help="Directory to write eval results")
+    parser.add_argument("--dataset", type=str, default="aime24", help="Dataset name for eval script")
     parser.add_argument("--dry-run", action="store_true", help="Print what would run without launching processes")
     return parser.parse_args()
 
@@ -254,6 +258,36 @@ def merge_outputs(shard_output_dir: Path, merged_dir_name: str, skip_merge: bool
     subprocess.check_call(cmd, cwd=str(PROJECT_ROOT))
 
 
+def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Optional[Path], conda_env: str, dry_run: bool) -> None:
+    if not base_dir.exists():
+        print(f"[eval] skip, base_dir not found: {base_dir}")
+        return
+    if not any(base_dir.glob("*.jsonl")):
+        print(f"[eval] skip, no jsonl under {base_dir}")
+        return
+    cmd = [
+        "conda",
+        "run",
+        "-n",
+        conda_env,
+        "python",
+        str(EVAL_SCRIPT),
+        "--base_dir",
+        str(base_dir),
+        "--dataset",
+        dataset,
+        "--exp_name",
+        exp_name,
+    ]
+    if output_dir:
+        cmd.extend(["--output_dir", str(output_dir)])
+    if dry_run:
+        print(f"[dry-run] eval command: {' '.join(cmd)}")
+        return
+    print(f"[eval] {' '.join(cmd)}")
+    subprocess.check_call(cmd, cwd=str(PROJECT_ROOT))
+
+
 def main() -> None:
     mask_process_command("PD-L1_binder")
     args = parse_args()
@@ -267,6 +301,7 @@ def main() -> None:
     log_dir = resolve_path(args.log_dir or experiment.get("log_dir", "R-KV/logs/rkv_aime24_sharded"))
     method_output_dir = resolve_path(args.method_output_dir or experiment.get("method_output_dir", "R-KV/outputs/rkv_aime24_sharded"))
     merged_dir_name = experiment.get("merged_dir_name", "merged")
+    eval_output_dir = resolve_path(args.eval_output_dir) if args.eval_output_dir else None
 
     runner_args = experiment.get("runner_args", {}).copy()
     if args.output_dir:
@@ -282,6 +317,10 @@ def main() -> None:
 
     run_shards(gpus, total_shards, base_cmd, base_env, log_dir, args.dry_run, runner_args["output_dir"])
     merge_outputs(runner_args["output_dir"], merged_dir_name, args.skip_merge, args.dry_run)
+    merged_dir = runner_args["output_dir"].parent / merged_dir_name
+    if args.run_eval:
+        exp_name = experiment.get("name", merged_dir_name)
+        run_evaluation(merged_dir, args.dataset, exp_name, eval_output_dir, conda_env, args.dry_run)
 
 
 if __name__ == "__main__":
