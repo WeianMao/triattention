@@ -37,3 +37,7 @@
 - When launching long-running jobs, ensure the visible process command string follows the `PD-L1_binder` convention (e.g., via wrapper scripts or `setproctitle`) to align with existing cluster naming.
 - Artifact-heavy outputs（例如 `outputs/deepseek_r1_qwen3_8b/qk_*`）已经在 `.gitignore` 中屏蔽，生成后请勿尝试纳入版本管理。
 - LazyEviction 子工程默认使用 `lazy_evict` conda 环境；在运行其脚本或评测前 `conda activate lazy_evict`。
+
+## Recent Ops
+- Created conda env `rkv` (Python 3.10) for `R-KV/rkv/compression` + eval: installed torch 2.3.1+cu121, flash-attn 2.5.8 (built with `CUDA_HOME=/usr/local/cuda-12.4`), transformers stack from `R-KV/HuggingFace/requirements.txt`, and `evaluation/` deps (`latex2sympy2`, datasets, pebble, timeout_decorator, word2number). Pip cache set to `/data/rbg/users/weian/.cache/pip`, HF cache to `/data/rbg/users/weian/.cache/huggingface`.
+- Downloaded `deepseek-ai/DeepSeek-R1-Distill-Llama-8B` to `/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B` for AIME runs.
