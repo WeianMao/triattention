@@ -1,8 +1,6 @@
 import json
 import random
 import argparse
-import sys
-from pathlib import Path
 
 import numpy as np
 from tqdm import tqdm
@@ -10,12 +8,6 @@ from tqdm import tqdm
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from rkv.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
-
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from weian_development.process_utils import mask_process_command
 
 dataset2key = {
     "gsm8k": ["question", "answer"],
@@ -172,7 +164,6 @@ def parse_arguments():
 
 
 if __name__ == "__main__":
-    mask_process_command("PD-L1_binder")
     args = parse_arguments()
     set_seed(args.seed)
 
