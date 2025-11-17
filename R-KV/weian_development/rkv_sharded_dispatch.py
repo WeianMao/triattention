@@ -231,15 +231,15 @@ def run_shards(
         raise
 
 
-def merge_outputs(method_output_dir: Path, merged_dir_name: str, skip_merge: bool, dry_run: bool) -> None:
+def merge_outputs(shard_output_dir: Path, merged_dir_name: str, skip_merge: bool, dry_run: bool) -> None:
     if skip_merge:
         print("Skipping merge (--skip-merge enabled).")
         return
     if dry_run:
-        cmd = [sys.executable, str(MERGE_SCRIPT), "--method-output-dir", str(method_output_dir), "--merged-dir-name", merged_dir_name]
+        cmd = [sys.executable, str(MERGE_SCRIPT), "--method-output-dir", str(shard_output_dir), "--merged-dir-name", merged_dir_name]
         print(f"[dry-run] merge command: {' '.join(cmd)}")
         return
-    cmd = [sys.executable, str(MERGE_SCRIPT), "--method-output-dir", str(method_output_dir), "--merged-dir-name", merged_dir_name]
+    cmd = [sys.executable, str(MERGE_SCRIPT), "--method-output-dir", str(shard_output_dir), "--merged-dir-name", merged_dir_name]
     print(f"[merge] {' '.join(cmd)}")
     subprocess.check_call(cmd, cwd=str(PROJECT_ROOT))
 
@@ -271,7 +271,8 @@ def main() -> None:
     base_cmd = build_base_command(conda_env, runner_path, format_runner_args(runner_args, total_shards))
 
     run_shards(gpus, total_shards, base_cmd, base_env, log_dir, args.dry_run)
-    merge_outputs(method_output_dir, merged_dir_name, args.skip_merge, args.dry_run)
+    shard_output_dir = runner_args["output_dir"]
+    merge_outputs(shard_output_dir, merged_dir_name, args.skip_merge, args.dry_run)
 
 
 if __name__ == "__main__":
