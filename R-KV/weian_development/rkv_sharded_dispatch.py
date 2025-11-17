@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--method-output-dir", type=str, help="Override merge target directory")
     parser.add_argument("--gpu-memory-threshold", type=int, help="Override GPU memory threshold for auto selection")
     parser.add_argument("--skip-merge", action="store_true", help="Skip shard merge step")
-    parser.add_argument("--run-eval", action="store_true", help="Run eval_math.py on merged outputs")
+    parser.add_argument("--no-eval", action="store_true", help="Skip eval_math.py after merge")
     parser.add_argument("--eval-output-dir", type=str, help="Directory to write eval results")
     parser.add_argument("--dataset", type=str, default="aime24", help="Dataset name for eval script")
     parser.add_argument("--dry-run", action="store_true", help="Print what would run without launching processes")
@@ -318,7 +318,7 @@ def main() -> None:
     run_shards(gpus, total_shards, base_cmd, base_env, log_dir, args.dry_run, runner_args["output_dir"])
     merge_outputs(runner_args["output_dir"], merged_dir_name, args.skip_merge, args.dry_run)
     merged_dir = runner_args["output_dir"].parent / merged_dir_name
-    if args.run_eval:
+    if not args.no_eval:
         exp_name = experiment.get("name", merged_dir_name)
         run_evaluation(merged_dir, args.dataset, exp_name, eval_output_dir, conda_env, args.dry_run)
 
