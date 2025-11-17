@@ -192,18 +192,28 @@ def run_shards(
     base_env: Dict[str, str],
     log_dir: Path,
     dry_run: bool,
+    output_dir: Path,
 ) -> None:
     if not gpus:
         raise ValueError("No GPUs available to schedule shards")
+    shards_to_run: List[int] = []
+    for shard_id in range(total_shards):
+        expected = output_dir / f"shard{shard_id:02d}.jsonl"
+        if expected.exists() and expected.stat().st_size > 0:
+            print(f"[skip] shard {shard_id} output exists -> {expected}")
+            continue
+        shards_to_run.append(shard_id)
+    if not shards_to_run:
+        print("All shard outputs already exist; skipping shard launch.")
+        return
     if dry_run:
-        for shard_id in range(total_shards):
+        for shard_id in shards_to_run:
             gpu = gpus[shard_id % len(gpus)]
             log_path = (log_dir / f"rkv_aime24_shard{shard_id:02d}.log").resolve()
             cmd_preview = base_cmd + ["--shard_id", str(shard_id)]
             print(f"[dry-run] shard {shard_id} -> GPU {gpu}\n  log: {log_path}\n  cmd: {' '.join(cmd_preview)}")
         return
-
-    shard_queue: deque[int] = deque(range(total_shards))
+    shard_queue: deque[int] = deque(shards_to_run)
     available: deque[str] = deque(gpus)
     active: Dict[str, ActiveShard] = {}
     try:
@@ -270,9 +280,8 @@ def main() -> None:
 
     base_cmd = build_base_command(conda_env, runner_path, format_runner_args(runner_args, total_shards))
 
-    run_shards(gpus, total_shards, base_cmd, base_env, log_dir, args.dry_run)
-    shard_output_dir = runner_args["output_dir"]
-    merge_outputs(shard_output_dir, merged_dir_name, args.skip_merge, args.dry_run)
+    run_shards(gpus, total_shards, base_cmd, base_env, log_dir, args.dry_run, runner_args["output_dir"])
+    merge_outputs(runner_args["output_dir"], merged_dir_name, args.skip_merge, args.dry_run)
 
 
 if __name__ == "__main__":
