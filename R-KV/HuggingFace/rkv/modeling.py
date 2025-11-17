@@ -174,14 +174,7 @@ def LlamaAttention_forward(
 
     attention_interface: Callable = eager_attention_forward
     if self.config._attn_implementation != "eager":
-        # flash_attention_2 + KV compression has been unstable; fall back to eager to avoid CUDA crashes.
-        if (
-            self.config._attn_implementation == "flash_attention_2"
-            and self.config.method is not None
-            and self.config.method.lower() != "fullkv"
-        ):
-            attention_interface = eager_attention_forward
-        elif self.config._attn_implementation == "sdpa" and kwargs.get(
+        if self.config._attn_implementation == "sdpa" and kwargs.get(
             "output_attentions", False
         ):
             logger.warning_once(

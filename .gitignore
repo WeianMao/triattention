@@ -8,6 +8,7 @@ logs
 outputs
 vllm
 kvpress
+/R-KV-backup-*
 /tmp/rkv_test_shard/
 /data/rbg/users/weian/project/rl/dc/R-KV/outputs/
 /data/rbg/users/weian/project/rl/dc/R-KV/logs/
