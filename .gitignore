@@ -28,3 +28,7 @@ R-KV/HuggingFace/evaluation/aime24/
 R-KV/HuggingFace/evaluation/all_results.csv
 R-KV/HuggingFace/all_results.csv
 R-KV/HuggingFace/rkv.egg-info/
+
+# R-KV sharded outputs/logs
+R-KV/outputs/
+R-KV/logs/

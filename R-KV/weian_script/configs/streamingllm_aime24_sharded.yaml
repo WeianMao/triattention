@@ -17,5 +17,5 @@ experiment:
     max_length: 16384
     eval_batch_size: 1
     method: streamingllm
-    kv_budget: 128
+    kv_budget: 2048
     attn_implementation: flash_attention_2
