@@ -9,8 +9,12 @@ from transformers.models.llama.modeling_llama import (
 )
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
-from transformers.models.qwen3.modeling_qwen3 import Qwen3RMSNorm
-from transformers.models.qwen3.modeling_qwen3 import Qwen3Config
+try:
+    from transformers.models.qwen3.modeling_qwen3 import Qwen3RMSNorm
+    from transformers.models.qwen3.modeling_qwen3 import Qwen3Config
+except ImportError:
+    Qwen3RMSNorm = None
+    Qwen3Config = None
 from transformers.cache_utils import Cache
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
@@ -370,43 +374,45 @@ def Qwen2Attention_forward(
 def Qwen3Attention_init(
     self, config: Qwen3Config, layer_idx: int, compression_config: dict
 ):
-        nn.Module.__init__(self)
-        self.config = config
-        self.layer_idx = layer_idx
-        self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
-        self.num_key_value_groups = config.num_attention_heads // config.num_key_value_heads
-        self.scaling = self.head_dim**-0.5
-        self.attention_dropout = config.attention_dropout
-        self.is_causal = True
+    if Qwen3RMSNorm is None or Qwen3Config is None:
+        raise ImportError("transformers does not provide qwen3 in this version")
+    nn.Module.__init__(self)
+    self.config = config
+    self.layer_idx = layer_idx
+    self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+    self.num_key_value_groups = config.num_attention_heads // config.num_key_value_heads
+    self.scaling = self.head_dim**-0.5
+    self.attention_dropout = config.attention_dropout
+    self.is_causal = True
 
-        self.q_proj = nn.Linear(
-            config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias
-        )
-        self.k_proj = nn.Linear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
-        )
-        self.v_proj = nn.Linear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
-        )
-        self.o_proj = nn.Linear(
-            config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias
-        )
-        self.q_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)  # unlike olmo, only on the head dim!
-        self.k_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)  # thus post q_norm does not need reshape
-        self.sliding_window = config.sliding_window
-        if not (
-            self.config.use_sliding_window
-            and getattr(self.config, "sliding_window", None) is not None
-            and self.layer_idx >= self.config.max_window_layers
-        ):
-            self.sliding_window = None
+    self.q_proj = nn.Linear(
+        config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias
+    )
+    self.k_proj = nn.Linear(
+        config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
+    )
+    self.v_proj = nn.Linear(
+        config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
+    )
+    self.o_proj = nn.Linear(
+        config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias
+    )
+    self.q_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)  # unlike olmo, only on the head dim!
+    self.k_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)  # thus post q_norm does not need reshape
+    self.sliding_window = config.sliding_window
+    if not (
+        self.config.use_sliding_window
+        and getattr(self.config, "sliding_window", None) is not None
+        and self.layer_idx >= self.config.max_window_layers
+    ):
+        self.sliding_window = None
 
-        # =============== New logic start ===============
-        self.config.update(compression_config)
-        self.kv_cluster = KV_COMPRESSION_MAP[compression_config["method"]](
-            **compression_config["method_config"]
-        )
-        # =============== New logic end =================
+    # =============== New logic start ===============
+    self.config.update(compression_config)
+    self.kv_cluster = KV_COMPRESSION_MAP[compression_config["method"]](
+        **compression_config["method_config"]
+    )
+    # =============== New logic end =================
 
 def Qwen3Attention_forward(
     self,

@@ -14,3 +14,17 @@ kvpress
 /data/rbg/users/weian/project/rl/dc/R-KV/logs/
 /data/rbg/users/weian/project/rl/dc/R-KV/outputs/*
 /data/rbg/users/weian/project/rl/dc/R-KV/logs/*
+
+# R-KV HuggingFace run artifacts
+R-KV/HuggingFace/outputs*/
+R-KV/HuggingFace/output*.jsonl
+R-KV/HuggingFace/evaluation/*_math_eval*.json*
+R-KV/HuggingFace/evaluation/*/default-*_math_eval*.jsonl
+R-KV/HuggingFace/evaluation/*/*/default-*_math_eval*.jsonl
+R-KV/HuggingFace/evaluation/*/default-*_metrics.json
+R-KV/HuggingFace/evaluation/*/*/default-*_metrics.json
+R-KV/HuggingFace/evaluation/evaluation_*/
+R-KV/HuggingFace/evaluation/aime24/
+R-KV/HuggingFace/evaluation/all_results.csv
+R-KV/HuggingFace/all_results.csv
+R-KV/HuggingFace/rkv.egg-info/

@@ -1,6 +1,10 @@
 from transformers.models.llama import modeling_llama
 from transformers.models.qwen2 import modeling_qwen2
-from transformers.models.qwen3 import modeling_qwen3
+
+try:
+    from transformers.models.qwen3 import modeling_qwen3
+except ImportError:
+    modeling_qwen3 = None
 from .modeling import (
     LlamaAttention_init,
     LlamaAttention_forward,
@@ -30,6 +34,9 @@ def replace_qwen2(compression_config):
     modeling_qwen2.Qwen2ForCausalLM.forward = CausalLM_forward
 
 def replace_qwen3(compression_config):
+    if modeling_qwen3 is None:
+        raise ImportError("transformers does not provide qwen3 in this version")
+
     def init_wrapper(self, config, layer_idx):
         Qwen3Attention_init(self, config, layer_idx, compression_config)
 
