@@ -5,6 +5,7 @@
 - `run_math.py` 添加进程名遮罩 `mask_process_command("PD-L1_binder")` 并补充仓库根目录到 `sys.path`。
 - `rkv/monkeypatch.py`、`rkv/modeling.py` 对 qwen3 相关 import 做可选处理，以兼容 transformers 4.48.1；不影响 llama 路径和已有逻辑。
 - 新增 gitignore 规则，排除 HuggingFace 目录下运行产物（outputs、evaluation 结果、egg-info、all_results.csv 等）。
+- 从 `R-KV-backup-20250219/weian_script` 搬运了所有自定义脚本与配置到 `R-KV/weian_script/`（不同方法的 AIME24 单卡/分片调度脚本和 YAML 配置），仅更改位置，未改动内容。
 - 更新 `R-KV/rkv_task_log.md` 记录环境与实验。
 
 ### 实验记录
