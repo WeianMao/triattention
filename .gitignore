@@ -23,6 +23,7 @@ R-KV/HuggingFace/evaluation/*/default-*_math_eval*.jsonl
 R-KV/HuggingFace/evaluation/*/*/default-*_math_eval*.jsonl
 R-KV/HuggingFace/evaluation/*/default-*_metrics.json
 R-KV/HuggingFace/evaluation/*/*/default-*_metrics.json
+R-KV/HuggingFace/evaluation/rkv_sdpa_single/
 R-KV/HuggingFace/evaluation/evaluation_*/
 R-KV/HuggingFace/evaluation/aime24/
 R-KV/HuggingFace/evaluation/all_results.csv
