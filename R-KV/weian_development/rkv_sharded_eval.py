@@ -20,6 +20,7 @@ for path in (REPO_ROOT, MODULE_ROOT, HF_RKV_ROOT):
         sys.path.insert(0, str(path))
 
 from weian_development.process_utils import mask_process_command
+from weian_development.rkv_cache_utils import reset_model_cache
 from rkv.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
 
 dataset2key = {
@@ -46,6 +47,26 @@ def set_seed(seed: int) -> None:
 
 
 prompt_template = "You are given a math problem.\n\nProblem: {question}\n\n You need to solve the problem step by step. First, you need to provide the chain-of-thought, then provide the final answer.\n\n Provide the final answer in the format: Final answer:  \\boxed{{}}"
+
+
+def str2bool(value: str | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    value = value.strip().lower()
+    if value in {"true", "1", "yes", "y"}:
+        return True
+    if value in {"false", "0", "no", "n"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Unable to interpret boolean value '{value}'")
+
+
+def resolve_torch_dtype(name: str):
+    normalized = name.lower()
+    if normalized == "bfloat16":
+        return torch.bfloat16
+    if normalized == "float16":
+        return torch.float16
+    raise ValueError(f"Unsupported dtype: {name}")
 
 
 def load_dataset(path: Path, dataset_name: str, shard_id: int, num_shards: int) -> List[dict]:
@@ -75,6 +96,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--model_path", "--model-path", dest="model_path", type=str, required=True)
     parser.add_argument("--max_length", "--max-length", dest="max_length", type=int, default=-1)
     parser.add_argument("--eval_batch_size", "--eval-batch-size", dest="eval_batch_size", type=int, default=1)
+    parser.add_argument("--load_dtype", "--load-dtype", dest="load_dtype", type=str, default="bfloat16", choices=["bfloat16", "float16"])
     parser.add_argument(
         "--attn_implementation",
         "--attn-implementation",
@@ -88,7 +110,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--first_tokens", "--first-tokens", dest="first_tokens", type=int, default=4)
     parser.add_argument("--mix_lambda", "--mix-lambda", dest="mix_lambda", type=float, default=0.07)
     parser.add_argument("--retain_ratio", "--retain-ratio", dest="retain_ratio", type=float, default=0.2)
-    parser.add_argument("--update_kv", "--update-kv", dest="update_kv", type=bool, default=True)
+    parser.add_argument("--update_kv", "--update-kv", dest="update_kv", type=str2bool, default=True)
+    parser.add_argument("--fp32_topk", "--fp32-topk", dest="fp32_topk", type=str2bool, default=False)
+    parser.add_argument(
+        "--reset_cache_each_batch",
+        "--reset-cache-each-batch",
+        dest="reset_cache_each_batch",
+        type=str2bool,
+        default=False,
+    )
     parser.add_argument(
         "--retain_direction", type=str, default="last", choices=["last", "first"]
     )
@@ -136,6 +166,7 @@ def main(args: argparse.Namespace) -> None:
             "retain_ratio": args.retain_ratio,
             "retain_direction": args.retain_direction,
             "first_tokens": args.first_tokens,
+            "fp32_topk": args.fp32_topk,
         },
         "compression": None,
         "update_kv": args.update_kv,
@@ -163,9 +194,11 @@ def main(args: argparse.Namespace) -> None:
         else:
             raise ValueError(f"Unsupported model: {args.model_path}")
 
+    dtype = resolve_torch_dtype(args.load_dtype)
+
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=dtype,
         low_cpu_mem_usage=True,
         device_map="auto",
         use_cache=True,
@@ -198,6 +231,9 @@ def main(args: argparse.Namespace) -> None:
             ).to("cuda")
 
             prefill_lengths = tokenized_prompts["attention_mask"].sum(dim=1).tolist()
+
+            if args.reset_cache_each_batch:
+                reset_model_cache(model)
 
             output = model.generate(
                 **tokenized_prompts,

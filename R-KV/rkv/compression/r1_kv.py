@@ -15,6 +15,7 @@ class R1KV:
         retain_ratio=0.1,
         retain_direction="last",
         record_kept_token_indices=False,
+        fp32_topk: bool = False,
         **kwargs,
     ):
         assert budget - window_size > 0, "budget must be greater than window_size"
@@ -24,6 +25,7 @@ class R1KV:
         self.mix_lambda = mix_lambda
         self.retain_ratio = retain_ratio
         self.retain_direction = retain_direction
+        self.use_fp32_topk = fp32_topk
 
         # for recording kept token indices
         self.record_kept_token_indices = record_kept_token_indices
@@ -48,15 +50,13 @@ class R1KV:
         else:
             attn_weights = compute_attention_scores(query_states, key_states)
 
-            attn_weights_sum = (
-                nn.functional.softmax(
-                    attn_weights[:, :, -self.window_size :, : -self.window_size],
-                    dim=-1,
-                    dtype=torch.float32,
-                )
-                .mean(dim=-2)
-                .to(query_states.dtype)
-            )
+            attn_weights_sum = nn.functional.softmax(
+                attn_weights[:, :, -self.window_size :, : -self.window_size],
+                dim=-1,
+                dtype=torch.float32,
+            ).mean(dim=-2)
+            if not self.use_fp32_topk:
+                attn_weights_sum = attn_weights_sum.to(query_states.dtype)
             # TODO: Softmax then reduce head
 
             attn_cache = F.max_pool1d(
@@ -71,15 +71,18 @@ class R1KV:
                 retain_ratio=self.retain_ratio,
                 retain_direction=self.retain_direction,
             )[:, : -self.window_size]
+            if self.use_fp32_topk:
+                similarity_cos = similarity_cos.to(torch.float32)
+            else:
+                similarity_cos = similarity_cos.to(query_states.dtype)
 
             final_score = attn_cache * self.mix_lambda - similarity_cos * (
                 1 - self.mix_lambda
             )
 
-            
-
+            score_for_topk = final_score if self.use_fp32_topk else final_score.to(query_states.dtype)
             # shape: (bsz, num_kv_heads, budget - window_size)
-            indices = final_score.topk(self.budget - self.window_size, dim=-1).indices
+            indices = score_for_topk.topk(self.budget - self.window_size, dim=-1).indices
 
             #####################################################
             ###### Store evicted token indices start ############
@@ -178,3 +181,11 @@ class R1KV:
             key_states = torch.cat([k_past_compress, k_cur], dim=2)
             value_states = torch.cat([v_past_compress, v_cur], dim=2)
             return key_states, value_states
+
+    def reset_compression_state(self) -> None:
+        if self.record_kept_token_indices:
+            self.evicted_token_num = 0
+            self.kept_token_indices = []
+            self.kept_attention_scores = []
+            self.kept_similarity_scores = []
+            self.kept_final_scores = []

@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from weian_development.process_utils import mask_process_command
+from weian_development.rkv_cache_utils import reset_model_cache
 
 dataset2key = {
     "gsm8k": ["question", "answer"],
@@ -41,6 +42,26 @@ def set_seed(seed):
 
 
 prompt_template = "You are given a math problem.\n\nProblem: {question}\n\n You need to solve the problem step by step. First, you need to provide the chain-of-thought, then provide the final answer.\n\n Provide the final answer in the format: Final answer:  \\boxed{{}}"
+
+
+def str2bool(value):
+    if isinstance(value, bool):
+        return value
+    value = value.strip().lower()
+    if value in {"true", "1", "yes", "y"}:
+        return True
+    if value in {"false", "0", "no", "n"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Unable to interpret boolean value '{value}'")
+
+
+def resolve_torch_dtype(name: str):
+    normalized = name.lower()
+    if normalized == "bfloat16":
+        return torch.bfloat16
+    if normalized == "float16":
+        return torch.float16
+    raise ValueError(f"Unsupported dtype: {name}")
 
 
 def main(args):
@@ -74,6 +95,9 @@ def main(args):
         ).to("cuda")
 
         prefill_lengths = tokenized_prompts["attention_mask"].sum(dim=1).tolist()
+
+        if args.reset_cache_each_batch:
+            reset_model_cache(model)
 
         output = model.generate(
             **tokenized_prompts,
@@ -128,6 +152,7 @@ def parse_arguments():
     parser.add_argument("--model_path", type=str)
     parser.add_argument("--max_length", type=int, default=-1)
     parser.add_argument("--eval_batch_size", type=int, default=1)
+    parser.add_argument("--load_dtype", type=str, default="bfloat16", choices=["bfloat16", "float16"])
     parser.add_argument(
         "--attn_implementation",
         type=str,
@@ -147,7 +172,9 @@ def parse_arguments():
     parser.add_argument("--first_tokens", type=int, default=4)
     parser.add_argument("--mix_lambda", type=float, default=0.07)
     parser.add_argument("--retain_ratio", type=float, default=0.2)
-    parser.add_argument("--update_kv", type=bool, default=True)
+    parser.add_argument("--update_kv", type=str2bool, default=True)
+    parser.add_argument("--fp32_topk", type=str2bool, default=False)
+    parser.add_argument("--reset_cache_each_batch", type=str2bool, default=False)
     parser.add_argument(
         "--retain_direction", type=str, default="last", choices=["last", "first"]
     )
@@ -189,6 +216,7 @@ if __name__ == "__main__":
             "retain_ratio": args.retain_ratio,
             "retain_direction": args.retain_direction,
             "first_tokens": args.first_tokens,
+            "fp32_topk": args.fp32_topk,
         },
         "compression": None,
         "update_kv": args.update_kv
@@ -218,9 +246,11 @@ if __name__ == "__main__":
         else:
             raise ValueError(f"Unsupported model: {args.model_path}")
 
+    dtype = resolve_torch_dtype(args.load_dtype)
+
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=dtype,
         low_cpu_mem_usage=True,
         device_map="auto",
         use_cache=True,

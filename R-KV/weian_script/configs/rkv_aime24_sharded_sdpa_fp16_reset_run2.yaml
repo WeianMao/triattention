@@ -1,0 +1,24 @@
+experiment:
+  name: rkv_aime24_sharded_sdpa_fp16_reset_run2
+  conda_env: rkv
+  runner_path: R-KV/weian_development/rkv_sharded_runner.py
+  log_dir: R-KV/logs/rkv_aime24_sharded_sdpa_fp16_reset_run2
+  method_output_dir: R-KV/outputs/rkv_aime24_sharded_sdpa_fp16_reset_run2
+  merged_dir_name: merged
+  gpus: auto
+  auto_gpu_fallback: [0, 1, 2, 3, 4, 5, 6, 7]
+  num_shards: 8
+  gpu_memory_threshold: 200
+  env: {}
+  runner_args:
+    output_dir: R-KV/outputs/rkv_aime24_sharded_sdpa_fp16_reset_run2/shards
+    dataset_path: R-KV/HuggingFace/data/aime24.jsonl
+    model_path: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B
+    max_length: 16384
+    eval_batch_size: 1
+    method: rkv
+    kv_budget: 2048
+    attn_implementation: sdpa
+    load_dtype: float16
+    fp32_topk: true
+    reset_cache_each_batch: true
