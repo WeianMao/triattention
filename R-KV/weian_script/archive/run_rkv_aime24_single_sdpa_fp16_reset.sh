@@ -1,23 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Single-GPU AIME24 baseline: sdpa + fp16 + fp32_topk + reset (outputs under R-KV/outputs, auto-eval).
-# Process name is masked via run_math.py (PD-L1_binder).
+# Single-GPU SDPA run with optional fp16 + deterministic cache resets.
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_PATH="${REPO_ROOT}/HuggingFace/data/aime24.jsonl"
 MODEL_PATH="/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B"
-OUTPUT_DIR="${REPO_ROOT}/R-KV/outputs/rkv_aime24_single_sdpa_fp16_reset"
-OUTPUT_PATH="${OUTPUT_DIR}/output.jsonl"
-EVAL_DIR="${REPO_ROOT}/R-KV/HuggingFace/outputs/output_sdpa_fp16_reset_eval"
+OUTPUT_PATH="${REPO_ROOT}/HuggingFace/outputs/output_sdpa_fp16_reset.jsonl"
 
-mkdir -p "${OUTPUT_DIR}" "${EVAL_DIR}"
+mkdir -p "$(dirname "${OUTPUT_PATH}")"
 
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-2}"
 export HF_HOME="${HF_HOME:-/data/rbg/users/weian/.cache/huggingface}"
 export PIP_CACHE_DIR="${PIP_CACHE_DIR:-/data/rbg/users/weian/.cache/pip}"
 
-# Inference
 conda run -n rkv --no-capture-output python "${REPO_ROOT}/HuggingFace/run_math.py" \
   --dataset_path "${DATA_PATH}" \
   --save_path "${OUTPUT_PATH}" \
@@ -30,10 +26,3 @@ conda run -n rkv --no-capture-output python "${REPO_ROOT}/HuggingFace/run_math.p
   --load_dtype float16 \
   --fp32_topk True \
   --reset_cache_each_batch True
-
-# Evaluation (writes to ${EVAL_DIR})
-conda run -n rkv --no-capture-output python "${REPO_ROOT}/HuggingFace/evaluation/eval_math.py" \
-  --base_dir "${OUTPUT_DIR}" \
-  --dataset aime24 \
-  --exp_name output_sdpa_fp16_reset \
-  --output_dir "${EVAL_DIR}"

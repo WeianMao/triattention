@@ -559,14 +559,18 @@ def CausalLM_forward(
     )
 
     # sample-level statistics
-    if len(past_key_values) == 0:
+    try:
+        cache_empty = past_key_values is None or len(past_key_values) == 0
+    except TypeError:
+        cache_empty = past_key_values is None
+
+    if cache_empty:
         if self.config.compression_content == "think":
             self.after_think = False
+        # Ensure per-sample length accounting instead of accumulating across prompts
+        self.length = 0
 
-    if not hasattr(self, "length"):
-        self.length = input_ids.shape[1]
-    else:
-        self.length += input_ids.shape[1]
+    self.length = getattr(self, "length", 0) + input_ids.shape[1]
 
     # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
     outputs = self.model(
