@@ -26,12 +26,14 @@ from rkv.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
 dataset2key = {
     "gsm8k": ["question", "answer"],
     "aime24": ["question", "answer"],
+    "aime25": ["question", "answer"],
     "math": ["problem", "answer"],
 }
 
 dataset2max_length = {
     "gsm8k": 8192,
-    "aime24": 16384,
+    "aime24": 32768,
+    "aime25": 32768,
     "math": 8192,
 }
 
@@ -74,8 +76,6 @@ def load_dataset(path: Path, dataset_name: str, shard_id: int, num_shards: int) 
     test_data: List[dict] = []
     with path.open() as f:
         for index, line in enumerate(f):
-            if index % num_shards != shard_id:
-                continue
             example = json.loads(line)
             question_key = dataset2key[dataset_name][0]
             question = example[question_key]
@@ -141,14 +141,27 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--shard_id", type=int, required=True)
     parser.add_argument("--num_shards", type=int, required=True)
     parser.add_argument("--output_name", type=str, default=None)
+    parser.add_argument("--num_samples", type=int, default=64)
+    parser.add_argument("--temperature", type=float, default=0.6)
+    parser.add_argument("--top_p", type=float, default=0.95)
     return parser.parse_args()
 
 
 def main(args: argparse.Namespace) -> None:
     mask_process_command("PD-L1_binder")
     args.dataset_name = Path(args.dataset_path).name.split(".")[0]
-    if args.max_length == -1:
+    if args.dataset_name in dataset2max_length:
         args.max_length = dataset2max_length[args.dataset_name]
+    if args.eval_batch_size != 1:
+        raise ValueError("eval_batch_size must be 1 for current R-KV sharded runner.")
+
+    total_samples = args.num_samples
+    base = total_samples // args.num_shards
+    extra = total_samples % args.num_shards
+    local_samples = base + (1 if args.shard_id < extra else 0)
+    start_draw = args.shard_id * base + min(args.shard_id, extra)
+    if local_samples == 0:
+        return
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -192,7 +205,7 @@ def main(args: argparse.Namespace) -> None:
         elif "qwen" in args.model_path.lower():
             replace_qwen2(compression_config)
         else:
-            raise ValueError(f"Unsupported model: {args.model_path}")
+        raise ValueError(f"Unsupported model: {args.model_path}")
 
     dtype = resolve_torch_dtype(args.load_dtype)
 
@@ -220,61 +233,50 @@ def main(args: argparse.Namespace) -> None:
             tokenizer.encode("</think>")[-1],
         ]
 
+    set_seed(args.seed + args.shard_id)
+
     with save_path.open("w") as fout:
-        for i in range(0, len(prompts), args.eval_batch_size):
-            batch_prompts = prompts[i : i + args.eval_batch_size]
+        for local_idx, prompt in enumerate(prompts):
             tokenized_prompts = tokenizer(
-                batch_prompts,
+                [prompt],
                 padding="longest",
                 return_tensors="pt",
                 add_special_tokens=True,
             ).to("cuda")
+            prefill_length = int(tokenized_prompts["attention_mask"].sum().item())
+            sample_idx = test_data[local_idx]["index"]
 
-            prefill_lengths = tokenized_prompts["attention_mask"].sum(dim=1).tolist()
+            for draw_idx in range(local_samples):
+                if args.reset_cache_each_batch:
+                    reset_model_cache(model)
 
-            if args.reset_cache_each_batch:
-                reset_model_cache(model)
-
-            output = model.generate(
-                **tokenized_prompts,
-                max_length=args.max_length,
-                do_sample=False,
-                num_beams=1,
-            )
-
-            batch_token_stats = []
-            for j in range(output.size(0)):
-                total_tokens = int((output[j] != tokenizer.pad_token_id).sum().item())
-                prefill = prefill_lengths[j]
-                output_tokens = total_tokens - prefill
-                sample_idx = test_data[i + j]["index"]
-                batch_token_stats.append(
-                    {
-                        "sample_idx": sample_idx,
-                        "prefill_tokens": prefill,
-                        "output_tokens": output_tokens,
-                        "total_tokens": total_tokens,
-                    }
+                output = model.generate(
+                    **tokenized_prompts,
+                    max_length=args.max_length,
+                    do_sample=True,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    num_beams=1,
+                    num_return_sequences=1,
                 )
 
-            batch_outputs = tokenizer.batch_decode(
-                [output[j][prefill_lengths[j] :] for j in range(output.size(0))],
-                skip_special_tokens=True,
-            )
+                total_tokens = int((output[0] != tokenizer.pad_token_id).sum().item())
+                output_tokens = total_tokens - prefill_length
+                decoded = tokenizer.decode(
+                    output[0][prefill_length:], skip_special_tokens=True
+                )
 
-            torch.cuda.empty_cache()
-
-            for j in range(len(batch_outputs)):
-                data_idx = i + j
-                sample_idx = batch_token_stats[j]["sample_idx"]
-                record = test_data[data_idx]
-                record["prompt"] = batch_prompts[j]
-                record["output"] = batch_outputs[j]
-                record["prefill_tokens"] = batch_token_stats[j]["prefill_tokens"]
-                record["output_tokens"] = batch_token_stats[j]["output_tokens"]
-                record["total_tokens"] = batch_token_stats[j]["total_tokens"]
+                record = dict(test_data[local_idx])
+                record["prompt"] = prompt
+                record["output"] = decoded
+                record["prefill_tokens"] = prefill_length
+                record["output_tokens"] = output_tokens
+                record["total_tokens"] = total_tokens
                 record["sample_idx"] = sample_idx
+                record["draw_idx"] = start_draw + draw_idx
+
                 fout.write(json.dumps(record, ensure_ascii=False) + "\n")
+            torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":

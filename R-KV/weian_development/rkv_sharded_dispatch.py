@@ -19,7 +19,7 @@ from weian_development.process_utils import mask_process_command
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = PROJECT_ROOT / "R-KV" / "weian_script" / "configs" / "rkv_aime24_sharded.yaml"
 MERGE_SCRIPT = PROJECT_ROOT / "R-KV" / "weian_development" / "merge_rkv_shards.py"
-EVAL_SCRIPT = PROJECT_ROOT / "R-KV" / "HuggingFace" / "evaluation" / "eval_math.py"
+MULTI_EVAL_SCRIPT = PROJECT_ROOT / "R-KV" / "HuggingFace" / "evaluation" / "eval_math_multi.py"
 PATH_ARG_KEYS = {"output_dir", "dataset_path", "model_path", "tokenizer_path"}
 
 
@@ -63,6 +63,14 @@ def load_config(path: Path) -> Dict:
 def parse_gpu_string(value: str) -> List[str]:
     tokens = value.replace(",", " ").split()
     return [token.strip() for token in tokens if token.strip()]
+
+
+def compute_local_samples(num_samples: int, num_shards: int, shard_id: int) -> tuple[int, int]:
+    base = num_samples // num_shards
+    extra = num_samples % num_shards
+    start = shard_id * base + min(shard_id, extra)
+    count = base + (1 if shard_id < extra else 0)
+    return start, count
 
 
 def auto_detect_gpus(threshold: int) -> List[str]:
@@ -193,6 +201,7 @@ def terminate_active(active: Iterable[ActiveShard]) -> None:
 def run_shards(
     gpus: List[str],
     total_shards: int,
+    num_samples: int,
     base_cmd: List[str],
     base_env: Dict[str, str],
     log_dir: Path,
@@ -206,6 +215,10 @@ def run_shards(
     if skip_existing:
         shards_to_run = []
         for shard_id in range(total_shards):
+            _, local_count = compute_local_samples(num_samples, total_shards, shard_id)
+            if local_count == 0:
+                print(f"[skip] shard {shard_id} has 0 assigned samples, no output required.")
+                continue
             expected = output_dir / f"shard{shard_id:02d}.jsonl"
             if expected.exists() and expected.stat().st_size > 0:
                 print(f"[skip] shard {shard_id} output exists -> {expected}")
@@ -215,13 +228,23 @@ def run_shards(
             print("All shard outputs already exist; skipping shard launch.")
             return
     else:
-        shards_to_run = list(range(total_shards))
+        shards_to_run = []
+        for shard_id in range(total_shards):
+            _, local_count = compute_local_samples(num_samples, total_shards, shard_id)
+            if local_count == 0:
+                print(f"[skip] shard {shard_id} has 0 assigned samples, no output required.")
+                continue
+            shards_to_run.append(shard_id)
     if dry_run:
         for shard_id in shards_to_run:
+            _, local_count = compute_local_samples(num_samples, total_shards, shard_id)
+            if local_count == 0:
+                print(f"[dry-run] shard {shard_id} -> no assigned samples, skipping launch")
+                continue
             gpu = gpus[shard_id % len(gpus)]
             log_path = (log_dir / f"rkv_aime24_shard{shard_id:02d}.log").resolve()
             cmd_preview = base_cmd + ["--shard_id", str(shard_id)]
-            print(f"[dry-run] shard {shard_id} -> GPU {gpu}\n  log: {log_path}\n  cmd: {' '.join(cmd_preview)}")
+            print(f"[dry-run] shard {shard_id} -> GPU {gpu} (samples={local_count})\n  log: {log_path}\n  cmd: {' '.join(cmd_preview)}")
         return
     shard_queue: deque[int] = deque(shards_to_run)
     available: deque[str] = deque(gpus)
@@ -231,6 +254,11 @@ def run_shards(
             while shard_queue and available:
                 gpu = available.popleft()
                 shard_id = shard_queue.popleft()
+                _, local_count = compute_local_samples(num_samples, total_shards, shard_id)
+                if local_count == 0:
+                    print(f"[skip] shard {shard_id} has 0 assigned samples, continuing.")
+                    available.append(gpu)
+                    continue
                 active[gpu] = launch_shard(gpu, shard_id, base_cmd, base_env, log_dir)
             if not active:
                 continue
@@ -264,7 +292,7 @@ def merge_outputs(shard_output_dir: Path, merged_dir_name: str, skip_merge: bool
     subprocess.check_call(cmd, cwd=str(PROJECT_ROOT))
 
 
-def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Optional[Path], conda_env: str, dry_run: bool) -> None:
+def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Optional[Path], conda_env: str, dry_run: bool, num_samples: int | None = None) -> None:
     if not base_dir.exists():
         print(f"[eval] skip, base_dir not found: {base_dir}")
         return
@@ -277,7 +305,7 @@ def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Opti
         "-n",
         conda_env,
         "python",
-        str(EVAL_SCRIPT),
+        str(MULTI_EVAL_SCRIPT),
         "--base_dir",
         str(base_dir),
         "--dataset",
@@ -287,6 +315,8 @@ def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Opti
     ]
     if output_dir:
         cmd.extend(["--output_dir", str(output_dir)])
+    if num_samples:
+        cmd.extend(["--num_samples", str(num_samples)])
     if dry_run:
         print(f"[dry-run] eval command: {' '.join(cmd)}")
         return
@@ -320,10 +350,12 @@ def main() -> None:
     runner_args["model_path"] = resolve_path(runner_args["model_path"])
 
     base_cmd = build_base_command(conda_env, runner_path, format_runner_args(runner_args, total_shards))
+    num_samples = int(runner_args.get("num_samples", 64))
 
     run_shards(
         gpus,
         total_shards,
+        num_samples,
         base_cmd,
         base_env,
         log_dir,
@@ -337,7 +369,7 @@ def main() -> None:
         eval_output_dir = merged_dir.parent / "eval"
     if not args.no_eval:
         exp_name = experiment.get("name", merged_dir_name)
-        run_evaluation(merged_dir, args.dataset, exp_name, eval_output_dir, conda_env, args.dry_run)
+        run_evaluation(merged_dir, args.dataset, exp_name, eval_output_dir, conda_env, args.dry_run, num_samples)
 
 
 if __name__ == "__main__":

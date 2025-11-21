@@ -72,7 +72,7 @@ def save_token_lengths_to_csv(token_lengths, output_csv):
         # Writing the header
         header = ["Model"]  # First column is the model name
         for dataset in token_lengths[list(token_lengths.keys())[0]].keys():
-            header.extend([f"{dataset}-pre", f"{dataset}-out", f"{dataset}-tot])
+            header.extend([f"{dataset}-pre", f"{dataset}-out", f"{dataset}-tot"])
 
         writer.writerow(header)
 

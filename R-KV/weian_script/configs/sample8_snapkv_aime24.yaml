@@ -1,0 +1,28 @@
+experiment:
+  name: sample8_snapkv_aime24
+  conda_env: rkv
+  runner_path: R-KV/weian_development/rkv_sharded_runner.py
+  log_dir: R-KV/logs/sample8_snapkv_aime24
+  method_output_dir: R-KV/outputs/sample8_snapkv_aime24
+  merged_dir_name: merged
+  gpus: auto
+  auto_gpu_fallback: [0, 1, 2, 3, 4, 5, 6, 7]
+  num_shards: 8
+  gpu_memory_threshold: 200
+  env: {}
+  runner_args:
+    output_dir: R-KV/outputs/sample8_snapkv_aime24/shards
+    dataset_path: R-KV/HuggingFace/data/aime24.jsonl
+    model_path: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B
+    max_length: 32768
+    eval_batch_size: 1
+    seed: 42
+    method: snapkv
+    kv_budget: 2048
+    attn_implementation: sdpa
+    load_dtype: float16
+    fp32_topk: true
+    reset_cache_each_batch: true
+    num_samples: 8
+    temperature: 0.6
+    top_p: 0.95

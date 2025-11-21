@@ -33,10 +33,15 @@ def main() -> None:
     if not shard_files:
         raise FileNotFoundError(f"No shard files matching {args.pattern} under {shard_dir}")
 
+    def sort_key(item: Dict) -> tuple:
+        sample_idx = item.get("sample_idx", item.get("index", 0))
+        draw_idx = item.get("draw_idx", 0)
+        return (sample_idx, draw_idx)
+
     all_items: List[Dict] = []
     for path in shard_files:
         all_items.extend(load_shard(path))
-    all_items.sort(key=lambda x: x.get("index", x.get("sample_idx", 0)))
+    all_items.sort(key=sort_key)
 
     merged_path = merged_dir / "merged.jsonl"
     with merged_path.open("w") as fp:

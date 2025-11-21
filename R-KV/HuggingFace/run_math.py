@@ -21,12 +21,14 @@ from weian_development.rkv_cache_utils import reset_model_cache
 dataset2key = {
     "gsm8k": ["question", "answer"],
     "aime24": ["question", "answer"],
+    "aime25": ["question", "answer"],
     "math": ["problem", "answer"],
 }
 
 dataset2max_length = {
     "gsm8k": 8192,
-    "aime24": 16384,
+    "aime24": 32768,
+    "aime25": 32768,
     "math": 8192,
 }
 
@@ -84,61 +86,46 @@ def main(args):
             prompts.append(prompt)
             test_data.append(example)
 
-
-    for i in tqdm(range(0, len(prompts), args.eval_batch_size)):
-        batch_prompts = prompts[i : i + args.eval_batch_size]
+    for sample_idx, prompt in enumerate(tqdm(prompts)):
         tokenized_prompts = tokenizer(
-            batch_prompts,
+            [prompt],
             padding="longest",
             return_tensors="pt",
             add_special_tokens=True,
         ).to("cuda")
+        prefill_length = int(tokenized_prompts["attention_mask"].sum().item())
 
-        prefill_lengths = tokenized_prompts["attention_mask"].sum(dim=1).tolist()
+        for draw_idx in range(args.num_samples):
+            if args.reset_cache_each_batch:
+                reset_model_cache(model)
 
-        if args.reset_cache_each_batch:
-            reset_model_cache(model)
-
-        output = model.generate(
-            **tokenized_prompts,
-            max_length=args.max_length,
-            do_sample=False,
-            num_beams=1,
-        )
-
-        batch_token_stats = []
-        for j in range(output.size(0)):
-            total_tokens = int((output[j] != tokenizer.pad_token_id).sum().item())
-
-            prefill = prefill_lengths[j]
-            output_tokens = total_tokens - prefill
-
-            batch_token_stats.append(
-                {
-                    "sample_idx": i + j,
-                    "prefill_tokens": prefill,
-                    "output_tokens": output_tokens,
-                    "total_tokens": total_tokens,
-                }
+            output = model.generate(
+                **tokenized_prompts,
+                max_length=args.max_length,
+                do_sample=True,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                num_beams=1,
+                num_return_sequences=1,
             )
 
-        batch_outputs = tokenizer.batch_decode(
-            [output[j][prefill_lengths[j] :] for j in range(output.size(0))],
-            skip_special_tokens=True,
-        )
+            total_tokens = int((output[0] != tokenizer.pad_token_id).sum().item())
+            output_tokens = total_tokens - prefill_length
+            decoded = tokenizer.decode(
+                output[0][prefill_length:], skip_special_tokens=True
+            )
 
+            record = dict(test_data[sample_idx])
+            record["prompt"] = prompt
+            record["output"] = decoded
+            record["prefill_tokens"] = prefill_length
+            record["output_tokens"] = output_tokens
+            record["total_tokens"] = total_tokens
+            record["sample_idx"] = sample_idx
+            record["draw_idx"] = draw_idx
+
+            fout.write(json.dumps(record, ensure_ascii=False) + "\n")
         torch.cuda.empty_cache()
-
-        for j in range(len(batch_outputs)):
-            sample_idx = batch_token_stats[j]["sample_idx"]
-            test_data[sample_idx]["prompt"] = batch_prompts[j]
-            test_data[sample_idx]["output"] = batch_outputs[j]
-            test_data[sample_idx]["prefill_tokens"] = batch_token_stats[j]["prefill_tokens"]
-            test_data[sample_idx]["output_tokens"] = batch_token_stats[j]["output_tokens"]
-            test_data[sample_idx]["total_tokens"] = batch_token_stats[j]["total_tokens"]
-            test_data[sample_idx]["sample_idx"] = batch_token_stats[j]["sample_idx"]
-
-            fout.write(json.dumps(test_data[sample_idx], ensure_ascii=False) + "\n")
 
     fout.close()
 
@@ -194,6 +181,9 @@ def parse_arguments():
         choices=["think", "all"],
         help="whether to compress the whole model output or only the think part",
     )
+    parser.add_argument("--num_samples", type=int, default=64)
+    parser.add_argument("--temperature", type=float, default=0.6)
+    parser.add_argument("--top_p", type=float, default=0.95)
 
     return parser.parse_args()
 
@@ -204,7 +194,10 @@ if __name__ == "__main__":
     set_seed(args.seed)
 
     args.dataset_name = args.dataset_path.split("/")[-1].split(".")[0]
-    if args.max_length == -1: args.max_length = dataset2max_length[args.dataset_name]
+    if args.dataset_name in dataset2max_length:
+        args.max_length = dataset2max_length[args.dataset_name]
+    if args.eval_batch_size != 1:
+        raise ValueError("eval_batch_size must be 1 for current R-KV HuggingFace path.")
 
     # ====== build compression config ======
     compression_config = {

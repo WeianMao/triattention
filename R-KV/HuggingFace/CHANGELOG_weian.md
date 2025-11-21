@@ -1,3 +1,10 @@
+## 2025-03-xx (weian agent)
+
+- 增强 HuggingFace 跑法：`run_math.py` 与 `weian_development/rkv_sharded_eval.py` 支持 `num_samples`/`temperature`/`top_p`（默认 64/0.6/0.95），AIME24/25 默认 `max_length=32768`，强制 `eval_batch_size=1`，输出带 `draw_idx`。
+- 分片改为“每卡跑全集题目、均分采样次数”，按 `shard_id` 偏移随机种子；合并按 `(sample_idx, draw_idx)` 排序，调度默认跑多样本评测。
+- 新增多样本评估脚本 `evaluation/eval_math_multi.py`，`rkv_sharded_dispatch` 调用它生成 pass@1 统计。
+- 新增采样版脚本/YAML（64/8 draws）覆盖 rkv/fullkv/snapkv/streamingllm/h2o，输出与日志目录使用全新命名；`weian_script/README.md` 记录入口。
+
 ## 2025-02-17 (weian agent)
 
 ### 变更概览
