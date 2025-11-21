@@ -205,7 +205,7 @@ def main(args: argparse.Namespace) -> None:
         elif "qwen" in args.model_path.lower():
             replace_qwen2(compression_config)
         else:
-        raise ValueError(f"Unsupported model: {args.model_path}")
+            raise ValueError(f"Unsupported model: {args.model_path}")
 
     dtype = resolve_torch_dtype(args.load_dtype)
 
