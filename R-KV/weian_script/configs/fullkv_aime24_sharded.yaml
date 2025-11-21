@@ -21,3 +21,4 @@ experiment:
     attn_implementation: sdpa
     load_dtype: float16
     reset_cache_each_batch: true
+    fp32_topk: true
