@@ -24,6 +24,6 @@ Progress notes
 
 Recent maintenance (2025-03-xx)
 - Updated R1KV modeling: reset `self.length` per sample; fixes compression phase mismatch (single vs sharded outputs now对齐).
-- Refreshed AIME24 baselines: `run_rkv_aime24_single.sh` (wrapper `run_rkv_aime24.sh`) and `run_rkv_aime24_sharded.sh` now use sdpa + fp16 + fp32_topk + reset, outputs under `R-KV/outputs/...`, auto-eval to `R-KV/HuggingFace/outputs/output_sdpa_fp16_reset_eval` (single) or `.../eval` (sharded). Updated `configs/rkv_aime24_sharded.yaml` accordingly.
-- Tidied `weian_script`: archived legacy/test R-KV launchers and ablations into `weian_script/archive/` (and configs under `weian_script/configs/archive/`); README documents the new baseline entry points.
-- Aligned other sharded methods (fullkv/snapkv/streamingllm/h2o) to sdpa + fp16 + reset (fp32_topk where applicable); outputs/log dirs renamed with `_sdpa_fp16_reset` suffix.
+- Refreshed AIME24 baselines: `run_rkv_aime24_single.sh` (wrapper `run_rkv_aime24.sh`) 和 `run_rkv_aime24_sharded.sh` 统一为 sdpa + fp16 + fp32_topk + reset，输出归一到 `R-KV/outputs/rkv_aime24_single_sdpa_fp16_reset` / `R-KV/outputs/rkv_aime24_sharded_sdpa_fp16_reset`，单卡自动评测写入 `R-KV/HuggingFace/outputs/output_sdpa_fp16_reset_eval`，分片评测在对应 `eval/` 子目录；`configs/rkv_aime24_sharded.yaml` 已更新。
+- Tidied `weian_script`: 历史/测试型 R-KV 启动脚本与 ablations 归档到 `weian_script/archive/`（配置到 `weian_script/configs/archive/`），README 标注现行入口。
+- 其他 sharded 方法（fullkv/snapkv/streamingllm/h2o）对齐 sdpa + fp16 + reset（适用时附 fp32_topk），输出/日志目录带 `_sdpa_fp16_reset` 后缀；新增 fullkv flash-attn 变体 `run_fullkv_aime24_sharded_flash.sh`。
