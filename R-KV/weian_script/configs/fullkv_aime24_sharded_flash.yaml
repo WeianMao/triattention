@@ -1,0 +1,23 @@
+experiment:
+  name: fullkv_aime24_sharded_flash
+  conda_env: rkv
+  runner_path: R-KV/weian_development/rkv_sharded_runner.py
+  log_dir: R-KV/logs/fullkv_aime24_sharded_flash
+  method_output_dir: R-KV/outputs/fullkv_aime24_sharded_flash
+  merged_dir_name: merged
+  gpus: auto
+  auto_gpu_fallback: [0, 1, 2, 3, 4, 5, 6, 7]
+  num_shards: 8
+  gpu_memory_threshold: 200
+  env: {}
+  runner_args:
+    output_dir: R-KV/outputs/fullkv_aime24_sharded_flash/shards
+    dataset_path: R-KV/HuggingFace/data/aime24.jsonl
+    model_path: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B
+    max_length: 16384
+    eval_batch_size: 1
+    method: fullkv
+    kv_budget: null
+    attn_implementation: flash_attention_2
+    load_dtype: float16
+    reset_cache_each_batch: true
