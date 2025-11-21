@@ -1,9 +1,9 @@
 experiment:
-  name: snapkv_aime24_sharded
+  name: snapkv_aime24_sharded_sdpa_fp16_reset
   conda_env: rkv
   runner_path: R-KV/weian_development/rkv_sharded_runner.py
-  log_dir: R-KV/logs/snapkv_aime24_sharded
-  method_output_dir: R-KV/outputs/snapkv_aime24_sharded
+  log_dir: R-KV/logs/snapkv_aime24_sharded_sdpa_fp16_reset
+  method_output_dir: R-KV/outputs/snapkv_aime24_sharded_sdpa_fp16_reset
   merged_dir_name: merged
   gpus: auto
   auto_gpu_fallback: [0, 1, 2, 3, 4, 5, 6, 7]
@@ -11,11 +11,14 @@ experiment:
   gpu_memory_threshold: 200
   env: {}
   runner_args:
-    output_dir: R-KV/outputs/snapkv_aime24_sharded/shards
+    output_dir: R-KV/outputs/snapkv_aime24_sharded_sdpa_fp16_reset/shards
     dataset_path: R-KV/HuggingFace/data/aime24.jsonl
     model_path: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B
     max_length: 16384
     eval_batch_size: 1
     method: snapkv
     kv_budget: 2048
-    attn_implementation: flash_attention_2
+    attn_implementation: sdpa
+    load_dtype: float16
+    fp32_topk: true
+    reset_cache_each_batch: true

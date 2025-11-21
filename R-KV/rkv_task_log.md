@@ -26,3 +26,4 @@ Recent maintenance (2025-03-xx)
 - Updated R1KV modeling: reset `self.length` per sample; fixes compression phase mismatch (single vs sharded outputs now对齐).
 - Refreshed AIME24 baselines: `run_rkv_aime24_single.sh` (wrapper `run_rkv_aime24.sh`) and `run_rkv_aime24_sharded.sh` now use sdpa + fp16 + fp32_topk + reset, outputs under `R-KV/outputs/...`, auto-eval to `R-KV/HuggingFace/outputs/output_sdpa_fp16_reset_eval` (single) or `.../eval` (sharded). Updated `configs/rkv_aime24_sharded.yaml` accordingly.
 - Tidied `weian_script`: archived legacy/test R-KV launchers and ablations into `weian_script/archive/` (and configs under `weian_script/configs/archive/`); README documents the new baseline entry points.
+- Aligned other sharded methods (fullkv/snapkv/streamingllm/h2o) to sdpa + fp16 + reset (fp32_topk where applicable); outputs/log dirs renamed with `_sdpa_fp16_reset` suffix.
