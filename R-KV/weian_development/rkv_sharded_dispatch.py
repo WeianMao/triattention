@@ -215,14 +215,12 @@ def terminate_active(active: Iterable[ActiveShard]) -> None:
 def run_shards(
     gpus: List[str],
     total_shards: int,
-    num_samples: int,
     base_cmd: List[str],
     base_env: Dict[str, str],
     log_dir: Path,
     dry_run: bool,
     output_dir: Path,
     skip_existing: bool,
-    num_shards: int,
     num_samples: int,
 ) -> None:
     if not gpus:
@@ -376,7 +374,6 @@ def main() -> None:
         args.dry_run,
         runner_args["output_dir"],
         args.skip_existing,
-        total_shards,
         num_samples,
     )
     merge_outputs(runner_args["output_dir"], merged_dir_name, args.skip_merge, args.dry_run)
