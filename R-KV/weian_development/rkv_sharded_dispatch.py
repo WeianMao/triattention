@@ -73,6 +73,20 @@ def compute_local_samples(num_samples: int, num_shards: int, shard_id: int) -> t
     return start, count
 
 
+def shard_completed(output_dir: Path, shard_id: int, expected: int) -> bool:
+    path = output_dir / f"shard{shard_id:02d}.jsonl"
+    if not path.exists() or path.stat().st_size == 0:
+        return False
+    if expected <= 0:
+        return True
+    try:
+        with path.open() as fp:
+            lines = sum(1 for _ in fp)
+        return lines >= expected
+    except Exception:
+        return False
+
+
 def auto_detect_gpus(threshold: int) -> List[str]:
     cmd = [
         "nvidia-smi",
@@ -208,6 +222,8 @@ def run_shards(
     dry_run: bool,
     output_dir: Path,
     skip_existing: bool,
+    num_shards: int,
+    num_samples: int,
 ) -> None:
     if not gpus:
         raise ValueError("No GPUs available to schedule shards")
@@ -219,9 +235,8 @@ def run_shards(
             if local_count == 0:
                 print(f"[skip] shard {shard_id} has 0 assigned samples, no output required.")
                 continue
-            expected = output_dir / f"shard{shard_id:02d}.jsonl"
-            if expected.exists() and expected.stat().st_size > 0:
-                print(f"[skip] shard {shard_id} output exists -> {expected}")
+            if shard_completed(output_dir, shard_id, local_count):
+                print(f"[skip] shard {shard_id} already has >= {local_count} records.")
                 continue
             shards_to_run.append(shard_id)
         if not shards_to_run:
@@ -355,13 +370,14 @@ def main() -> None:
     run_shards(
         gpus,
         total_shards,
-        num_samples,
         base_cmd,
         base_env,
         log_dir,
         args.dry_run,
         runner_args["output_dir"],
         args.skip_existing,
+        total_shards,
+        num_samples,
     )
     merge_outputs(runner_args["output_dir"], merged_dir_name, args.skip_merge, args.dry_run)
     merged_dir = runner_args["output_dir"].parent / merged_dir_name
