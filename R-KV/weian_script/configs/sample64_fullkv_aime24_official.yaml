@@ -16,7 +16,7 @@ experiment:
     model_path: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B
     max_length: 32768
     eval_batch_size: 1
-    seed: 123
+    seed: 666
     method: fullkv
     kv_budget: null
     attn_implementation: flash_attention_2
