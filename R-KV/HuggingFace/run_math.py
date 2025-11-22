@@ -157,7 +157,7 @@ def parse_arguments():
     parser.add_argument("--kv_budget", type=int, default=None)
     parser.add_argument("--window_size", type=int, default=8)
     parser.add_argument("--first_tokens", type=int, default=4)
-    parser.add_argument("--mix_lambda", type=float, default=0.07)
+    parser.add_argument("--mix_lambda", type=float, default=0.1)
     parser.add_argument("--retain_ratio", type=float, default=0.2)
     parser.add_argument("--update_kv", type=str2bool, default=True)
     parser.add_argument("--fp32_topk", type=str2bool, default=False)

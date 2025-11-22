@@ -14,7 +14,7 @@ experiment:
     output_dir: R-KV/outputs/fullkv_aime24_sharded_sdpa_fp16_reset/shards
     dataset_path: R-KV/HuggingFace/data/aime24.jsonl
     model_path: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B
-    max_length: 16384
+    max_length: 32768
     eval_batch_size: 1
     method: fullkv
     kv_budget: null

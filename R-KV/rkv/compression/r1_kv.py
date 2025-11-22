@@ -11,7 +11,7 @@ class R1KV:
         budget=128,
         window_size=8,
         kernel_size=7,
-        mix_lambda=0.07,
+        mix_lambda=0.1,
         retain_ratio=0.1,
         retain_direction="last",
         record_kept_token_indices=False,
