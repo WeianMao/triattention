@@ -170,17 +170,23 @@ def main(args: argparse.Namespace) -> None:
 
     prompts, test_data = load_dataset(Path(args.dataset_path), args.dataset_name, args.shard_id, args.num_shards)
 
+    method_config = {"budget": args.kv_budget, "window_size": args.window_size}
+    if args.method in {"rkv", "snapkv"}:
+        method_config.update(
+            {
+                "mix_lambda": args.mix_lambda,
+                "retain_ratio": args.retain_ratio,
+                "retain_direction": args.retain_direction,
+                "first_tokens": args.first_tokens,
+                "fp32_topk": args.fp32_topk,
+            }
+        )
+    elif args.method == "streamingllm":
+        method_config.update({"first_tokens": args.first_tokens})
+
     compression_config = {
         "method": args.method,
-        "method_config": {
-            "budget": args.kv_budget,
-            "window_size": args.window_size,
-            "mix_lambda": args.mix_lambda,
-            "retain_ratio": args.retain_ratio,
-            "retain_direction": args.retain_direction,
-            "first_tokens": args.first_tokens,
-            "fp32_topk": args.fp32_topk,
-        },
+        "method_config": method_config,
         "compression": None,
         "update_kv": args.update_kv,
     }

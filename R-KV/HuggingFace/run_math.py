@@ -200,17 +200,23 @@ if __name__ == "__main__":
         raise ValueError("eval_batch_size must be 1 for current R-KV HuggingFace path.")
 
     # ====== build compression config ======
+    method_config = {"budget": args.kv_budget, "window_size": args.window_size}
+    if args.method in {"rkv", "snapkv"}:
+        method_config.update(
+            {
+                "mix_lambda": args.mix_lambda,
+                "retain_ratio": args.retain_ratio,
+                "retain_direction": args.retain_direction,
+                "first_tokens": args.first_tokens,
+                "fp32_topk": args.fp32_topk,
+            }
+        )
+    elif args.method == "streamingllm":
+        method_config.update({"first_tokens": args.first_tokens})
+
     compression_config = {
         "method": args.method,
-        "method_config": {
-            "budget": args.kv_budget,
-            "window_size": args.window_size,
-            "mix_lambda": args.mix_lambda,
-            "retain_ratio": args.retain_ratio,
-            "retain_direction": args.retain_direction,
-            "first_tokens": args.first_tokens,
-            "fp32_topk": args.fp32_topk,
-        },
+        "method_config": method_config,
         "compression": None,
         "update_kv": args.update_kv
     }
