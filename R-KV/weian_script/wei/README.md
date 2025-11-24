@@ -12,3 +12,13 @@
 - 输出目录位于 `R-KV/outputs/sample64_*_aime24_official/`（各方法对应的子目录）。
 
 可选参数：脚本透传额外参数到 `rkv_sharded_dispatch.py`，例如指定 GPU `--gpus 0,1`。***
+
+# 环境安装（rkv）
+在仓库根目录执行：
+1. 新建环境：`conda env create -n rkv -f R-KV/environment.yml`
+2. 已存在同名环境且需同步：`conda env update -n rkv -f R-KV/environment.yml`
+3. 激活：`conda activate rkv`
+
+注意事项：
+- 该 `environment.yml` 采用 `--no-builds` 导出，如目标机器已有 GPU 驱动/CUDA 对应的 `torch` 支持即可；若需特定 CUDA 版本可自行在安装后调整 `pytorch-cuda`。
+- 推荐设置缓存（可选）：`export HF_HOME=/data/rbg/users/weian/.cache/huggingface`、`export PIP_CACHE_DIR=/data/rbg/users/weian/.cache/pip`。
