@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -85,18 +86,56 @@ def compute_local_samples(num_samples: int, num_shards: int, shard_id: int) -> t
     return start, count
 
 
-def shard_completed(output_dir: Path, shard_id: int, expected: int) -> bool:
-    path = output_dir / f"shard{shard_id:02d}.jsonl"
-    if not path.exists() or path.stat().st_size == 0:
+def shard_run_dir(base_dir: Path, shard_id: int) -> Path:
+    return base_dir / f"shard{shard_id:02d}"
+
+
+def run_paths(base_dir: Path, shard_id: int, run_id: int) -> tuple[Path, Path]:
+    run_dir = shard_run_dir(base_dir, shard_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    run_path = run_dir / f"run{run_id:03d}.jsonl"
+    meta_path = run_dir / f"run{run_id:03d}.meta.json"
+    return run_path, meta_path
+
+
+def run_completed(base_dir: Path, shard_id: int, run_id: int, expected_records: int) -> bool:
+    run_path, meta_path = run_paths(base_dir, shard_id, run_id)
+    if not run_path.exists() or run_path.stat().st_size == 0 or not meta_path.exists():
         return False
-    if expected <= 0:
-        return True
     try:
-        with path.open() as fp:
-            lines = sum(1 for _ in fp)
-        return lines >= expected
+        with meta_path.open() as meta_fp:
+            meta = json.load(meta_fp)
+        status_ok = meta.get("status") == "complete"
+        recorded = int(meta.get("records", -1))
     except Exception:
         return False
+    if not status_ok:
+        return False
+    if expected_records > 0 and recorded >= 0 and recorded < expected_records:
+        return False
+    if expected_records <= 0:
+        return True
+    try:
+        with run_path.open() as fp:
+            lines = sum(1 for _ in fp)
+        return lines >= expected_records
+    except Exception:
+        return False
+
+
+def count_dataset_examples(dataset_path: Path, max_examples: int | None = None) -> int:
+    count = 0
+    with dataset_path.open("r", encoding="utf-8") as fp:
+        for count, _ in enumerate(fp, start=1):
+            if max_examples is not None and count >= max_examples:
+                return max_examples
+    return count
+
+
+def questions_for_shard(total_questions: int, num_shards: int, shard_id: int) -> int:
+    base = total_questions // num_shards
+    extra = total_questions % num_shards
+    return base + (1 if shard_id < extra else 0)
 
 
 def auto_detect_gpus(threshold: int) -> List[str]:
@@ -234,20 +273,28 @@ def run_shards(
     output_dir: Path,
     skip_existing: bool,
     num_samples: int,
+    total_questions: int | None = None,
 ) -> None:
     if not gpus:
         raise ValueError("No GPUs available to schedule shards")
     shards_to_run: List[int]
+    pending_runs: Dict[int, List[int]] = {}
+    expected_records = total_questions if total_questions is not None else 0
     if skip_existing:
         shards_to_run = []
         for shard_id in range(total_shards):
-            _, local_count = compute_local_samples(num_samples, total_shards, shard_id)
+            start_draw, local_count = compute_local_samples(num_samples, total_shards, shard_id)
             if local_count == 0:
-                print(f"[skip] shard {shard_id} has 0 assigned samples, no output required.")
+                print(f"[skip] shard {shard_id} has 0 assigned runs, no output required.")
                 continue
-            if shard_completed(output_dir, shard_id, local_count):
-                print(f"[skip] shard {shard_id} already has >= {local_count} records.")
+            missing = []
+            for run_id in range(start_draw, start_draw + local_count):
+                if not run_completed(output_dir, shard_id, run_id, expected_records):
+                    missing.append(run_id)
+            if not missing:
+                print(f"[skip] shard {shard_id} has all {local_count} runs completed.")
                 continue
+            pending_runs[shard_id] = missing
             shards_to_run.append(shard_id)
         if not shards_to_run:
             print("All shard outputs already exist; skipping shard launch.")
@@ -257,19 +304,20 @@ def run_shards(
         for shard_id in range(total_shards):
             _, local_count = compute_local_samples(num_samples, total_shards, shard_id)
             if local_count == 0:
-                print(f"[skip] shard {shard_id} has 0 assigned samples, no output required.")
+                print(f"[skip] shard {shard_id} has 0 assigned runs, no output required.")
                 continue
             shards_to_run.append(shard_id)
     if dry_run:
         for shard_id in shards_to_run:
-            _, local_count = compute_local_samples(num_samples, total_shards, shard_id)
-            if local_count == 0:
-                print(f"[dry-run] shard {shard_id} -> no assigned samples, skipping launch")
-                continue
+            start_draw, local_count = compute_local_samples(num_samples, total_shards, shard_id)
             gpu = gpus[shard_id % len(gpus)]
             log_path = (log_dir / f"rkv_aime24_shard{shard_id:02d}.log").resolve()
             cmd_preview = base_cmd + ["--shard_id", str(shard_id)]
-            print(f"[dry-run] shard {shard_id} -> GPU {gpu} (samples={local_count})\n  log: {log_path}\n  cmd: {' '.join(cmd_preview)}")
+            runs_preview = pending_runs.get(shard_id)
+            run_span = f"runs={local_count}"
+            if runs_preview is not None:
+                run_span = f"missing_runs={runs_preview}"
+            print(f"[dry-run] shard {shard_id} -> GPU {gpu} ({run_span})\n  log: {log_path}\n  cmd: {' '.join(cmd_preview)}")
         return
     shard_queue: deque[int] = deque(shards_to_run)
     available: deque[str] = deque(gpus)
@@ -281,7 +329,7 @@ def run_shards(
                 shard_id = shard_queue.popleft()
                 _, local_count = compute_local_samples(num_samples, total_shards, shard_id)
                 if local_count == 0:
-                    print(f"[skip] shard {shard_id} has 0 assigned samples, continuing.")
+                    print(f"[skip] shard {shard_id} has 0 assigned runs, continuing.")
                     available.append(gpu)
                     continue
                 active[gpu] = launch_shard(gpu, shard_id, base_cmd, base_env, log_dir)
@@ -370,9 +418,16 @@ def main() -> None:
     base_env = prepare_environment(experiment.get("env", {}))
     base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 
-    runner_args["output_dir"] = resolve_path(runner_args.get("output_dir", method_output_dir / "shards"))
+    runner_args["output_dir"] = resolve_path(args.output_dir or runner_args.get("output_dir", method_output_dir / "shards"))
     runner_args["dataset_path"] = resolve_path(runner_args["dataset_path"])
     runner_args["model_path"] = resolve_path(runner_args["model_path"])
+    max_examples = runner_args.get("max_examples")
+    try:
+        max_examples = int(max_examples) if max_examples is not None else None
+    except Exception:
+        max_examples = None
+
+    dataset_example_count = count_dataset_examples(runner_args["dataset_path"], max_examples)
 
     base_cmd = build_base_command(conda_env, runner_path, format_runner_args(runner_args, total_shards))
     num_samples = int(runner_args.get("num_samples", 64))
@@ -387,6 +442,7 @@ def main() -> None:
         runner_args["output_dir"],
         args.skip_existing,
         num_samples,
+        total_questions=dataset_example_count,
     )
     merge_outputs(runner_args["output_dir"], merged_dir_name, args.skip_merge, args.dry_run)
     merged_dir = runner_args["output_dir"].parent / merged_dir_name

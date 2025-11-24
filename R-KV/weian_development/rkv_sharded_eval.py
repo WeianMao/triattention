@@ -6,11 +6,18 @@ import json
 import random
 import sys
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List
 
 import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from weian_development.hf_offline_runner_sparse.example_offline_hf_serialized import (
+    run_sparse_generation,
+)
+from weian_development.hf_offline_runner_sparse.sparse_round_pruner_prefill_keep import (
+    SparsePruningConfig,
+    SparseRoundPruner,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = REPO_ROOT / "R-KV"
@@ -36,6 +43,9 @@ dataset2max_length = {
     "aime25": 32768,
     "math": 8192,
 }
+
+DEFAULT_CHAT_SYSTEM = "You are a helpful assistant."
+RUN_SEED_STRIDE = 1_000_000
 
 
 def set_seed(seed: int) -> None:
@@ -71,6 +81,53 @@ def resolve_torch_dtype(name: str):
     raise ValueError(f"Unsupported dtype: {name}")
 
 
+def compute_local_runs(num_samples: int, num_shards: int, shard_id: int) -> tuple[int, int]:
+    base = num_samples // num_shards
+    extra = num_samples % num_shards
+    start = shard_id * base + min(shard_id, extra)
+    count = base + (1 if shard_id < extra else 0)
+    return start, count
+
+
+def shard_run_dir(base_dir: Path, shard_id: int) -> Path:
+    return base_dir / f"shard{shard_id:02d}"
+
+
+def run_artifacts(base_dir: Path, shard_id: int, run_id: int) -> dict[str, Path]:
+    run_dir = shard_run_dir(base_dir, shard_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    stem = run_dir / f"run{run_id:03d}"
+    return {
+        "run": stem.with_suffix(".jsonl"),
+        "tmp": stem.with_suffix(".jsonl.tmp"),
+        "meta": stem.with_suffix(".meta.json"),
+        "meta_tmp": stem.with_suffix(".meta.json.tmp"),
+    }
+
+
+def run_is_complete(run_path: Path, meta_path: Path, expected_records: int) -> bool:
+    if not run_path.exists() or run_path.stat().st_size == 0 or not meta_path.exists():
+        return False
+    try:
+        with meta_path.open() as fp:
+            meta = json.load(fp)
+    except Exception:
+        return False
+    if meta.get("status") != "complete":
+        return False
+    recorded = meta.get("records")
+    if expected_records > 0 and isinstance(recorded, int) and recorded < expected_records:
+        return False
+    if expected_records <= 0:
+        return True
+    try:
+        with run_path.open() as fp:
+            lines = sum(1 for _ in fp)
+        return lines >= expected_records
+    except Exception:
+        return False
+
+
 def load_dataset(path: Path, dataset_name: str, shard_id: int, num_shards: int) -> List[dict]:
     prompts: List[str] = []
     test_data: List[dict] = []
@@ -104,7 +161,12 @@ def parse_arguments() -> argparse.Namespace:
         default="flash_attention_2",
         choices=["flash_attention_2", "sdpa", "eager"],
     )
-    parser.add_argument("--method", type=str, default=None, choices=["rkv", "fullkv", "snapkv", "streamingllm", "h2o"])
+    parser.add_argument(
+        "--method",
+        type=str,
+        default=None,
+        choices=["rkv", "fullkv", "snapkv", "streamingllm", "h2o", "sparse_round_prefill_keep", "speckv"],
+    )
     parser.add_argument("--kv_budget", "--kv-budget", dest="kv_budget", type=int, default=None)
     parser.add_argument("--window_size", "--window-size", dest="window_size", type=int, default=8)
     parser.add_argument("--first_tokens", "--first-tokens", dest="first_tokens", type=int, default=4)
@@ -144,7 +206,172 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--num_samples", type=int, default=64)
     parser.add_argument("--temperature", type=float, default=0.6)
     parser.add_argument("--top_p", type=float, default=0.95)
+    parser.add_argument(
+        "--sparse_stats_path",
+        type=str,
+        default=None,
+        help="Stats file for sparse round pruning (required when method=sparse_round_prefill_keep).",
+    )
+    parser.add_argument(
+        "--sparse_round_window",
+        type=int,
+        default=None,
+        help="Round window for sparse pruning (defaults to window_size when unset).",
+    )
+    parser.add_argument(
+        "--sparse_offset_max_length",
+        type=int,
+        default=65536,
+        help="Maximum offset length for sparse pruning frequency scoring.",
+    )
+    parser.add_argument(
+        "--sparse_score_aggregation",
+        type=str,
+        default="mean",
+        choices=["mean", "max"],
+        help="Aggregation strategy for sparse round pruning scores.",
+    )
+    parser.add_argument(
+        "--sparse_seed",
+        type=int,
+        default=0,
+        help="Seed used by sparse pruner for noise / head shuffling.",
+    )
+    parser.add_argument(
+        "--sparse_head_limit",
+        type=int,
+        default=None,
+        help="Optional head limit for sparse stats (None keeps all sampled heads).",
+    )
+    parser.add_argument(
+        "--use_chat_template",
+        type=str2bool,
+        default=False,
+        help="Wrap prompts with tokenizer.apply_chat_template when using sparse pruning.",
+    )
+    parser.add_argument(
+        "--chat_system_prompt",
+        type=str,
+        default=DEFAULT_CHAT_SYSTEM,
+        help="System prompt used when --use_chat_template is enabled for sparse pruning.",
+    )
+    parser.add_argument(
+        "--max_examples",
+        type=int,
+        default=None,
+        help="Optional cap on number of dataset examples for quick smoke tests.",
+    )
     return parser.parse_args()
+
+
+def configure_tokenizer(tokenizer: AutoTokenizer) -> AutoTokenizer:
+    tokenizer.padding_side = "left"
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+    return tokenizer
+
+
+def compute_available_new_tokens(max_length: int, prompt_length: int, model, tokenizer) -> int:
+    candidate_context_lengths: List[int] = []
+    for attr in (
+        "max_position_embeddings",
+        "max_sequence_length",
+        "n_positions",
+        "max_seq_len",
+        "window",
+        "context_length",
+    ):
+        value = getattr(model.config, attr, None)
+        if isinstance(value, int) and value > 0:
+            candidate_context_lengths.append(value)
+
+    tokenizer_limit = getattr(tokenizer, "model_max_length", None)
+    if isinstance(tokenizer_limit, int) and 0 < tokenizer_limit < 10**7:
+        candidate_context_lengths.append(tokenizer_limit)
+
+    context_cap = max(candidate_context_lengths) if candidate_context_lengths else None
+    if max_length and max_length > 0:
+        context_cap = max_length if context_cap is None else min(context_cap, max_length)
+    if context_cap is None:
+        return 1
+    available = context_cap - prompt_length
+    return max(1, available)
+
+
+def build_sparse_pruner_config(args: argparse.Namespace, device: torch.device, max_keys: int, model_path: Path) -> SparsePruningConfig:
+    stats_path = args.sparse_stats_path
+    if not stats_path:
+        raise ValueError("sparse_stats_path is required for sparse_round_prefill_keep.")
+    resolved_stats = Path(stats_path)
+    if not resolved_stats.is_absolute():
+        resolved_stats = (REPO_ROOT / resolved_stats).resolve()
+    if not resolved_stats.exists():
+        raise FileNotFoundError(f"Sparse stats file not found: {resolved_stats}")
+
+    round_window = args.sparse_round_window if args.sparse_round_window and args.sparse_round_window > 0 else args.window_size
+    return SparsePruningConfig(
+        stats_path=resolved_stats,
+        model_path=model_path,
+        device=device,
+        dtype=torch.float32,
+        max_keys=max_keys,
+        round_window=round_window,
+        offset_max_length=args.sparse_offset_max_length,
+        score_aggregation=args.sparse_score_aggregation,
+        seed=args.sparse_seed,
+        head_limit=args.sparse_head_limit,
+    )
+
+
+def format_prompt(question: str, tokenizer: AutoTokenizer, use_chat_template: bool, system_prompt: str) -> str:
+    base_prompt = prompt_template.format(question=question, answer="")
+    if not use_chat_template:
+        return base_prompt
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": base_prompt},
+    ]
+    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+
+def run_sparse_round_generation(
+    args: argparse.Namespace,
+    tokenizer: AutoTokenizer,
+    model,
+    question: str,
+    max_length: int,
+    pruner_cfg: SparsePruningConfig,
+) -> tuple[str, int, int, str]:
+    prompt = format_prompt(question, tokenizer, args.use_chat_template, args.chat_system_prompt)
+    tokenized_prompts = tokenizer(
+        [prompt],
+        padding="longest",
+        return_tensors="pt",
+        add_special_tokens=False,
+    ).to(model.device)
+    prompt_length = int(tokenized_prompts["attention_mask"].sum().item())
+    max_new_tokens = compute_available_new_tokens(max_length, prompt_length, model, tokenizer)
+
+    pruner = SparseRoundPruner(pruner_cfg)
+    do_sample = True
+    sequence, _ = run_sparse_generation(
+        model=model,
+        input_ids=tokenized_prompts["input_ids"],
+        max_new_tokens=max_new_tokens,
+        eos_token_id=tokenizer.eos_token_id,
+        do_sample=do_sample,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=0,
+        store_logprobs=False,
+        pruner=pruner,
+    )
+
+    total_tokens = int(sequence[0].numel())
+    output_tokens = total_tokens - prompt_length
+    decoded = tokenizer.decode(sequence[0][prompt_length:], skip_special_tokens=True)
+    return decoded, prompt_length, output_tokens, prompt
 
 
 def main(args: argparse.Namespace) -> None:
@@ -156,38 +383,100 @@ def main(args: argparse.Namespace) -> None:
         raise ValueError("eval_batch_size must be 1 for current R-KV sharded runner.")
 
     total_samples = args.num_samples
-    base = total_samples // args.num_shards
-    extra = total_samples % args.num_shards
-    local_samples = base + (1 if args.shard_id < extra else 0)
-    start_draw = args.shard_id * base + min(args.shard_id, extra)
+    start_draw, local_samples = compute_local_runs(total_samples, args.num_shards, args.shard_id)
     if local_samples == 0:
         return
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_name = args.output_name or f"shard{args.shard_id:02d}.jsonl"
-    save_path = output_dir / output_name
+    run_ids = list(range(start_draw, start_draw + local_samples))
+    output_root = Path(args.output_dir)
 
-    existing_draws: Dict[int, Set[int]] = {}
-    if save_path.exists():
-        with save_path.open() as fin:
-            for line in fin:
-                try:
-                    item = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                sample_idx = item.get("sample_idx", item.get("idx"))
-                draw_idx = item.get("draw_idx")
-                if sample_idx is None or draw_idx is None:
-                    continue
-                try:
-                    sample_idx_int = int(sample_idx)
-                    draw_idx_int = int(draw_idx)
-                except (TypeError, ValueError):
-                    continue
-                existing_draws.setdefault(sample_idx_int, set()).add(draw_idx_int)
+    method_lower = args.method.lower() if args.method else ""
+    use_sparse_round = method_lower in {"sparse_round_prefill_keep", "speckv"}
+
+    if use_sparse_round and args.kv_budget is None:
+        raise ValueError("kv_budget must be provided for sparse_round_prefill_keep.")
 
     prompts, test_data = load_dataset(Path(args.dataset_path), args.dataset_name, args.shard_id, args.num_shards)
+    if args.max_examples and args.max_examples > 0:
+        prompts = prompts[: args.max_examples]
+        test_data = test_data[: args.max_examples]
+    expected_records = len(test_data)
+    if expected_records == 0:
+        return
+
+    if use_sparse_round:
+        tokenizer = configure_tokenizer(
+            AutoTokenizer.from_pretrained(args.model_path, use_fast=True, padding_side="left")
+        )
+        dtype = resolve_torch_dtype(args.load_dtype)
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_path,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            use_cache=True,
+            attn_implementation=args.attn_implementation,
+        )
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model.to(device)
+        model.eval()
+
+        pruner_cfg = build_sparse_pruner_config(
+            args,
+            device=device,
+            max_keys=int(args.kv_budget),
+            model_path=Path(args.model_path),
+        )
+        for run_id in run_ids:
+            artifacts = run_artifacts(output_root, args.shard_id, run_id)
+            if run_is_complete(artifacts["run"], artifacts["meta"], expected_records):
+                continue
+            for stale in ("meta", "meta_tmp", "tmp"):
+                path = artifacts[stale]
+                if path.exists():
+                    path.unlink()
+
+            with artifacts["tmp"].open("w") as fout:
+                for example in test_data:
+                    question = example["question"]
+                    sample_idx = example["index"]
+                    seed_value = args.seed + run_id * RUN_SEED_STRIDE + sample_idx
+                    set_seed(seed_value)
+
+                    decoded, prefill_tokens, output_tokens, rendered_prompt = run_sparse_round_generation(
+                        args,
+                        tokenizer,
+                        model,
+                        question,
+                        args.max_length,
+                        pruner_cfg,
+                    )
+                    total_tokens = prefill_tokens + output_tokens
+
+                    record = dict(example)
+                    record["prompt"] = rendered_prompt
+                    record["output"] = decoded
+                    record["prefill_tokens"] = prefill_tokens
+                    record["output_tokens"] = output_tokens
+                    record["total_tokens"] = total_tokens
+                    record["sample_idx"] = sample_idx
+                    record["draw_idx"] = run_id
+
+                    fout.write(json.dumps(record, ensure_ascii=False) + "\n")
+                torch.cuda.empty_cache()
+
+            meta_tmp = artifacts["meta_tmp"]
+            meta = {
+                "status": "complete",
+                "records": expected_records,
+                "run_id": run_id,
+                "shard_id": args.shard_id,
+            }
+            with meta_tmp.open("w") as fp:
+                json.dump(meta, fp)
+            meta_tmp.replace(artifacts["meta"])
+            artifacts["tmp"].replace(artifacts["run"])
+        torch.cuda.empty_cache()
+        return
 
     method_config = {"budget": args.kv_budget, "window_size": args.window_size}
     if args.method in {"rkv", "snapkv"}:
@@ -258,32 +547,26 @@ def main(args: argparse.Namespace) -> None:
             tokenizer.encode("</think>")[-1],
         ]
 
-    set_seed(args.seed + args.shard_id)
+    for run_id in run_ids:
+        artifacts = run_artifacts(output_root, args.shard_id, run_id)
+        if run_is_complete(artifacts["run"], artifacts["meta"], expected_records):
+            continue
+        for stale in ("meta", "meta_tmp", "tmp"):
+            path = artifacts[stale]
+            if path.exists():
+                path.unlink()
 
-    with save_path.open("a") as fout:
-        for local_idx, prompt in enumerate(prompts):
-            tokenized_prompts = tokenizer(
-                [prompt],
-                padding="longest",
-                return_tensors="pt",
-                add_special_tokens=True,
-            ).to("cuda")
-            prefill_length = int(tokenized_prompts["attention_mask"].sum().item())
-            sample_idx = test_data[local_idx]["index"]
-            seen_draws = existing_draws.get(sample_idx, set())
-            if len(seen_draws) >= local_samples:
-                continue
-
-            for draw_idx in range(local_samples):
-                global_draw_idx = start_draw + draw_idx
-                if global_draw_idx in seen_draws:
-                    continue
-                seed_value = (
-                    args.seed
-                    + args.shard_id * 1_000_000
-                    + sample_idx * 1_000
-                    + global_draw_idx
-                )
+        with artifacts["tmp"].open("w") as fout:
+            for local_idx, prompt in enumerate(prompts):
+                tokenized_prompts = tokenizer(
+                    [prompt],
+                    padding="longest",
+                    return_tensors="pt",
+                    add_special_tokens=True,
+                ).to("cuda")
+                prefill_length = int(tokenized_prompts["attention_mask"].sum().item())
+                sample_idx = test_data[local_idx]["index"]
+                seed_value = args.seed + run_id * RUN_SEED_STRIDE + sample_idx
                 set_seed(seed_value)
 
                 if args.reset_cache_each_batch:
@@ -312,10 +595,23 @@ def main(args: argparse.Namespace) -> None:
                 record["output_tokens"] = output_tokens
                 record["total_tokens"] = total_tokens
                 record["sample_idx"] = sample_idx
-                record["draw_idx"] = global_draw_idx
+                record["draw_idx"] = run_id
 
                 fout.write(json.dumps(record, ensure_ascii=False) + "\n")
             torch.cuda.empty_cache()
+
+        meta_tmp = artifacts["meta_tmp"]
+        meta = {
+            "status": "complete",
+            "records": expected_records,
+            "run_id": run_id,
+            "shard_id": args.shard_id,
+        }
+        with meta_tmp.open("w") as fp:
+            json.dump(meta, fp)
+        meta_tmp.replace(artifacts["meta"])
+        artifacts["tmp"].replace(artifacts["run"])
+    torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
