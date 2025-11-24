@@ -2,21 +2,20 @@
 
 Convenience launchers for HuggingFace-based math experiments.
 
-## R-KV AIME24 baseline (sdpa + fp16 + fp32_topk + reset)
-- `run_rkv_aime24_single.sh` (or `run_rkv_aime24.sh` wrapper): single-GPU run, output to `R-KV/outputs/rkv_aime24_single_sdpa_fp16_reset/output.jsonl`, auto-eval to `R-KV/HuggingFace/outputs/output_sdpa_fp16_reset_eval/`.
-- `run_rkv_aime24_sharded.sh`: multi-GPU dispatcher using `configs/rkv_aime24_sharded.yaml` (8 shards by default), output to `R-KV/outputs/rkv_aime24_sharded_sdpa_fp16_reset/`, eval to its `eval` subdir.
+## 默认推荐（official）
+官方风格指：flash_attention_2 + bfloat16，默认不启用 reset_cache_each_batch / fp32_topk。以脚本名含 `official` 为准，目前常用：
+- `run_fullkv_aime24_official_sampled8.sh` → `configs/sample8_fullkv_aime24_official.yaml`
+- `run_fullkv_aime24_official_sampled64.sh` → `configs/sample64_fullkv_aime24_official.yaml`
+- `run_snapkv_aime24_official_sampled8.sh` → `configs/sample8_snapkv_aime24_official.yaml`
+- `run_streamingllm_aime24_official_sampled8.sh` → `configs/sample8_streamingllm_aime24_official.yaml`
+- `run_h2o_aime24_official_sampled8.sh` → `configs/sample8_h2o_aime24_official.yaml`
+- `run_rkv_aime24_official_sampled8.sh` → `configs/sample8_rkv_aime24_official.yaml`
 
-## R-KV AIME24 sampled（多次采样，默认 64 次；`SAMPLES=8` 可快速跑，`seed` 可在 YAML 中配置）
-- `run_rkv_aime24_sampled.sh` → `configs/sample64_rkv_aime24.yaml`（或 `sample8_rkv_aime24.yaml`）
-- `run_fullkv_aime24_sampled.sh` → `configs/sample64_fullkv_aime24.yaml`（或 `sample8_fullkv_aime24.yaml`）
-- `run_snapkv_aime24_sampled.sh` → `configs/sample64_snapkv_aime24.yaml`（或 `sample8_snapkv_aime24.yaml`）
-- `run_streamingllm_aime24_sampled.sh` → `configs/sample64_streamingllm_aime24.yaml`（或 `sample8_streamingllm_aime24.yaml`）
-- `run_h2o_aime24_sampled.sh` → `configs/sample64_h2o_aime24.yaml`（或 `sample8_h2o_aime24.yaml`）
+日志文件名沿用 `rkv_aime24_shardXX.log` 前缀是历史命名，与实际 method 无关。
 
-## Other methods (aligned settings)
-- `run_fullkv_aime24_sharded.sh` → `configs/fullkv_aime24_sharded.yaml` (sdpa + fp16 + reset; no compression).
-- `run_snapkv_aime24_sharded.sh` → `configs/snapkv_aime24_sharded.yaml` (sdpa + fp16 + fp32_topk + reset).
-- `run_streamingllm_aime24_sharded.sh` → `configs/streamingllm_aime24_sharded.yaml` (sdpa + fp16 + fp32_topk + reset).
-- `run_h2o_aime24_sharded.sh` → `configs/h2o_aime24_sharded.yaml` (sdpa + fp16 + fp32_topk + reset).
+## 旧版/非 official 路径（保留兼容）
+- R-KV baseline（sdpa + fp16 + fp32_topk + reset）：`run_rkv_aime24_single.sh` / `run_rkv_aime24.sh`（单卡），`run_rkv_aime24_sharded.sh`（多卡）。
+- 多次采样 sdpa+fp16+fp32_topk+reset：`run_rkv_aime24_sampled.sh`、`run_fullkv_aime24_sampled_fp16_sdpa_reset.sh`、`run_snapkv_aime24_sampled.sh`、`run_streamingllm_aime24_sampled.sh`、`run_h2o_aime24_sampled.sh`（`SAMPLES=8` 可切 8 次）。
+- 其他 sdpa+fp16 变体：`run_fullkv_aime24_sharded.sh`、`run_snapkv_aime24_sharded.sh`、`run_streamingllm_aime24_sharded.sh`、`run_h2o_aime24_sharded.sh`。
 
-Other compression variants (fullkv/h2o/snapkv/streamingllm) keep their original scripts in this folder. Legacy/test R-KV launchers and ablations have been moved into `archive/` for reference.
+Legacy/test 脚本与历史 ablation 位于 `archive/`。推荐优先使用含 `official` 的脚本作为默认设置。
