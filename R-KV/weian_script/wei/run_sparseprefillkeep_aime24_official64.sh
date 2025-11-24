@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# R-KV, AIME24, official setting (flash_attn2 + bfloat16), 64 抽样。
+# SparseRound (prefill-keep) baseline for AIME24 official setting, 64 samples.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -12,5 +12,5 @@ export HF_HOME="${HF_HOME:-/data/rbg/users/weian/.cache/huggingface}"
 export PIP_CACHE_DIR="${PIP_CACHE_DIR:-/data/rbg/users/weian/.cache/pip}"
 
 python3 "${PROJECT_ROOT}/R-KV/weian_development/rkv_sharded_dispatch.py" \
-  --config "${PROJECT_ROOT}/R-KV/weian_script/configs/sample64_rkv_aime24_official.yaml" \
+  --config "${PROJECT_ROOT}/R-KV/weian_script/configs/sample64_sparseprefillkeep_aime24_official.yaml" \
   "$@"

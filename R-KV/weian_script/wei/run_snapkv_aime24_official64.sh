@@ -4,7 +4,7 @@ set -euo pipefail
 # SnapKV, AIME24, official setting (flash_attn2 + bfloat16), 64 抽样。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 export VLLM_PROCESS_NAME_PREFIX="${VLLM_PROCESS_NAME_PREFIX:-PD-L1_binder}"
