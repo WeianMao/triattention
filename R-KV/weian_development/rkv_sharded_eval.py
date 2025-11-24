@@ -6,7 +6,7 @@ import json
 import random
 import sys
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Set
 
 import numpy as np
 import torch
@@ -168,6 +168,25 @@ def main(args: argparse.Namespace) -> None:
     output_name = args.output_name or f"shard{args.shard_id:02d}.jsonl"
     save_path = output_dir / output_name
 
+    existing_draws: Dict[int, Set[int]] = {}
+    if save_path.exists():
+        with save_path.open() as fin:
+            for line in fin:
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                sample_idx = item.get("sample_idx", item.get("idx"))
+                draw_idx = item.get("draw_idx")
+                if sample_idx is None or draw_idx is None:
+                    continue
+                try:
+                    sample_idx_int = int(sample_idx)
+                    draw_idx_int = int(draw_idx)
+                except (TypeError, ValueError):
+                    continue
+                existing_draws.setdefault(sample_idx_int, set()).add(draw_idx_int)
+
     prompts, test_data = load_dataset(Path(args.dataset_path), args.dataset_name, args.shard_id, args.num_shards)
 
     method_config = {"budget": args.kv_budget, "window_size": args.window_size}
@@ -241,7 +260,7 @@ def main(args: argparse.Namespace) -> None:
 
     set_seed(args.seed + args.shard_id)
 
-    with save_path.open("w") as fout:
+    with save_path.open("a") as fout:
         for local_idx, prompt in enumerate(prompts):
             tokenized_prompts = tokenizer(
                 [prompt],
@@ -251,8 +270,22 @@ def main(args: argparse.Namespace) -> None:
             ).to("cuda")
             prefill_length = int(tokenized_prompts["attention_mask"].sum().item())
             sample_idx = test_data[local_idx]["index"]
+            seen_draws = existing_draws.get(sample_idx, set())
+            if len(seen_draws) >= local_samples:
+                continue
 
             for draw_idx in range(local_samples):
+                global_draw_idx = start_draw + draw_idx
+                if global_draw_idx in seen_draws:
+                    continue
+                seed_value = (
+                    args.seed
+                    + args.shard_id * 1_000_000
+                    + sample_idx * 1_000
+                    + global_draw_idx
+                )
+                set_seed(seed_value)
+
                 if args.reset_cache_each_batch:
                     reset_model_cache(model)
 
@@ -279,7 +312,7 @@ def main(args: argparse.Namespace) -> None:
                 record["output_tokens"] = output_tokens
                 record["total_tokens"] = total_tokens
                 record["sample_idx"] = sample_idx
-                record["draw_idx"] = start_draw + draw_idx
+                record["draw_idx"] = global_draw_idx
 
                 fout.write(json.dumps(record, ensure_ascii=False) + "\n")
             torch.cuda.empty_cache()

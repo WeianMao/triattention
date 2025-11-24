@@ -42,7 +42,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--method-output-dir", type=str, help="Override merge target directory")
     parser.add_argument("--gpu-memory-threshold", type=int, help="Override GPU memory threshold for auto selection")
     parser.add_argument("--skip-merge", action="store_true", help="Skip shard merge step")
-    parser.add_argument("--skip-existing", action="store_true", help="Skip shards whose outputs already exist")
+    parser.add_argument(
+        "--skip-existing",
+        dest="skip_existing",
+        action="store_true",
+        default=True,
+        help="Skip shards whose outputs already exist (default: enabled).",
+    )
+    parser.add_argument(
+        "--no-skip-existing",
+        dest="skip_existing",
+        action="store_false",
+        help="Force rerun shards even if outputs exist.",
+    )
     parser.add_argument("--no-eval", action="store_true", help="Skip eval_math.py after merge")
     parser.add_argument("--eval-output-dir", type=str, help="Directory to write eval results")
     parser.add_argument("--dataset", type=str, default="aime24", help="Dataset name for eval script")

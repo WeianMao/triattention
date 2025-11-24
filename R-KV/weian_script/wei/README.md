@@ -11,7 +11,7 @@
 - 使用 `conda run -n rkv` 触发的 Python（由调度器内部处理），日志名仍以 `rkv_aime24_shardXX.log` 命名但不影响实际方法。
 - 输出目录位于 `R-KV/outputs/sample64_*_aime24_official/`（各方法对应的子目录）。
 
-可选参数：脚本透传额外参数到 `rkv_sharded_dispatch.py`，例如指定 GPU `--gpus 0,1`。***
+可选参数：脚本透传额外参数到 `rkv_sharded_dispatch.py`，例如指定 GPU `--gpus 0,1`。默认开启断点续跑（skip-existing）。
 
 # 环境安装（rkv）
 在仓库根目录执行：
