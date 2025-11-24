@@ -11,7 +11,7 @@ Convenience launchers for HuggingFace-based math experiments.
 - `run_h2o_aime24_official_sampled8.sh` → `configs/sample8_h2o_aime24_official.yaml`
 - `run_rkv_aime24_official_sampled8.sh` → `configs/sample8_rkv_aime24_official.yaml`
 
-日志文件名沿用 `rkv_aime24_shardXX.log` 前缀是历史命名，与实际 method 无关。
+日志文件名沿用 `rkv_aime24_shardXX.log` 前缀是历史命名，与实际 method 无关。`--skip-existing` 目前有 bug，暂不要使用。
 
 ## 旧版/非 official 路径（保留兼容）
 - R-KV baseline（sdpa + fp16 + fp32_topk + reset）：`run_rkv_aime24_single.sh` / `run_rkv_aime24.sh`（单卡），`run_rkv_aime24_sharded.sh`（多卡）。
