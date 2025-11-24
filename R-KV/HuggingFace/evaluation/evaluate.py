@@ -77,25 +77,36 @@ def evaluate(
         if len(s) < max_len:
             score_mat[i] = s + [s[-1]] * (max_len - len(s))  # pad
 
-    # output mean of each column of scores
-    col_means = np.array(score_mat).mean(axis=0)
+    score_mat_np = np.array(score_mat, dtype=float)
+
+    # column-wise mean still useful for debugging per-draw behavior
+    col_means = score_mat_np.mean(axis=0)
     mean_score = list(np.round(col_means * 100, decimals=1))
+
+    # paper definition: per-question mean over draws, then dataset average
+    row_means = score_mat_np.mean(axis=1)
+    pass_at_1 = float(np.round(row_means.mean() * 100, decimals=1))
+    per_sample_pass_at_1 = list(np.round(row_means * 100, decimals=1))
 
     result_json = {
         "num_samples": len(samples),
         "num_scores": len(scores),
         "timeout_samples": timeout_cnt,
         "empty_samples": len([s for s in samples if not s["pred"][-1]]),
-        "acc": mean_score[0],
+        "acc": pass_at_1,
     }
+
+    # attach per-sample pass@1 for downstream consumers/debugging
+    for sample, sample_pass in zip(samples, per_sample_pass_at_1):
+        sample["pass_at_1"] = sample_pass
 
     # each type score
     if "type" in samples[0]:
         type_scores = {}
-        for sample in samples:
+        for sample, sample_pass in zip(samples, per_sample_pass_at_1):
             if sample["type"] not in type_scores:
                 type_scores[sample["type"]] = []
-            type_scores[sample["type"]].append(sample["score"][-1])
+            type_scores[sample["type"]].append(sample_pass / 100)
         type_scores = {
             k: np.round(np.array(v).mean() * 100, decimals=1)
             for k, v in type_scores.items()
