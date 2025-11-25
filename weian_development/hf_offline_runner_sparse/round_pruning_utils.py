@@ -15,6 +15,10 @@ except ImportError:  # Transformers build without Qwen3 modules
         from transformers.models.qwen2.modeling_qwen2 import Qwen2RotaryEmbedding as Qwen3RotaryEmbedding
     except ImportError:
         Qwen3RotaryEmbedding = None  # type: ignore[assignment]
+try:
+    from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding
+except ImportError:
+    LlamaRotaryEmbedding = None  # type: ignore[assignment]
 
 DTYPE_MAP = {
     "float32": torch.float32,
@@ -95,13 +99,23 @@ def build_rotary(
     model_path: Path,
     dtype: torch.dtype,
     config: Optional[AutoConfig] = None,
-) -> Qwen3RotaryEmbedding:
+) -> object:
+    if config is None:
+        config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+
+    model_type = getattr(config, "model_type", "")
+    if "llama" in model_type:
+        if LlamaRotaryEmbedding is None:
+            raise ImportError("Llama rotary embedding is unavailable in the current transformers build.")
+        rotary = LlamaRotaryEmbedding(config=config, device=cache_device)
+        rotary.to(dtype=dtype, device=cache_device)
+        return rotary
+
     if Qwen3RotaryEmbedding is None:
         raise ImportError(
             "Neither Qwen3 nor Qwen2 rotary embeddings are available in the installed transformers package."
         )
-    if config is None:
-        config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+
     rope_scaling = dict(config.rope_scaling or {})
     if "attn_factor" in rope_scaling and "attention_factor" not in rope_scaling:
         rope_scaling["attention_factor"] = rope_scaling["attn_factor"]

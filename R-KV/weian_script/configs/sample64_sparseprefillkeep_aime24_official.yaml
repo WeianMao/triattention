@@ -19,7 +19,7 @@ experiment:
     seed: 666
     method: speckv
     kv_budget: 2048
-    window_size: 8
+    window_size: 128
     attn_implementation: flash_attention_2
     load_dtype: bfloat16
     reset_cache_each_batch: false
@@ -28,7 +28,7 @@ experiment:
     temperature: 0.6
     top_p: 0.95
     sparse_stats_path: R-KV/outputs/sample8_fullkv_aime24_official/stats/deepseek_r1_llama8b_chat_stats.pt
-    sparse_round_window: 8
+    sparse_round_window: 128
     sparse_offset_max_length: 65536
     sparse_score_aggregation: mean
     sparse_head_limit: -1
