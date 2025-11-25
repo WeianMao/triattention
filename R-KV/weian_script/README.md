@@ -20,7 +20,32 @@ Convenience launchers for HuggingFace-based math experiments.
 - `aime24_official_sampled8/run_streamingllm_aime24_official_sampled8.sh` → `configs/sample8_streamingllm_aime24_official.yaml`
 - `aime24_official_sampled8/run_h2o_aime24_official_sampled8.sh` → `configs/sample8_h2o_aime24_official.yaml`
 - `aime24_official_sampled8/run_rkv_aime24_official_sampled8.sh` → `configs/sample8_rkv_aime24_official.yaml`
+- `aime24_official_sampled8/run_sparseprefillkeep_aime24_official_sampled8.sh` → `configs/sample8_sparseprefillkeep_aime24_official.yaml`
+- `wei/run_sparseprefillkeep_aime24_official64.sh` → `configs/sample64_sparseprefillkeep_aime24_official.yaml`
+
 日志文件名沿用 `rkv_aime24_shardXX.log` 前缀是历史命名，与实际 method 无关。`--skip-existing`（默认开启）可用于断点续跑。
+
+## SparseRound（prefill-keep / SpecKV）使用方法
+1. 先生成稀疏统计（保持与对照一致的 chat template + prompt），示例：
+   ```bash
+   python R-KV/weian_development/rkv_sparse_round_calibrate.py \
+     --trace-root R-KV/outputs/sample8_fullkv_aime24_official \
+     --output-path R-KV/outputs/sample8_fullkv_aime24_official/stats/deepseek_r1_llama8b_chat_stats.pt \
+     --model-path /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B
+   ```
+   - 默认取 3 条 FullKV trace 求均值；需要更多样本可调 `--num-traces`。
+   - 头采样文件默认 `weian_development/hf_offline_runner_sparse/stats/deepseek_r1_llama8b_heads.json`，不存在会自动生成。
+2. 运行 8 次或 64 次抽样的稀疏版本（与 R-KV official 设置对齐：flash_attn2 + bf16，kv_budget=2048，prompt 不压缩）：
+   ```bash
+   # 8 抽样
+   bash R-KV/weian_script/aime24_official_sampled8/run_sparseprefillkeep_aime24_official_sampled8.sh
+   # 64 抽样
+   bash R-KV/weian_script/wei/run_sparseprefillkeep_aime24_official64.sh
+   ```
+   - 可通过 `--gpus`、`--num-shards`、`--skip-merge` 等参数覆盖默认。
+   - 若更换模型/数据集，请同步更新 YAML 中的 `model_path`、`dataset_path`、`sparse_stats_path`。
+
+提示：稀疏脚本与 R-KV baselines 共用调度器/评测流程，保持 kv_budget 与前缀保留策略一致即可公平对齐（prompt 全保留，解码阶段再裁剪）。
 
 ## 旧版/非 official 路径（保留兼容）
 - R-KV baseline（sdpa + fp16 + fp32_topk + reset）：`aime24_baseline/run_rkv_aime24_single.sh`、`aime24_baseline/run_rkv_aime24.sh`（单卡）、`aime24_sharded/run_rkv_aime24_sharded.sh`（多卡）。
