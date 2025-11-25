@@ -377,8 +377,9 @@ def run_sparse_round_generation(
 def main(args: argparse.Namespace) -> None:
     mask_process_command("PD-L1_binder")
     args.dataset_name = Path(args.dataset_path).name.split(".")[0]
-    if args.dataset_name in dataset2max_length:
-        args.max_length = dataset2max_length[args.dataset_name]
+    if (not args.max_length) or args.max_length <= 0:
+        if args.dataset_name in dataset2max_length:
+            args.max_length = dataset2max_length[args.dataset_name]
     if args.eval_batch_size != 1:
         raise ValueError("eval_batch_size must be 1 for current R-KV sharded runner.")
 
