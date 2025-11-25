@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Sharded AIME24 StreamingLLM (official-ish: flash_attn2 + bfloat16, no reset/fp32_topk), 8 draws.
+# Sharded AIME24 baseline (sdpa + fp16 + fp32_topk + reset) with fixed output/eval dirs.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 export VLLM_PROCESS_NAME_PREFIX="${VLLM_PROCESS_NAME_PREFIX:-PD-L1_binder}"
@@ -12,5 +12,5 @@ export HF_HOME="${HF_HOME:-/data/rbg/users/weian/.cache/huggingface}"
 export PIP_CACHE_DIR="${PIP_CACHE_DIR:-/data/rbg/users/weian/.cache/pip}"
 
 python3 "${PROJECT_ROOT}/R-KV/weian_development/rkv_sharded_dispatch.py" \
-  --config "${PROJECT_ROOT}/R-KV/weian_script/configs/sample8_streamingllm_aime24_official.yaml" \
+  --config "${PROJECT_ROOT}/R-KV/weian_script/configs/rkv_aime24_sharded.yaml" \
   "$@"

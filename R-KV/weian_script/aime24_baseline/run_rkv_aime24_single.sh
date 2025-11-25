@@ -4,7 +4,7 @@ set -euo pipefail
 # Single-GPU AIME24 baseline: sdpa + fp16 + fp32_topk + reset (outputs under R-KV/outputs, auto-eval).
 # Process name is masked via run_math.py (PD-L1_binder).
 
-REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 DATA_PATH="${REPO_ROOT}/HuggingFace/data/aime24.jsonl"
 MODEL_PATH="/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B"
 OUTPUT_DIR="${REPO_ROOT}/R-KV/outputs/rkv_aime24_single_sdpa_fp16_reset"
