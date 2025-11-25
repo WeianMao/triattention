@@ -57,3 +57,4 @@
 - 校准结果：`R-KV/outputs/sample8_fullkv_aime24_official/stats/deepseek_r1_llama8b_chat_stats.pt`
 - SpeckV 官方 8 抽样脚本：`R-KV/weian_script/aime24_official_sampled8/run_speckv_aime24_official_sampled8.sh`
 - SpeckV 官方 8 配置：`R-KV/weian_script/configs/sample8_sparseprefillkeep_aime24_official.yaml`
+- max_length 约定：官方 YAML 默认 32768（sample8/sample64）；quick YAML 默认 16000（仅 smoke）。
