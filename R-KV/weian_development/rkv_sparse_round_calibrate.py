@@ -77,8 +77,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--use-chat-template",
         action="store_true",
-        default=True,
-        help="Always on: apply tokenizer chat template to question before appending trace text.",
+        default=False,
+        help="Apply tokenizer chat template to question before appending trace text.",
     )
     parser.add_argument(
         "--dtype",
@@ -86,6 +86,13 @@ def parse_args() -> argparse.Namespace:
         default="float16",
         choices=["float16", "bfloat16", "float32"],
         help="Computation dtype for forward capture.",
+    )
+    parser.add_argument(
+        "--attn-implementation",
+        type=str,
+        default="flash_attention_2",
+        choices=["flash_attention_2", "eager", "sdpa"],
+        help="Attention implementation used while collecting Q/K statistics.",
     )
     return parser.parse_args()
 
@@ -243,7 +250,7 @@ def main() -> None:
         args.model_path,
         torch_dtype=precision,
         low_cpu_mem_usage=True,
-        attn_implementation="eager",
+        attn_implementation=args.attn_implementation,
         use_cache=True,
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -289,6 +296,7 @@ def main() -> None:
         "dtype": str(precision),
         "trace_root": str(args.trace_root),
         "use_chat_template": True,
+        "attn_implementation": args.attn_implementation,
     }
     save_head_frequency_stats(args.output_path, sampled_heads, stats_map, metadata)
     print(f"Saved sparse round stats to {args.output_path}")

@@ -6,13 +6,19 @@ import json
 import random
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from weian_development.hf_offline_runner_sparse.example_offline_hf_serialized import (
-    run_sparse_generation,
+from transformers.cache_utils import Cache, DynamicCache
+from transformers.generation.logits_process import (
+    InfNanRemoveLogitsProcessor,
+    LogitsProcessorList,
+    TemperatureLogitsWarper,
+    TopKLogitsWarper,
+    TopPLogitsWarper,
 )
 from weian_development.hf_offline_runner_sparse.sparse_round_pruner_prefill_keep import (
     SparsePruningConfig,
@@ -299,6 +305,135 @@ def compute_available_new_tokens(max_length: int, prompt_length: int, model, tok
     return max(1, available)
 
 
+def build_sampling_components(
+    do_sample: bool,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+) -> tuple[LogitsProcessorList, LogitsProcessorList]:
+    processors = LogitsProcessorList([InfNanRemoveLogitsProcessor()])
+    warpers = LogitsProcessorList()
+    if not do_sample:
+        return processors, warpers
+    if temperature and temperature != 1.0:
+        warpers.append(TemperatureLogitsWarper(temperature))
+    if top_k and top_k > 0:
+        warpers.append(TopKLogitsWarper(top_k))
+    if 0 < top_p < 1.0:
+        warpers.append(TopPLogitsWarper(top_p))
+    return processors, warpers
+
+
+def sample_next_token(
+    logits: torch.Tensor,
+    sequence: torch.Tensor,
+    do_sample: bool,
+    processors: LogitsProcessorList,
+    warpers: LogitsProcessorList,
+) -> torch.Tensor:
+    processed = processors(sequence, logits)
+    if not do_sample:
+        return torch.argmax(processed, dim=-1, keepdim=True)
+    warped = warpers(sequence, processed)
+    probs = F.softmax(warped, dim=-1)
+    next_token = torch.multinomial(probs, num_samples=1)
+    return next_token
+
+
+def speckv_generate_sequence(
+    model: AutoModelForCausalLM,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    max_new_tokens: int,
+    eos_token_id: Optional[int],
+    do_sample: bool,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    pruner: SparseRoundPruner,
+) -> torch.Tensor:
+    if max_new_tokens <= 0:
+        return input_ids.clone()
+
+    processors, warpers = build_sampling_components(do_sample, temperature, top_p, top_k)
+    sequence = input_ids.clone()
+
+    with torch.inference_mode():
+        outputs = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            use_cache=True,
+            return_dict=True,
+        )
+
+    logits = outputs.logits[:, -1, :]
+    past_key_values = outputs.past_key_values
+    if isinstance(past_key_values, Cache):
+        pkv_tuple = past_key_values.to_legacy_cache()
+    elif isinstance(past_key_values, tuple):
+        pkv_tuple = past_key_values
+        past_key_values = DynamicCache.from_legacy_cache(pkv_tuple)
+    else:
+        pkv_tuple = past_key_values
+
+    pruner.attach_initial_cache(pkv_tuple)
+    pkv_tuple = pruner.enforce_max_limit(pkv_tuple)
+    pkv_tuple = pruner.ensure_capacity(pkv_tuple)
+    cache_for_model = DynamicCache.from_legacy_cache(pkv_tuple) if isinstance(pkv_tuple, tuple) else pkv_tuple
+
+    generated: List[int] = []
+
+    for _ in range(max_new_tokens):
+        next_token = sample_next_token(logits, sequence, do_sample, processors, warpers)
+        token_id = int(next_token.item())
+        generated.append(token_id)
+        next_token_tensor = torch.tensor([[token_id]], device=input_ids.device, dtype=torch.long)
+        sequence = torch.cat([sequence, next_token_tensor], dim=1)
+
+        if eos_token_id is not None and token_id == eos_token_id:
+            break
+
+        with torch.inference_mode():
+            position_ids = torch.tensor(
+                [[pruner.absolute_position]],
+                device=next_token_tensor.device,
+                dtype=torch.long,
+            )
+            outputs = model(
+                input_ids=next_token_tensor,
+                attention_mask=None,
+                past_key_values=cache_for_model,
+                use_cache=True,
+                return_dict=True,
+                position_ids=position_ids,
+                cache_position=position_ids,
+            )
+
+        past_key_values = outputs.past_key_values
+        if isinstance(past_key_values, Cache):
+            pkv_tuple = past_key_values.to_legacy_cache()
+        elif isinstance(past_key_values, tuple):
+            pkv_tuple = past_key_values
+            past_key_values = DynamicCache.from_legacy_cache(pkv_tuple)
+        else:
+            pkv_tuple = past_key_values
+
+        pruner.on_token_appended()
+        if pruner.should_start_next_round():
+            pkv_tuple = pruner.start_next_round(pkv_tuple)
+
+        cache_for_model = DynamicCache.from_legacy_cache(pkv_tuple) if isinstance(pkv_tuple, tuple) else pkv_tuple
+        logits = outputs.logits[:, -1, :]
+
+    if generated:
+        gen_tensor = torch.tensor(generated, device=input_ids.device, dtype=torch.long).unsqueeze(0)
+        full_sequence = torch.cat([input_ids, gen_tensor], dim=1)
+    else:
+        full_sequence = input_ids.clone()
+
+    return full_sequence
+
+
 def build_sparse_pruner_config(args: argparse.Namespace, device: torch.device, max_keys: int, model_path: Path) -> SparsePruningConfig:
     stats_path = args.sparse_stats_path
     if not stats_path:
@@ -348,23 +483,22 @@ def run_sparse_round_generation(
         [prompt],
         padding="longest",
         return_tensors="pt",
-        add_special_tokens=False,
+        add_special_tokens=True,
     ).to(model.device)
     prompt_length = int(tokenized_prompts["attention_mask"].sum().item())
     max_new_tokens = compute_available_new_tokens(max_length, prompt_length, model, tokenizer)
 
     pruner = SparseRoundPruner(pruner_cfg)
-    do_sample = True
-    sequence, _ = run_sparse_generation(
+    sequence = speckv_generate_sequence(
         model=model,
         input_ids=tokenized_prompts["input_ids"],
+        attention_mask=tokenized_prompts["attention_mask"],
         max_new_tokens=max_new_tokens,
         eos_token_id=tokenizer.eos_token_id,
-        do_sample=do_sample,
+        do_sample=True,
         temperature=args.temperature,
         top_p=args.top_p,
         top_k=0,
-        store_logprobs=False,
         pruner=pruner,
     )
 
@@ -442,6 +576,8 @@ def main(args: argparse.Namespace) -> None:
                     sample_idx = example["index"]
                     seed_value = args.seed + run_id * RUN_SEED_STRIDE + sample_idx
                     set_seed(seed_value)
+                    if args.reset_cache_each_batch:
+                        reset_model_cache(model)
 
                     decoded, prefill_tokens, output_tokens, rendered_prompt = run_sparse_round_generation(
                         args,
