@@ -13,11 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, TextIO
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import yaml
 
 from weian_development.process_utils import mask_process_command
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = PROJECT_ROOT / "R-KV" / "weian_script" / "configs" / "rkv_aime24_sharded.yaml"
 MERGE_SCRIPT = PROJECT_ROOT / "R-KV" / "weian_development" / "merge_rkv_shards.py"
 MULTI_EVAL_SCRIPT = PROJECT_ROOT / "R-KV" / "HuggingFace" / "evaluation" / "eval_math_multi.py"

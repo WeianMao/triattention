@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -25,7 +30,6 @@ from weian_development.hf_offline_runner_sparse.round_pruning_utils import (
 )
 from weian_development.process_utils import mask_process_command
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATS_OUT = (
     PROJECT_ROOT
     / "R-KV"
@@ -77,8 +81,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--use-chat-template",
         action="store_true",
-        default=False,
-        help="Apply tokenizer chat template to question before appending trace text.",
+        default=True,
+        help="Apply tokenizer chat template to question before appending trace text (SpeckV baseline requires chat).",
     )
     parser.add_argument(
         "--dtype",
@@ -126,21 +130,17 @@ def format_full_text(
     question: str,
     response: str,
     system_prompt: str,
-    use_chat_template: bool,
 ) -> str:
     user_prompt = (
         "You are given a math problem.\n\nProblem: {question}\n\n You need to solve the problem step by step. "
         "First, you need to provide the chain-of-thought, then provide the final answer.\n\n "
         "Provide the final answer in the format: Final answer:  \\boxed{{}}"
     ).format(question=question)
-    if use_chat_template:
-        prompt = tokenizer.apply_chat_template(
-            [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-    else:
-        prompt = user_prompt
+    prompt = tokenizer.apply_chat_template(
+        [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
     return prompt + response
 
 
@@ -228,6 +228,8 @@ def aggregate_head_means(
 def main() -> None:
     mask_process_command("PD-L1_binder")
     args = parse_args()
+    if not args.use_chat_template:
+        raise ValueError("SpeckV calibration must use chat template to match R-KV inference.")
 
     records = load_records(args.trace_root, args.num_traces)
     if not records:
@@ -270,13 +272,7 @@ def main() -> None:
     for idx, record in enumerate(records):
         question = record.get("question") or record.get("problem") or ""
         response = record.get("output") or record.get("model_output") or ""
-        full_text = format_full_text(
-            tokenizer,
-            question,
-            response,
-            system_prompt=args.system_prompt,
-            use_chat_template=args.use_chat_template,
-        )
+        full_text = format_full_text(tokenizer, question, response, system_prompt=args.system_prompt)
         buffer = capture_qk_single(model, tokenizer, full_text, precision)
         buffers.append(buffer)
         torch.cuda.empty_cache()

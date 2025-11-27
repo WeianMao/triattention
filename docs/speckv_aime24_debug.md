@@ -97,13 +97,11 @@
 - 已回退 Lazy 路径中为 R-KV 适配加入的短路 + `cache_position` 变更，保持 `weian_development/hf_offline_runner_sparse` 纯 Lazy 行为。
 - SpeckV 在 R-KV 下改为原生实现：`R-KV/weian_development/rkv_sharded_eval.py` 内置采样/裁剪（`speckv_generate_sequence`），不再依赖 Lazy 的 `run_sparse_generation`；tokenization 使用 `add_special_tokens=True`，支持 `reset_cache_each_batch`，提示/采样开关与基线一致。
 - SpeckV YAML 统一 `use_chat_template: true` 以匹配现有校准文件（chat 模板统计仍沿用 `deepseek_r1_llama8b_chat_stats.pt`；尚未产出非 chat stats）。涉及：`sample8/64_sparseprefillkeep_aime24_official.yaml`、`sample8_speckv_aime24_quick.yaml`。
-- 试图用非 chat 模板重跑校准时报错：  
-  - `PYTHONPATH=/data/rbg/users/weian/project/rl/dc conda run -n rkv python R-KV/weian_development/rkv_sparse_round_calibrate.py ...` → `No such file or directory`（conda run 版本位于 `/data/rbg/users/weian/env/miniconda3/bin/conda`）。  
-  - 直接 `/data/rbg/users/weian/env/miniconda3/envs/rkv/bin/python R-KV/weian_development/rkv_sparse_round_calibrate.py ...` → `ModuleNotFoundError: No module named 'weian_development'`（缺 PYTHONPATH）。  
-  - 目前未拿到非 chat stats；仍使用 chat stats。
-- 试图在 GPU3 上跑 quick smoke：`PYTHONPATH=... conda run -n rkv python R-KV/weian_development/rkv_sharded_dispatch.py --config ... --gpus 3 --num-shards 1 --skip-existing --method-output-dir ... --log-dir ... --output-dir ... --no-eval` 同样报 `No such file or directory`，未能验证新路径；可能与当前 shell/conda run 触发的路径或可执行依赖缺失有关。
+- 修正 `rkv_sparse_round_calibrate.py` 的 `PROJECT_ROOT`（父级改为 parents[2]）并预置 `sys.path`；`rkv_sharded_dispatch.py` 同步注入 `sys.path`，避免缺省 `PYTHONPATH` 时导入失败或路径落到 `R-KV/R-KV/...`。
+- `conda run -n rkv python R-KV/weian_development/rkv_sparse_round_calibrate.py --help` 可正常运行（约 17s 初始化）；`rkv_sharded_dispatch.py --help` 同样通过。
+- quick 配置 dry-run 验证通过：`conda run -n rkv python R-KV/weian_development/rkv_sharded_dispatch.py --config R-KV/weian_script/configs/sample8_speckv_aime24_quick.yaml --gpus 3 --num-shards 1 --skip-existing --no-eval --dry-run`，输出展示 shard0 命令/日志路径，未再现 “No such file or directory”。
+- SpeckV 路径统一强制 chat 模板：`rkv_sparse_round_calibrate.py`/`rkv_sharded_eval.py` 默认 chat 且拒绝非 chat，保持与 R-KV 基线一致。
+- 已用 chat 模板重新跑校准（GPU=3，FA2，float16，3 traces），覆盖输出：`R-KV/outputs/sample8_fullkv_aime24_official/stats/deepseek_r1_llama8b_chat_stats.pt`。
 - 下一步建议：  
-  1) 优先修复 `conda run`/解释器调用问题（可尝试：用完整 python 路径 + 导出 `PYTHONPATH=/data/rbg/users/weian/project/rl/dc`；或在 shell 直接 `source activate rkv` 后运行相同命令），确认能调用 `R-KV/weian_development/rkv_sparse_round_calibrate.py` 与 `rkv_sharded_dispatch.py`。  
-  2) 与运行模板一致地重跑校准（chat 或非 chat）；若要非 chat 版本，生成新 stats 并更新 SpeckV YAML。  
-  3) 选空闲 GPU（3 或 6 当前空闲）跑一次小样本 smoke（可用 quick YAML，加 `--no-eval`，短 `max_length`/`max_examples`/`num_samples=1`），确认落盘和评测链路正常。  
-  4) 完成后更新本文件记录结果和剩余问题。
+  1) 在空闲 GPU 上跑一次实际 smoke（例如 quick 配置，`--gpus 3 --num-shards 1 --skip-existing --no-eval`，必要时 `--max_examples 1 --num_samples 1` 以加速），确认落盘与评测链路。  
+  2) 完成 smoke 后按需跑官方 8 抽样（`run_speckv_aime24_official_sampled8.sh`），评估精度。

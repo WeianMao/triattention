@@ -252,8 +252,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--use_chat_template",
         type=str2bool,
-        default=False,
-        help="Wrap prompts with tokenizer.apply_chat_template when using sparse pruning.",
+        default=True,
+        help="Wrap prompts with tokenizer.apply_chat_template when using sparse pruning (SpeckV baseline uses chat).",
     )
     parser.add_argument(
         "--chat_system_prompt",
@@ -527,6 +527,8 @@ def main(args: argparse.Namespace) -> None:
 
     method_lower = args.method.lower() if args.method else ""
     use_sparse_round = method_lower in {"sparse_round_prefill_keep", "speckv"}
+    if use_sparse_round and not args.use_chat_template:
+        raise ValueError("SpeckV/sparse_round_prefill_keep requires chat template to align with R-KV baseline.")
 
     if use_sparse_round and args.kv_budget is None:
         raise ValueError("kv_budget must be provided for sparse_round_prefill_keep.")
