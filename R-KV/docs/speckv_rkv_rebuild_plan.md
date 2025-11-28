@@ -65,7 +65,7 @@
    - [x] 移除/合并 `method=sparse_round_prefill_keep` 与 `method=speckv` 的重复代码，保留单一名称（建议 `speckv`）。
 
 3) 模板与统计一致性  
-   - [ ] 抽象统一的 prompt 构造函数（chat 与非 chat），校准与运行共用；在运行时校验统计文件的元数据（chat 开关、system prompt）与当前配置一致，不一致则直接报错。  
+   - [ ] 抽象统一的 prompt 构造函数，**直接复用 R-KV baseline 的同款 API/模板**（`prompt_template` + `.format(question=...)`，纯文本非 chat），校准与运行共用；运行时校验统计文件元数据（模板类型、system prompt 如有）与当前配置一致，不一致直接报错。  
    - [ ] 额外校验 stats 元数据中的 `attn_implementation`、`dtype`、`kv_budget` 等关键字段，防止用到 FA2/SDPA 或精度不一致的统计文件。  
    - [ ] 将统计文件生成与读取路径改到 `R-KV/outputs/.../stats/*.pt`，并在 SpeckV README/注释中写清如何重算（命令示例）。  
    - [ ] 如需兼容 LazyEviction 多消息 JSON，加入转换层（消息 → question/prompt），保证评测输入与 R-KV baseline 一致。
