@@ -19,6 +19,13 @@ from weian_development.speckv.attention_qk_analysis.capture_qk_distributed impor
     LayerCaptureBuffer,
     QKCollector,
 )
+from weian_development.speckv.prompt_utils import (
+    DEFAULT_SYSTEM_PROMPT,
+    PROMPT_TEMPLATE,
+    build_prompt_with_response,
+    extract_question_from_record,
+)
+from weian_development.speckv.stats_utils import normalize_dtype_name
 from weian_development.speckv.round_pruning_utils import (
     HeadFrequencyStats,
     build_rotary,
@@ -37,7 +44,6 @@ DEFAULT_STATS_OUT = (
     / "stats"
     / "deepseek_r1_llama8b_chat_stats.pt"
 )
-DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
 
 
 def parse_args() -> argparse.Namespace:
@@ -96,6 +102,12 @@ def parse_args() -> argparse.Namespace:
         choices=["flash_attention_2", "eager", "sdpa"],
         help="Attention implementation used while collecting Q/K statistics.",
     )
+    parser.add_argument(
+        "--kv-budget",
+        type=int,
+        default=2048,
+        help="KV budget expected to be used at inference time (stored in stats metadata for validation).",
+    )
     return parser.parse_args()
 
 
@@ -128,18 +140,15 @@ def format_full_text(
     question: str,
     response: str,
     system_prompt: str,
+    use_chat_template: bool,
 ) -> str:
-    user_prompt = (
-        "You are given a math problem.\n\nProblem: {question}\n\n You need to solve the problem step by step. "
-        "First, you need to provide the chain-of-thought, then provide the final answer.\n\n "
-        "Provide the final answer in the format: Final answer:  \\boxed{{}}"
-    ).format(question=question)
-    prompt = tokenizer.apply_chat_template(
-        [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-        tokenize=False,
-        add_generation_prompt=True,
+    return build_prompt_with_response(
+        tokenizer,
+        question,
+        response,
+        use_chat_template=use_chat_template,
+        system_prompt=system_prompt,
     )
-    return prompt + response
 
 
 def capture_qk_single(
@@ -268,9 +277,15 @@ def main() -> None:
 
     buffers: List[LayerCaptureBuffer] = []
     for idx, record in enumerate(records):
-        question = record.get("question") or record.get("problem") or ""
+        question = extract_question_from_record(record, fallback_keys=["question", "problem"])
         response = record.get("output") or record.get("model_output") or ""
-        full_text = format_full_text(tokenizer, question, response, system_prompt=args.system_prompt)
+        full_text = format_full_text(
+            tokenizer,
+            question,
+            str(response),
+            system_prompt=args.system_prompt,
+            use_chat_template=args.use_chat_template,
+        )
         buffer = capture_qk_single(model, tokenizer, full_text, precision)
         buffers.append(buffer)
         torch.cuda.empty_cache()
@@ -287,9 +302,12 @@ def main() -> None:
         "model_path": str(args.model_path),
         "num_traces": len(buffers),
         "head_dim": buffers[0].q.shape[-1],
-        "dtype": str(precision),
+        "dtype": normalize_dtype_name(precision),
         "trace_root": str(args.trace_root),
-        "use_chat_template": True,
+        "use_chat_template": bool(args.use_chat_template),
+        "system_prompt": args.system_prompt if args.use_chat_template else "",
+        "prompt_template": PROMPT_TEMPLATE,
+        "kv_budget": int(args.kv_budget),
         "attn_implementation": args.attn_implementation,
     }
     save_head_frequency_stats(args.output_path, sampled_heads, stats_map, metadata)

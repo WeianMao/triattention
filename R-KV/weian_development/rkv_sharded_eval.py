@@ -22,6 +22,13 @@ from weian_development.process_utils import mask_process_command
 from weian_development.rkv_cache_utils import reset_model_cache
 from rkv.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
 from rkv.compression.speckv import apply_speckv_generate_patch
+from weian_development.speckv.prompt_utils import (
+    DEFAULT_SYSTEM_PROMPT,
+    PROMPT_TEMPLATE,
+    build_prompt,
+    extract_question_from_record,
+)
+from weian_development.speckv.stats_utils import normalize_dtype_name
 
 dataset2key = {
     "gsm8k": ["question", "answer"],
@@ -37,7 +44,6 @@ dataset2max_length = {
     "math": 8192,
 }
 
-DEFAULT_CHAT_SYSTEM = "You are a helpful assistant."
 RUN_SEED_STRIDE = 1_000_000
 
 
@@ -49,9 +55,6 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
     torch.cuda.manual_seed_all(seed)
-
-
-prompt_template = "You are given a math problem.\n\nProblem: {question}\n\n You need to solve the problem step by step. First, you need to provide the chain-of-thought, then provide the final answer.\n\n Provide the final answer in the format: Final answer:  \\boxed{{}}"
 
 
 def str2bool(value: str | bool) -> bool:
@@ -131,20 +134,38 @@ def run_is_complete(run_path: Path, meta_path: Path, expected_records: int) -> b
         return False
 
 
-def load_dataset(path: Path, dataset_name: str, shard_id: int, num_shards: int) -> List[dict]:
+def load_dataset(
+    path: Path,
+    dataset_name: str,
+    tokenizer: AutoTokenizer,
+    *,
+    use_chat_template: bool,
+    system_prompt: str,
+    max_examples: int | None = None,
+) -> tuple[List[str], List[dict]]:
     prompts: List[str] = []
     test_data: List[dict] = []
+    fallback_keys: List[str] = []
+    if dataset_name in dataset2key and dataset2key[dataset_name]:
+        fallback_keys.append(dataset2key[dataset_name][0])
+
     with path.open() as f:
         for index, line in enumerate(f):
             example = json.loads(line)
-            question_key = dataset2key[dataset_name][0]
-            question = example[question_key]
+            question = extract_question_from_record(example, fallback_keys=fallback_keys)
             example["question"] = question
-            prompt = prompt_template.format(**example)
+            prompt = build_prompt(
+                tokenizer,
+                question,
+                use_chat_template=use_chat_template,
+                system_prompt=system_prompt,
+            )
             example["prompt"] = prompt
             example["index"] = index
             prompts.append(prompt)
             test_data.append(example)
+            if max_examples and len(test_data) >= max_examples:
+                break
     return prompts, test_data
 
 
@@ -255,7 +276,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--chat_system_prompt",
         type=str,
-        default=DEFAULT_CHAT_SYSTEM,
+        default=DEFAULT_SYSTEM_PROMPT,
         help="System prompt used when --use_chat_template is enabled for sparse pruning.",
     )
     parser.add_argument(
@@ -273,17 +294,6 @@ def configure_tokenizer(tokenizer: AutoTokenizer) -> AutoTokenizer:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     return tokenizer
-
-
-def format_prompt(question: str, tokenizer: AutoTokenizer, use_chat_template: bool, system_prompt: str) -> str:
-    base_prompt = prompt_template.format(question=question, answer="")
-    if not use_chat_template:
-        return base_prompt
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": base_prompt},
-    ]
-    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
 
 def main(args: argparse.Namespace) -> None:
@@ -309,10 +319,20 @@ def main(args: argparse.Namespace) -> None:
     if method_lower == "speckv" and args.kv_budget is None:
         raise ValueError("kv_budget must be provided for speckv.")
 
-    prompts, test_data = load_dataset(Path(args.dataset_path), args.dataset_name, args.shard_id, args.num_shards)
-    if args.max_examples and args.max_examples > 0:
-        prompts = prompts[: args.max_examples]
-        test_data = test_data[: args.max_examples]
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_path, use_fast=True, padding_side="left"
+    )
+    tokenizer = configure_tokenizer(tokenizer)
+
+    prompt_use_chat = bool(args.use_chat_template) if method_lower == "speckv" else False
+    prompts, test_data = load_dataset(
+        Path(args.dataset_path),
+        args.dataset_name,
+        tokenizer,
+        use_chat_template=prompt_use_chat,
+        system_prompt=args.chat_system_prompt,
+        max_examples=args.max_examples,
+    )
     expected_records = len(test_data)
     if expected_records == 0:
         return
@@ -361,13 +381,6 @@ def main(args: argparse.Namespace) -> None:
         "compression_content": args.compression_content,
     }
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.model_path, use_fast=True, padding_side="left"
-    )
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-
     if method_name and method_name not in {"fullkv", "speckv"}:
         if "llama" in args.model_path.lower():
             replace_llama(compression_config)
@@ -404,10 +417,20 @@ def main(args: argparse.Namespace) -> None:
             tokenizer.encode("</think>")[-1],
         ]
     elif method_lower == "speckv":
+        if args.sparse_stats_path is None:
+            raise ValueError("sparse_stats_path must be provided for speckv.")
         stats_path = resolve_under_rkv(args.sparse_stats_path)
         if not stats_path.exists():
             raise FileNotFoundError(f"SpeckV stats file not found: {stats_path}")
         round_window = args.sparse_round_window if args.sparse_round_window and args.sparse_round_window > 0 else args.window_size
+        metadata_expectations = {
+            "prompt_template": PROMPT_TEMPLATE,
+            "use_chat_template": prompt_use_chat,
+            "system_prompt": args.chat_system_prompt if prompt_use_chat else "",
+            "attn_implementation": args.attn_implementation,
+            "dtype": normalize_dtype_name(dtype),
+            "kv_budget": int(args.kv_budget),
+        }
         apply_speckv_generate_patch(
             model,
             stats_path=stats_path,
@@ -418,6 +441,7 @@ def main(args: argparse.Namespace) -> None:
             score_aggregation=args.sparse_score_aggregation,
             sparse_seed=args.sparse_seed,
             head_limit=args.sparse_head_limit,
+            metadata_expectations=metadata_expectations,
         )
 
     for run_id in run_ids:
@@ -431,17 +455,8 @@ def main(args: argparse.Namespace) -> None:
 
         with artifacts["tmp"].open("w") as fout:
             for local_idx, prompt in enumerate(prompts):
-                prompt_text = prompt
-                if method_lower == "speckv" and args.use_chat_template:
-                    prompt_text = format_prompt(
-                        test_data[local_idx]["question"],
-                        tokenizer,
-                        True,
-                        args.chat_system_prompt,
-                    )
-
                 tokenized_prompts = tokenizer(
-                    [prompt_text],
+                    [prompt],
                     padding="longest",
                     return_tensors="pt",
                     add_special_tokens=True,
@@ -471,7 +486,7 @@ def main(args: argparse.Namespace) -> None:
                 )
 
                 record = dict(test_data[local_idx])
-                record["prompt"] = prompt_text
+                record["prompt"] = prompt
                 record["output"] = decoded
                 record["prefill_tokens"] = prefill_length
                 record["output_tokens"] = output_tokens

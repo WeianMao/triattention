@@ -18,6 +18,7 @@ from weian_development.speckv.round_pruning_utils import (
     load_head_frequency_stats,
     score_keys_for_round,
 )
+from weian_development.speckv.stats_utils import validate_stats_metadata
 
 
 @dataclass
@@ -32,6 +33,7 @@ class SparsePruningConfig:
     score_aggregation: str
     seed: int | None = None
     head_limit: int | None = None
+    metadata_expectations: Dict[str, object] | None = None
 
 
 class SparseRoundPruner:
@@ -48,6 +50,8 @@ class SparseRoundPruner:
             raise ValueError("max_keys must be >= round_window for round-based pruning")
         self.config = config
         metadata, stats_map = load_head_frequency_stats(config.stats_path, config.device)
+        if config.metadata_expectations:
+            validate_stats_metadata(metadata, config.metadata_expectations, stats_path=config.stats_path)
         sampled_heads = [tuple(item) for item in metadata.get("sampled_heads", [])]
         if not sampled_heads:
             raise ValueError("Stats file does not contain any sampled heads")

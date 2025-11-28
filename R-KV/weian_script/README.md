@@ -35,6 +35,7 @@ Convenience launchers for HuggingFace-based math experiments.
    ```
    - 默认取 3 条 FullKV trace 求均值；需要更多样本可调 `--num-traces`。
    - 头采样文件默认 `R-KV/weian_development/speckv/stats/deepseek_r1_llama8b_heads.json`，不存在会自动生成。
+   - 统计文件会记录 prompt 模板 / system prompt / attn 实现 / dtype / kv_budget，并在 SpeckV 运行时强校验；切换 chat 模板、system prompt、kv_budget、dtype 或 attn 实现后请重新运行校准生成新的 `outputs/.../stats/*.pt`。
 2. 运行 8 次或 64 次抽样的稀疏版本（与 R-KV official 设置对齐：flash_attn2 + bf16，kv_budget=2048，prompt 不压缩）：
    ```bash
    # 8 抽样

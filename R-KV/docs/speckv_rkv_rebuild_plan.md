@@ -65,15 +65,15 @@
    - [x] 移除/合并 `method=sparse_round_prefill_keep` 与 `method=speckv` 的重复代码，保留单一名称（建议 `speckv`）。
 
 3) 模板与统计一致性  
-   - [ ] 抽象统一的 prompt 构造函数，**直接复用 R-KV baseline 的同款 API/模板**（`prompt_template` + `.format(question=...)`，纯文本非 chat），校准与运行共用；运行时校验统计文件元数据（模板类型、system prompt 如有）与当前配置一致，不一致直接报错。  
-   - [ ] 额外校验 stats 元数据中的 `attn_implementation`、`dtype`、`kv_budget` 等关键字段，防止用到 FA2/SDPA 或精度不一致的统计文件。  
-   - [ ] 将统计文件生成与读取路径改到 `R-KV/outputs/.../stats/*.pt`，并在 SpeckV README/注释中写清如何重算（命令示例）。  
-   - [ ] 如需兼容 LazyEviction 多消息 JSON，加入转换层（消息 → question/prompt），保证评测输入与 R-KV baseline 一致。
+   - [x] 抽象统一的 prompt 构造函数，**直接复用 R-KV baseline 的同款 API/模板**（`prompt_template` + `.format(question=...)`，纯文本非 chat），校准与运行共用；运行时校验统计文件元数据（模板类型、system prompt 如有）与当前配置一致，不一致直接报错。  
+   - [x] 额外校验 stats 元数据中的 `attn_implementation`、`dtype`、`kv_budget` 等关键字段，防止用到 FA2/SDPA 或精度不一致的统计文件。  
+   - [x] 将统计文件生成与读取路径改到 `R-KV/outputs/.../stats/*.pt`，并在 SpeckV README/注释中写清如何重算（命令示例）。  
+   - [x] 如需兼容 LazyEviction 多消息 JSON，加入转换层（消息 → question/prompt），保证评测输入与 R-KV baseline 一致。
 
 4) 配置与脚本收敛  
-   - [ ] 统一 YAML：`method` 使用 `speckv`，所有路径改为 `R-KV/...`，去掉对根目录模块的隐式依赖。  
-   - [ ] 更新脚本（`run_speckv_aime24_official_sampled8.sh`、`quick_tests/run_speckv_aime24_quick.sh` 等）指向新的模块路径；若需要额外说明，补充 SpeckV 专用 README。  
-   - [ ] dispatcher/runner 使用迁移后的 `process_utils`，确认 merge/eval 流程不变。
+   - [x] 统一 YAML：`method` 使用 `speckv`，所有路径改为 `R-KV/...`，去掉对根目录模块的隐式依赖。  
+   - [x] 更新脚本（`run_speckv_aime24_official_sampled8.sh`、`quick_tests/run_speckv_aime24_quick.sh` 等）指向新的模块路径；若需要额外说明，补充 SpeckV 专用 README。  
+   - [x] dispatcher/runner 使用迁移后的 `process_utils`，确认 merge/eval 流程不变。
 
 5) 验证矩阵（完成即打勾）  
    - [ ] 烟囱测试：`num_shards=1`，`max_examples≈2`，`num_samples=1`，`max_length≈2048`，`attn_implementation=sdpa`，确认能写出 shard→merge→eval。  
