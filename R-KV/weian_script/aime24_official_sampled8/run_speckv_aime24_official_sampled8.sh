@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# SpecKV (sparse_round_prefill_keep) for AIME24, 8 draws, aligned with official R-KV settings.
+# SpeckV for AIME24, 8 draws, aligned with official R-KV settings.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

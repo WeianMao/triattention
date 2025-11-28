@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from types import MethodType
-from typing import Optional, Sequence
+from typing import Optional
 
 import torch
 from transformers.cache_utils import Cache, DynamicCache
@@ -22,7 +22,6 @@ class _SpeckVState:
     attached: bool = False
     config: SparsePruningConfig | None = None
     initial_prefix_length: int | None = None
-    prev_seq_len: int | None = None
 
 
 def _cache_to_tuple(past_key_values) -> tuple:
@@ -43,21 +42,6 @@ def _cache_from_tuple(pkv_tuple: tuple, template):
     if template is None:
         return pkv_tuple
     return pkv_tuple
-
-def _sync_pruner_positions(state: _SpeckVState, pkv_tuple: tuple) -> None:
-    if not pkv_tuple:
-        state.pruner.cache_positions = []
-        state.pruner.absolute_position = 0
-        state.pruner.prefix_length = 0
-        return
-    # assume shape [num_layers][2][bsz, kv_heads, seq, head_dim]
-    seq_len = pkv_tuple[0][0].shape[2]
-    if state.initial_prefix_length is None:
-        state.initial_prefix_length = seq_len
-    state.pruner.cache_positions = list(range(seq_len))
-    state.pruner.absolute_position = seq_len
-    state.pruner.prefix_length = min(state.initial_prefix_length, seq_len)
-    state.prev_seq_len = seq_len
 
 
 def apply_speckv_generate_patch(
@@ -107,10 +91,31 @@ def apply_speckv_generate_patch(
         cache_position: Optional[torch.LongTensor] = None,
         **kwargs,
     ):
+        cache_position_override = cache_position
+        position_ids_override = position_ids
+
+        if past_key_values is not None and input_ids is not None:
+            # Keep absolute RoPE positions aligned with pruner state during decode.
+            bsz, step = input_ids.shape
+            start_pos = state.pruner.absolute_position
+            cache_positions = torch.arange(
+                start_pos,
+                start_pos + step,
+                device=input_ids.device,
+                dtype=torch.long,
+            )
+            if bsz > 1:
+                cache_positions = cache_positions.unsqueeze(0).expand(bsz, -1)
+            else:
+                cache_positions = cache_positions.unsqueeze(0)
+            cache_position_override = cache_positions
+            if position_ids is None:
+                position_ids_override = cache_positions
+
         outputs = orig_forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            position_ids=position_ids,
+            position_ids=position_ids_override,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
             labels=labels,
@@ -118,7 +123,7 @@ def apply_speckv_generate_patch(
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            cache_position=cache_position,
+            cache_position=cache_position_override,
             **kwargs,
         )
 
@@ -128,27 +133,34 @@ def apply_speckv_generate_patch(
         if past_key_values is None and state.attached:
             state.pruner = SparseRoundPruner(state.config)
             state.attached = False
+            state.initial_prefix_length = None
 
         pkv_tuple = _cache_to_tuple(outputs.past_key_values)
 
         if not state.attached:
             state.pruner.attach_initial_cache(pkv_tuple)
-            _sync_pruner_positions(state, pkv_tuple)
+            state.initial_prefix_length = state.pruner.prefix_length
+            pkv_tuple = state.pruner.enforce_max_limit(pkv_tuple)
             pkv_tuple = state.pruner.ensure_capacity(pkv_tuple)
             state.attached = True
         else:
-            _sync_pruner_positions(state, pkv_tuple)
             seq_len = pkv_tuple[0][0].shape[2]
-            added = 0
-            if state.prev_seq_len is not None and seq_len > state.prev_seq_len:
-                added = seq_len - state.prev_seq_len
-            state.prev_seq_len = seq_len
+            cached_len = len(state.pruner.cache_positions)
+            if cached_len < seq_len:
+                added = seq_len - cached_len
+                start_pos = state.pruner.absolute_position
+                new_positions = list(range(start_pos, start_pos + added))
+                state.pruner.cache_positions.extend(new_positions)
+                state.pruner.absolute_position += added
+                state.pruner.tokens_in_round += added
+            elif cached_len > seq_len:
+                state.pruner.cache_positions = state.pruner.cache_positions[-seq_len:]
 
-            tokens_in_round = getattr(state.pruner, "tokens_in_round", 0) + added
-            while tokens_in_round >= state.pruner.round_window:
+            if state.pruner.prefix_length == 0 and state.initial_prefix_length:
+                state.pruner.prefix_length = state.initial_prefix_length
+
+            while state.pruner.should_start_next_round():
                 pkv_tuple = state.pruner.start_next_round(pkv_tuple)
-                tokens_in_round -= state.pruner.round_window
-            state.pruner.tokens_in_round = tokens_in_round
             pkv_tuple = state.pruner.ensure_capacity(pkv_tuple)
 
         outputs = CausalLMOutputWithPast(

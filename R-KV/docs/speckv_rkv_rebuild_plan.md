@@ -59,10 +59,10 @@
    - [x] `R-KV/HuggingFace/run_math.py`：去除对根目录的依赖（迁移 `rkv_cache_utils` 后改 import），同时**保留**已有采样多抽样逻辑（do_sample/num_samples/temperature/top_p/输出 draw_idx）、`aime24=32768` 和 `mix_lambda=0.1`，默认 dtype 仍用 bfloat16。
 
 2) 按 R-KV 范式重写 SpeckV 集成  
-   - [ ] 合并双轨：删除/废弃手写采样分支，仅保留 “forward 内裁剪 + HF generate” 路径。  
-   - [ ] 在 SpeckV 专用 forward patch 内实现：保持 prefix 固定，decode 轮次按 round_window 触发裁剪，kv_budget 不修改 max_length；采样参数使用 HF generate 默认（含 top_k=50、eos）并允许 YAML 透传温度/top_p。  
-   - [ ] 将 SpeckV 注册到与 R-KV 其他方法相同的挂钩方式（可新增 `rkv/compression/speckv.py` 或专用 patch），确保对其他方法零侵入。  
-   - [ ] 移除/合并 `method=sparse_round_prefill_keep` 与 `method=speckv` 的重复代码，保留单一名称（建议 `speckv`）。
+   - [x] 合并双轨：删除/废弃手写采样分支，仅保留 “forward 内裁剪 + HF generate” 路径。  
+   - [x] 在 SpeckV 专用 forward patch 内实现：保持 prefix 固定，decode 轮次按 round_window 触发裁剪，kv_budget 不修改 max_length；采样参数使用 HF generate 默认（含 top_k=50、eos）并允许 YAML 透传温度/top_p。  
+   - [x] 将 SpeckV 注册到与 R-KV 其他方法相同的挂钩方式（可新增 `rkv/compression/speckv.py` 或专用 patch），确保对其他方法零侵入。  
+   - [x] 移除/合并 `method=sparse_round_prefill_keep` 与 `method=speckv` 的重复代码，保留单一名称（建议 `speckv`）。
 
 3) 模板与统计一致性  
    - [ ] 抽象统一的 prompt 构造函数（chat 与非 chat），校准与运行共用；在运行时校验统计文件的元数据（chat 开关、system prompt）与当前配置一致，不一致则直接报错。  
