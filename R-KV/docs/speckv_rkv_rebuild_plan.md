@@ -46,15 +46,15 @@
 按序执行，每一步完成后把 [ ] 改为 [x]。
 
 1) 依赖迁移（自包含）  
-   - [ ] 在 `R-KV/weian_development/` 下建立 SpeckV 子目录（或放入 `rkv/compression/`），复制并重命名下列文件：  
+   - [x] 在 `R-KV/weian_development/` 下建立 SpeckV 子目录（或放入 `rkv/compression/`），复制并重命名下列文件：  
      - `weian_development/hf_offline_runner_sparse/sparse_round_pruner_prefill_keep.py`、`round_pruning_utils.py`、`stats/*`；  
      - `weian_development/rkv_speckv_generate.py`；  
      - 校准依赖的 `weian_development/attention_qk_analysis/capture_qk_distributed.py` 及必要模块；  
      - 最小化版 `weian_development/process_utils.py`（仅保留 `mask_process_command` 等必需函数）。  
      - `weian_development/rkv_cache_utils.py`（当前被 `run_math.py`/`rkv_sharded_eval.py` 引用）。  
-   - [ ] 调整所有 import 指向新路径，确保 `PYTHONPATH` 只需 `R-KV/`，`sys.path` 不再插入仓库根。
-   - [ ] 校准脚本的默认路径（如 `head-sample-file`）改到 `R-KV/`，不再落到根目录。
-   - [ ] `R-KV/HuggingFace/run_math.py`：去除对根目录的依赖（迁移 `rkv_cache_utils` 后改 import），同时**保留**已有采样多抽样逻辑（do_sample/num_samples/temperature/top_p/输出 draw_idx）、`aime24=32768` 和 `mix_lambda=0.1`，默认 dtype 仍用 bfloat16。
+   - [x] 调整所有 import 指向新路径，确保 `PYTHONPATH` 只需 `R-KV/`，`sys.path` 不再插入仓库根。
+   - [x] 校准脚本的默认路径（如 `head-sample-file`）改到 `R-KV/`，不再落到根目录。
+   - [x] `R-KV/HuggingFace/run_math.py`：去除对根目录的依赖（迁移 `rkv_cache_utils` 后改 import），同时**保留**已有采样多抽样逻辑（do_sample/num_samples/temperature/top_p/输出 draw_idx）、`aime24=32768` 和 `mix_lambda=0.1`，默认 dtype 仍用 bfloat16。
 
 2) 按 R-KV 范式重写 SpeckV 集成  
    - [ ] 合并双轨：删除/废弃手写采样分支，仅保留 “forward 内裁剪 + HF generate” 路径。  
