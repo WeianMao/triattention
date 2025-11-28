@@ -81,12 +81,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-count", type=int, default=100, help="Number of heads to sample.")
     parser.add_argument("--sample-seed", type=int, default=42, help="Seed for head sampling.")
     parser.add_argument("--num-traces", type=int, default=3, help="Number of traces to average.")
-    parser.add_argument("--system-prompt", type=str, default=DEFAULT_SYSTEM_PROMPT, help="System prompt for chat template.")
+    parser.add_argument("--system-prompt", type=str, default="", help="System prompt for chat template (unused when chat is off).")
     parser.add_argument(
         "--use-chat-template",
         action="store_true",
-        default=True,
-        help="Apply tokenizer chat template to question before appending trace text (SpeckV baseline requires chat).",
+        default=False,
+        help="Apply tokenizer chat template to question before appending trace text.",
     )
     parser.add_argument(
         "--dtype",
@@ -235,8 +235,9 @@ def aggregate_head_means(
 def main() -> None:
     mask_process_command("PD-L1_binder")
     args = parse_args()
-    if not args.use_chat_template:
-        raise ValueError("SpeckV calibration must use chat template to match R-KV inference.")
+    # SpeckV paper/baseline uses plain prompt (no chat); forbid chat calibration.
+    if bool(args.use_chat_template):
+        raise ValueError("SpeckV calibration uses plain R-KV prompt; use_chat_template must be False.")
 
     records = load_records(args.trace_root, args.num_traces)
     if not records:

@@ -76,10 +76,10 @@
    - [x] dispatcher/runner 使用迁移后的 `process_utils`，确认 merge/eval 流程不变。
 
 5) 验证矩阵（完成即打勾）  
-   - [ ] 烟囱测试：`num_shards=1`，`max_examples≈2`，`num_samples=1`，`max_length≈2048`，`attn_implementation=sdpa`，确认能写出 shard→merge→eval。  
+   - [x] 烟囱测试：`num_shards=1`，`max_examples≈2`，`num_samples=1`，`max_length≈2048`，`attn_implementation=sdpa`，确认能写出 shard→merge→eval。  
    - [ ] 官方对齐测试：`run_speckv_aime24_official_sampled8.sh --gpus ... --num-shards 4`，输出行数=题目数×抽样数，评测正常。  
-   - [ ] 模板/统计一致性：切换 chat 开关或模型后，重跑校准并在日志打印所用 stats 路径，验证调用的是新文件。  
-   - [ ] 回归检查：R-KV 其他方法（rkv/snapkv/h2o/streamingllm）仍可通过相同 dispatcher/runner 运行。
+   - [x] 模板/统计一致性：切换 chat 开关或模型后，重跑校准并在日志打印所用 stats 路径，验证调用的是新文件。  
+   - [x] 回归检查：R-KV 其他方法（rkv/snapkv/h2o/streamingllm）仍可通过相同 dispatcher/runner 运行。
 
 ## 预期单元/集成测试
 - 快速自测：在 SpeckV 模块添加最小单测（如可用 pytest）验证 pruner 对小型假 cache 的裁剪逻辑、round_window 触发、前缀保留（可放到 `R-KV/tests/`，命名 `test_speckv_pruner.py`）。  

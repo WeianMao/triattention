@@ -14,7 +14,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 RKV_ROOT = Path(__file__).resolve().parents[1]
 HF_RKV_ROOT = RKV_ROOT / "HuggingFace"
-for path in (RKV_ROOT, HF_RKV_ROOT):
+for path in (HF_RKV_ROOT, RKV_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
@@ -270,8 +270,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--use_chat_template",
         type=str2bool,
-        default=True,
-        help="Wrap prompts with tokenizer.apply_chat_template when using sparse pruning (SpeckV baseline uses chat).",
+        default=False,
+        help="Wrap prompts with tokenizer.apply_chat_template when using sparse pruning.",
     )
     parser.add_argument(
         "--chat_system_prompt",
@@ -314,17 +314,19 @@ def main(args: argparse.Namespace) -> None:
     output_root = Path(args.output_dir)
 
     method_lower = args.method.lower() if args.method else ""
-    if method_lower == "speckv" and not args.use_chat_template:
-        raise ValueError("SpeckV requires chat template to align with R-KV baseline.")
-    if method_lower == "speckv" and args.kv_budget is None:
-        raise ValueError("kv_budget must be provided for speckv.")
+    if method_lower == "speckv":
+        # SpeckV paper/baseline uses plain prompt (no chat); do not allow chat mode.
+        if args.kv_budget is None:
+            raise ValueError("kv_budget must be provided for speckv.")
+        if bool(args.use_chat_template):
+            raise ValueError("SpeckV uses the plain R-KV prompt; use_chat_template must be False.")
 
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_path, use_fast=True, padding_side="left"
     )
     tokenizer = configure_tokenizer(tokenizer)
 
-    prompt_use_chat = bool(args.use_chat_template) if method_lower == "speckv" else False
+    prompt_use_chat = False
     prompts, test_data = load_dataset(
         Path(args.dataset_path),
         args.dataset_name,

@@ -33,5 +33,5 @@ experiment:
     sparse_score_aggregation: mean
     sparse_head_limit: -1
     sparse_seed: 0
-    use_chat_template: true
-    chat_system_prompt: "You are a helpful assistant."
+    use_chat_template: false
+    chat_system_prompt: ""
