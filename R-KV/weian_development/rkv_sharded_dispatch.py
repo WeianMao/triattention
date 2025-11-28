@@ -13,17 +13,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, TextIO
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+RKV_ROOT = Path(__file__).resolve().parents[1]
+if str(RKV_ROOT) not in sys.path:
+    sys.path.insert(0, str(RKV_ROOT))
 
 import yaml
 
 from weian_development.process_utils import mask_process_command
 
-DEFAULT_CONFIG = PROJECT_ROOT / "R-KV" / "weian_script" / "configs" / "rkv_aime24_sharded.yaml"
-MERGE_SCRIPT = PROJECT_ROOT / "R-KV" / "weian_development" / "merge_rkv_shards.py"
-MULTI_EVAL_SCRIPT = PROJECT_ROOT / "R-KV" / "HuggingFace" / "evaluation" / "eval_math_multi.py"
+DEFAULT_CONFIG = RKV_ROOT / "weian_script" / "configs" / "rkv_aime24_sharded.yaml"
+MERGE_SCRIPT = RKV_ROOT / "weian_development" / "merge_rkv_shards.py"
+MULTI_EVAL_SCRIPT = RKV_ROOT / "HuggingFace" / "evaluation" / "eval_math_multi.py"
 PATH_ARG_KEYS = {"output_dir", "dataset_path", "model_path", "tokenizer_path"}
 
 
@@ -191,9 +191,12 @@ def determine_gpus(args: argparse.Namespace, experiment: Dict) -> List[str]:
 
 def resolve_path(value: str | Path) -> Path:
     path = Path(value).expanduser()
-    if not path.is_absolute():
-        path = (PROJECT_ROOT / path).resolve()
-    return path
+    if path.is_absolute():
+        return path
+    parts = path.parts
+    if parts and parts[0] == "R-KV":
+        path = Path(*parts[1:]) if len(parts) > 1 else Path(".")
+    return (RKV_ROOT / path).resolve()
 
 
 def format_runner_args(args_dict: Dict[str, object], total_shards: int) -> List[str]:
@@ -242,7 +245,7 @@ def launch_shard(
     print(f"[launch] shard {shard_id} -> GPU {gpu}, log {log_path}")
     process = subprocess.Popen(
         shard_cmd,
-        cwd=str(PROJECT_ROOT),
+        cwd=str(RKV_ROOT),
         stdout=log_handle,
         stderr=subprocess.STDOUT,
         env=env,
@@ -365,7 +368,7 @@ def merge_outputs(shard_output_dir: Path, merged_dir_name: str, skip_merge: bool
         return
     cmd = [sys.executable, str(MERGE_SCRIPT), "--method-output-dir", str(shard_output_dir), "--merged-dir-name", merged_dir_name]
     print(f"[merge] {' '.join(cmd)}")
-    subprocess.check_call(cmd, cwd=str(PROJECT_ROOT))
+    subprocess.check_call(cmd, cwd=str(RKV_ROOT))
 
 
 def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Optional[Path], conda_env: str, dry_run: bool, num_samples: int | None = None) -> None:
@@ -397,7 +400,7 @@ def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Opti
         print(f"[dry-run] eval command: {' '.join(cmd)}")
         return
     print(f"[eval] {' '.join(cmd)}")
-    subprocess.check_call(cmd, cwd=str(PROJECT_ROOT))
+    subprocess.check_call(cmd, cwd=str(RKV_ROOT))
 
 
 def main() -> None:

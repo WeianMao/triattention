@@ -34,7 +34,7 @@ Convenience launchers for HuggingFace-based math experiments.
      --model-path /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B
    ```
    - 默认取 3 条 FullKV trace 求均值；需要更多样本可调 `--num-traces`。
-   - 头采样文件默认 `weian_development/hf_offline_runner_sparse/stats/deepseek_r1_llama8b_heads.json`，不存在会自动生成。
+   - 头采样文件默认 `R-KV/weian_development/speckv/stats/deepseek_r1_llama8b_heads.json`，不存在会自动生成。
 2. 运行 8 次或 64 次抽样的稀疏版本（与 R-KV official 设置对齐：flash_attn2 + bf16，kv_budget=2048，prompt 不压缩）：
    ```bash
    # 8 抽样

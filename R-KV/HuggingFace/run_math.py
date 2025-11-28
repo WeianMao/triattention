@@ -11,9 +11,9 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from rkv.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+RKV_ROOT = Path(__file__).resolve().parents[1]
+if str(RKV_ROOT) not in sys.path:
+    sys.path.insert(0, str(RKV_ROOT))
 
 from weian_development.process_utils import mask_process_command
 from weian_development.rkv_cache_utils import reset_model_cache

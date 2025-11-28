@@ -20,19 +20,18 @@ from transformers.generation.logits_process import (
     TopKLogitsWarper,
     TopPLogitsWarper,
 )
-from weian_development.hf_offline_runner_sparse.sparse_round_pruner_prefill_keep import (
-    SparsePruningConfig,
-    SparseRoundPruner,
-)
-from weian_development.rkv_speckv_generate import apply_speckv_generate_patch
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-MODULE_ROOT = REPO_ROOT / "R-KV"
-HF_RKV_ROOT = REPO_ROOT / "R-KV" / "HuggingFace"
-for path in (REPO_ROOT, MODULE_ROOT, HF_RKV_ROOT):
+RKV_ROOT = Path(__file__).resolve().parents[1]
+HF_RKV_ROOT = RKV_ROOT / "HuggingFace"
+for path in (RKV_ROOT, HF_RKV_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from weian_development.speckv.sparse_round_pruner_prefill_keep import (
+    SparsePruningConfig,
+    SparseRoundPruner,
+)
+from weian_development.speckv.rkv_speckv_generate import apply_speckv_generate_patch
 from weian_development.process_utils import mask_process_command
 from weian_development.rkv_cache_utils import reset_model_cache
 from rkv.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
@@ -86,6 +85,16 @@ def resolve_torch_dtype(name: str):
     if normalized == "float16":
         return torch.float16
     raise ValueError(f"Unsupported dtype: {name}")
+
+
+def resolve_under_rkv(path_like: str | Path) -> Path:
+    path = Path(path_like).expanduser()
+    if path.is_absolute():
+        return path
+    parts = path.parts
+    if parts and parts[0] == "R-KV":
+        path = Path(*parts[1:]) if len(parts) > 1 else Path(".")
+    return (RKV_ROOT / path).resolve()
 
 
 def compute_local_runs(num_samples: int, num_shards: int, shard_id: int) -> tuple[int, int]:
@@ -442,9 +451,7 @@ def build_sparse_pruner_config(args: argparse.Namespace, device: torch.device, m
     stats_path = args.sparse_stats_path
     if not stats_path:
         raise ValueError("sparse_stats_path is required for sparse_round_prefill_keep.")
-    resolved_stats = Path(stats_path)
-    if not resolved_stats.is_absolute():
-        resolved_stats = (REPO_ROOT / resolved_stats).resolve()
+    resolved_stats = resolve_under_rkv(stats_path)
     if not resolved_stats.exists():
         raise FileNotFoundError(f"Sparse stats file not found: {resolved_stats}")
 
@@ -715,9 +722,7 @@ def main(args: argparse.Namespace) -> None:
             tokenizer.encode("</think>")[-1],
         ]
     elif method_lower == "speckv":
-        stats_path = Path(args.sparse_stats_path)
-        if not stats_path.is_absolute():
-            stats_path = (REPO_ROOT / stats_path).resolve()
+        stats_path = resolve_under_rkv(args.sparse_stats_path)
         if not stats_path.exists():
             raise FileNotFoundError(f"SpeckV stats file not found: {stats_path}")
         round_window = args.sparse_round_window if args.sparse_round_window and args.sparse_round_window > 0 else args.window_size

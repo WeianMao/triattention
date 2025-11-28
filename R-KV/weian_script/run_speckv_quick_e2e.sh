@@ -16,7 +16,7 @@ SHARD_DIR="${OUT_DIR}/shards"
 GPUS="${GPUS:-0}"
 NUM_SHARDS="${NUM_SHARDS:-1}"
 
-export PYTHONPATH="$ROOT"
+export PYTHONPATH="$ROOT/R-KV"
 
 echo "[1/3] Calibrating sparse stats for Llama3 (SpecKV)…"
 conda run -n rkv python "$ROOT/R-KV/weian_development/rkv_sparse_round_calibrate.py" \

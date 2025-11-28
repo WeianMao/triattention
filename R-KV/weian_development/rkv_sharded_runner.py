@@ -5,10 +5,10 @@ import runpy
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_PATH = REPO_ROOT / "R-KV" / "weian_development" / "rkv_sharded_eval.py"
+RKV_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_PATH = RKV_ROOT / "weian_development" / "rkv_sharded_eval.py"
 
-for path in {REPO_ROOT, SCRIPT_PATH.parent}:
+for path in (RKV_ROOT, SCRIPT_PATH.parent):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 

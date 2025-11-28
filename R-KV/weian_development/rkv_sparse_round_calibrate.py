@@ -8,18 +8,18 @@ import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+RKV_ROOT = Path(__file__).resolve().parents[1]
+if str(RKV_ROOT) not in sys.path:
+    sys.path.insert(0, str(RKV_ROOT))
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from weian_development.attention_qk_analysis.capture_qk_distributed import (
+from weian_development.speckv.attention_qk_analysis.capture_qk_distributed import (
     LayerCaptureBuffer,
     QKCollector,
 )
-from weian_development.hf_offline_runner_sparse.round_pruning_utils import (
+from weian_development.speckv.round_pruning_utils import (
     HeadFrequencyStats,
     build_rotary,
     compute_rotary_tables,
@@ -31,8 +31,7 @@ from weian_development.hf_offline_runner_sparse.round_pruning_utils import (
 from weian_development.process_utils import mask_process_command
 
 DEFAULT_STATS_OUT = (
-    PROJECT_ROOT
-    / "R-KV"
+    RKV_ROOT
     / "outputs"
     / "sample8_fullkv_aime24_official"
     / "stats"
@@ -46,8 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--trace-root",
         type=Path,
-        default=PROJECT_ROOT
-        / "R-KV"
+        default=RKV_ROOT
         / "outputs"
         / "sample8_fullkv_aime24_official",
         help="Directory containing merged.jsonl or shard outputs used as trace text.",
@@ -67,9 +65,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--head-sample-file",
         type=Path,
-        default=PROJECT_ROOT
+        default=RKV_ROOT
         / "weian_development"
-        / "hf_offline_runner_sparse"
+        / "speckv"
         / "stats"
         / "deepseek_r1_llama8b_heads.json",
         help="JSON file describing sampled heads; created if missing.",
