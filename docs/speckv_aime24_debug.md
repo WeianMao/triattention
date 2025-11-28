@@ -95,13 +95,13 @@
 
 ## 2025-02-xx 本轮进展
 - 已回退 Lazy 路径中为 R-KV 适配加入的短路 + `cache_position` 变更，保持 `weian_development/hf_offline_runner_sparse` 纯 Lazy 行为。
-- SpeckV 在 R-KV 下改为原生实现：`R-KV/weian_development/rkv_sharded_eval.py` 内置采样/裁剪（`speckv_generate_sequence`），不再依赖 Lazy 的 `run_sparse_generation`；tokenization 使用 `add_special_tokens=True`，支持 `reset_cache_each_batch`，提示/采样开关与基线一致。
-- SpeckV YAML 统一 `use_chat_template: true` 以匹配现有校准文件（chat 模板统计仍沿用 `deepseek_r1_llama8b_chat_stats.pt`；尚未产出非 chat stats）。涉及：`sample8/64_sparseprefillkeep_aime24_official.yaml`、`sample8_speckv_aime24_quick.yaml`。
-- 修正 `rkv_sparse_round_calibrate.py` 的 `PROJECT_ROOT`（父级改为 parents[2]）并预置 `sys.path`；`rkv_sharded_dispatch.py` 同步注入 `sys.path`，避免缺省 `PYTHONPATH` 时导入失败或路径落到 `R-KV/R-KV/...`。
-- `conda run -n rkv python R-KV/weian_development/rkv_sparse_round_calibrate.py --help` 可正常运行（约 17s 初始化）；`rkv_sharded_dispatch.py --help` 同样通过。
-- quick 配置 dry-run 验证通过：`conda run -n rkv python R-KV/weian_development/rkv_sharded_dispatch.py --config R-KV/weian_script/configs/sample8_speckv_aime24_quick.yaml --gpus 3 --num-shards 1 --skip-existing --no-eval --dry-run`，输出展示 shard0 命令/日志路径，未再现 “No such file or directory”。
-- SpeckV 路径统一强制 chat 模板：`rkv_sparse_round_calibrate.py`/`rkv_sharded_eval.py` 默认 chat 且拒绝非 chat，保持与 R-KV 基线一致。
-- 已用 chat 模板重新跑校准（GPU=3，FA2，float16，3 traces），覆盖输出：`R-KV/outputs/sample8_fullkv_aime24_official/stats/deepseek_r1_llama8b_chat_stats.pt`。
-- 下一步建议：  
-  1) 在空闲 GPU 上跑一次实际 smoke（例如 quick 配置，`--gpus 3 --num-shards 1 --skip-existing --no-eval`，必要时 `--max_examples 1 --num_samples 1` 以加速），确认落盘与评测链路。  
-  2) 完成 smoke 后按需跑官方 8 抽样（`run_speckv_aime24_official_sampled8.sh`），评估精度。
+- SpeckV 采样默认对齐 HF generate：支持多 EOS，top_k=50（不再 top_k=0），避免温度+top_p 过平导致长尾。
+- SpeckV 正在改为“forward 内嵌裁剪 + 直接用 generate”：新增 `weian_development/rkv_speckv_generate.py` 在 CausalLM forward 里按 `round_window` 裁剪 PKV，再交回 HF generate；`rkv_sharded_eval.py` speckv 分支不再用 RKV/SnapKV 的 monkeypatch，而是挂 SpeckV 自己的 forward patch（独立于 baseline，避免污染）。尚待 smoke 验证。
+- SpeckV YAML 统一 `use_chat_template: true` 以匹配现有校准文件（chat stats 仍用 `deepseek_r1_llama8b_chat_stats.pt`）。
+- `rkv_sparse_round_calibrate.py`/`rkv_sharded_dispatch.py` 修正 PROJECT_ROOT + sys.path；chat 模板校准已在 GPU3 重跑并覆盖 stats。
+- 最近评测（旧自写循环）acc=29.6，输出均值 ~11.8k、max 32k+，长尾明显；需在新 forward 路径下重测。
+- 下一步计划：  
+  1) 在空闲 GPU（避开 0/1/2，选 3/6）用极小 smoke（max_examples≈2、num_samples=1、max_length≈2048、sdpa）验证新 forward 集成路径是否正常落盘、长度收敛；  
+  2) 如 smoke 正常，再跑官方 8 抽样评测；若仍长尾，检查位置对齐、stop/EOS、裁剪触发频次；  
+  3) 如需非 chat 模板，先重跑校准再切 YAML。
+- 额外要求（后续工作原则）：R-KV 侧的 SpeckV 需在 `R-KV/` 下独立实现/复用，不再依赖或修改 `weian_development/hf_offline_runner_sparse` 目录的代码；若当前引用了其中的 pruner，应尽快迁移/复制到 R-KV 专用模块并还原原文件。

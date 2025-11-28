@@ -24,6 +24,7 @@ from weian_development.hf_offline_runner_sparse.sparse_round_pruner_prefill_keep
     SparsePruningConfig,
     SparseRoundPruner,
 )
+from weian_development.rkv_speckv_generate import apply_speckv_generate_patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = REPO_ROOT / "R-KV"
@@ -345,7 +346,7 @@ def speckv_generate_sequence(
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     max_new_tokens: int,
-    eos_token_id: Optional[int],
+    eos_token_ids: Optional[Sequence[int]],
     do_sample: bool,
     temperature: float,
     top_p: float,
@@ -356,6 +357,9 @@ def speckv_generate_sequence(
         return input_ids.clone()
 
     processors, warpers = build_sampling_components(do_sample, temperature, top_p, top_k)
+    eos_set: set[int] = set()
+    if eos_token_ids is not None:
+        eos_set.update(int(token_id) for token_id in (eos_token_ids if isinstance(eos_token_ids, (list, tuple, set)) else [eos_token_ids]))
     sequence = input_ids.clone()
 
     with torch.inference_mode():
@@ -390,7 +394,7 @@ def speckv_generate_sequence(
         next_token_tensor = torch.tensor([[token_id]], device=input_ids.device, dtype=torch.long)
         sequence = torch.cat([sequence, next_token_tensor], dim=1)
 
-        if eos_token_id is not None and token_id == eos_token_id:
+        if eos_set and token_id in eos_set:
             break
 
         with torch.inference_mode():
@@ -477,6 +481,8 @@ def run_sparse_round_generation(
     question: str,
     max_length: int,
     pruner_cfg: SparsePruningConfig,
+    eos_token_ids: Optional[Sequence[int]],
+    top_k: int,
 ) -> tuple[str, int, int, str]:
     prompt = format_prompt(question, tokenizer, args.use_chat_template, args.chat_system_prompt)
     tokenized_prompts = tokenizer(
@@ -494,11 +500,11 @@ def run_sparse_round_generation(
         input_ids=tokenized_prompts["input_ids"],
         attention_mask=tokenized_prompts["attention_mask"],
         max_new_tokens=max_new_tokens,
-        eos_token_id=tokenizer.eos_token_id,
+        eos_token_ids=eos_token_ids,
         do_sample=True,
         temperature=args.temperature,
         top_p=args.top_p,
-        top_k=0,
+        top_k=top_k,
         pruner=pruner,
     )
 
@@ -526,7 +532,7 @@ def main(args: argparse.Namespace) -> None:
     output_root = Path(args.output_dir)
 
     method_lower = args.method.lower() if args.method else ""
-    use_sparse_round = method_lower in {"sparse_round_prefill_keep", "speckv"}
+    use_sparse_round = method_lower == "sparse_round_prefill_keep"
     if use_sparse_round and not args.use_chat_template:
         raise ValueError("SpeckV/sparse_round_prefill_keep requires chat template to align with R-KV baseline.")
 
@@ -563,6 +569,10 @@ def main(args: argparse.Namespace) -> None:
             max_keys=int(args.kv_budget),
             model_path=Path(args.model_path),
         )
+        eos_token_ids = model.generation_config.eos_token_id
+        if tokenizer.eos_token_id is None and eos_token_ids:
+            tokenizer.eos_token_id = eos_token_ids[0] if isinstance(eos_token_ids, (list, tuple)) else eos_token_ids
+        top_k = 50  # align with HF generate default top_k when sampling
         for run_id in run_ids:
             artifacts = run_artifacts(output_root, args.shard_id, run_id)
             if run_is_complete(artifacts["run"], artifacts["meta"], expected_records):
@@ -588,6 +598,8 @@ def main(args: argparse.Namespace) -> None:
                         question,
                         args.max_length,
                         pruner_cfg,
+                        eos_token_ids=eos_token_ids,
+                        top_k=top_k,
                     )
                     total_tokens = prefill_tokens + output_tokens
 
@@ -617,6 +629,21 @@ def main(args: argparse.Namespace) -> None:
         torch.cuda.empty_cache()
         return
 
+    speckv_method_config: Dict[str, object] = {}
+    if method_lower == "speckv":
+        if args.kv_budget is None:
+            raise ValueError("kv_budget must be provided for speckv.")
+        speckv_method_config = {
+            "kv_budget": args.kv_budget,
+            "window_size": args.window_size,
+            "sparse_stats_path": args.sparse_stats_path,
+            "sparse_round_window": args.sparse_round_window or args.window_size,
+            "sparse_offset_max_length": args.sparse_offset_max_length,
+            "sparse_score_aggregation": args.sparse_score_aggregation,
+            "sparse_head_limit": args.sparse_head_limit,
+            "sparse_seed": args.sparse_seed,
+        }
+
     method_config = {"budget": args.kv_budget, "window_size": args.window_size}
     if args.method in {"rkv", "snapkv"}:
         method_config.update(
@@ -630,6 +657,8 @@ def main(args: argparse.Namespace) -> None:
         )
     elif args.method == "streamingllm":
         method_config.update({"first_tokens": args.first_tokens})
+    if method_lower == "speckv":
+        method_config = speckv_method_config
 
     compression_config = {
         "method": args.method,
@@ -650,7 +679,7 @@ def main(args: argparse.Namespace) -> None:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    if args.method and args.method.lower() != "fullkv":
+    if args.method and args.method.lower() not in {"fullkv", "speckv"}:
         if "llama" in args.model_path.lower():
             replace_llama(compression_config)
         elif "qwen3" in args.model_path.lower():
@@ -673,7 +702,7 @@ def main(args: argparse.Namespace) -> None:
     model.eval()
     model.config.update(model_config)
 
-    if args.method and args.method.lower() != "fullkv":
+    if args.method and args.method.lower() not in {"fullkv", "speckv"}:
         model.newline_token_ids = [
             tokenizer.encode("\n")[-1],
             tokenizer.encode(".\n")[-1],
@@ -685,6 +714,24 @@ def main(args: argparse.Namespace) -> None:
         model.after_think_token_ids = [
             tokenizer.encode("</think>")[-1],
         ]
+    elif method_lower == "speckv":
+        stats_path = Path(args.sparse_stats_path)
+        if not stats_path.is_absolute():
+            stats_path = (REPO_ROOT / stats_path).resolve()
+        if not stats_path.exists():
+            raise FileNotFoundError(f"SpeckV stats file not found: {stats_path}")
+        round_window = args.sparse_round_window if args.sparse_round_window and args.sparse_round_window > 0 else args.window_size
+        apply_speckv_generate_patch(
+            model,
+            stats_path=stats_path,
+            model_path=Path(args.model_path),
+            kv_budget=int(args.kv_budget),
+            round_window=round_window,
+            offset_max_length=args.sparse_offset_max_length,
+            score_aggregation=args.sparse_score_aggregation,
+            sparse_seed=args.sparse_seed,
+            head_limit=args.sparse_head_limit,
+        )
 
     for run_id in run_ids:
         artifacts = run_artifacts(output_root, args.shard_id, run_id)
@@ -697,8 +744,17 @@ def main(args: argparse.Namespace) -> None:
 
         with artifacts["tmp"].open("w") as fout:
             for local_idx, prompt in enumerate(prompts):
+                prompt_text = prompt
+                if method_lower == "speckv" and args.use_chat_template:
+                    prompt_text = format_prompt(
+                        test_data[local_idx]["question"],
+                        tokenizer,
+                        True,
+                        args.chat_system_prompt,
+                    )
+
                 tokenized_prompts = tokenizer(
-                    [prompt],
+                    [prompt_text],
                     padding="longest",
                     return_tensors="pt",
                     add_special_tokens=True,
@@ -728,7 +784,7 @@ def main(args: argparse.Namespace) -> None:
                 )
 
                 record = dict(test_data[local_idx])
-                record["prompt"] = prompt
+                record["prompt"] = prompt_text
                 record["output"] = decoded
                 record["prefill_tokens"] = prefill_length
                 record["output_tokens"] = output_tokens
