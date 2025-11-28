@@ -36,7 +36,9 @@
 - 提示模板、统计、运行保持一致性：同一 chat 开关、同一 system prompt；若切换模板必须同步重算 stats。
 - 非侵入式：对 R-KV 现有方法（rkv/snapkv/h2o/streamingllm 等）的代码路径零改动；SpeckV 的 monkeypatch/forward patch 与其他方法隔离，不共享状态。
 
-## 参考对照文件（开发规范）
+## 参考对照文件（开发规范 + 执行提示）
+> 完成每个子任务后请将对应的 `[ ]` 改为 `[x]` 并提交 commit，便于交接与追踪。
+
 - R-KV 基线行为参考：`rkv/compression/snapkv.py`、`r1_kv.py`（forward 内 update_kv/裁剪）、`R-KV/weian_development/rkv_sharded_eval.py` 中非 SpeckV 分支的 generate 调用。
 - 提示/数据模板参考：`R-KV/weian_development/rkv_sharded_eval.py` 的 prompt_template 与 `dataset_path=R-KV/HuggingFace/data/aime24.jsonl`；chat 模板参考 `AutoTokenizer.apply_chat_template` 使用方式。
 - 统计生成参考：`R-KV/weian_development/rkv_sparse_round_calibrate.py`（需迁移依赖后自包含）。
