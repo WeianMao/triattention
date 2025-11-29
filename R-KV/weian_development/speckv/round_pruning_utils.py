@@ -27,7 +27,19 @@ DTYPE_MAP = {
 }
 
 
-def rotate_half(x: torch.Tensor) -> torch.Tensor:
+def determine_rope_style(config: AutoConfig) -> str:
+    model_type = getattr(config, "model_type", "")
+    if "llama" in model_type:
+        return "interleaved"  # even/odd pairing
+    return "half"  # front/back pairing (Qwen)
+
+
+def rotate_half(x: torch.Tensor, *, style: str = "half") -> torch.Tensor:
+    if style == "interleaved":
+        # Llama-style even/odd pairing
+        x_even = x[..., ::2]
+        x_odd = x[..., 1::2]
+        return torch.stack((-x_odd, x_even), dim=-1).flatten(-2)
     d = x.shape[-1] // 2
     x1 = x[..., :d]
     x2 = x[..., d:]
@@ -39,6 +51,8 @@ def invert_rope(
     cos: torch.Tensor,
     sin: torch.Tensor,
     scale: float,
+    *,
+    style: str = "half",
 ) -> torch.Tensor:
     if scale == 0:
         raise ValueError("attention scaling factor must be non-zero")
@@ -46,15 +60,19 @@ def invert_rope(
     base = rotated / scale_t
     cos_unit = cos / scale_t
     sin_unit = sin / scale_t
-    return base * cos_unit - rotate_half(base) * sin_unit
+    return base * cos_unit - rotate_half(base, style=style) * sin_unit
 
 
-def to_complex_pairs(tensor: torch.Tensor) -> torch.Tensor:
+def to_complex_pairs(tensor: torch.Tensor, *, style: str = "half") -> torch.Tensor:
     if tensor.size(-1) % 2 != 0:
         raise ValueError("Head dimension must be even to form complex pairs")
-    freq_count = tensor.shape[1] // 2
     real_dtype = torch.float32 if tensor.dtype in (torch.bfloat16, torch.float16) else tensor.dtype
     tensor_real = tensor.to(dtype=real_dtype)
+    if style == "interleaved":
+        real = tensor_real[..., ::2].contiguous()
+        imag = tensor_real[..., 1::2].contiguous()
+        return torch.complex(real, imag)
+    freq_count = tensor.shape[1] // 2
     real = tensor_real[:, :freq_count].contiguous()
     imag = tensor_real[:, freq_count:].contiguous()
     return torch.complex(real, imag)
@@ -103,6 +121,7 @@ def build_rotary(
     if config is None:
         config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
 
+    rope_style = determine_rope_style(config)
     model_type = getattr(config, "model_type", "")
     if "llama" in model_type:
         if LlamaRotaryEmbedding is None:
@@ -119,6 +138,7 @@ def build_rotary(
 
         rotary = LlamaRotaryEmbedding(config=config, device=cache_device)
         rotary.to(dtype=dtype, device=cache_device)
+        rotary._rope_style = rope_style  # type: ignore[attr-defined]
         return rotary
 
     if Qwen3RotaryEmbedding is None:
@@ -136,6 +156,7 @@ def build_rotary(
     config.rope_scaling = rope_scaling
     rotary = Qwen3RotaryEmbedding(config=config, device=cache_device)
     rotary.to(dtype=dtype)
+    rotary._rope_style = rope_style  # type: ignore[attr-defined]
     return rotary
 
 
@@ -189,7 +210,7 @@ def compute_rotary_tables(
     head_dim: int,
     dtype: torch.dtype,
     device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, str]:
     position_ids = torch.arange(seq_len, device=device).unsqueeze(0)
     base = torch.zeros(1, seq_len, head_dim, device=device, dtype=dtype)
     cos_table, sin_table = rotary(base, position_ids)
@@ -197,7 +218,8 @@ def compute_rotary_tables(
     sin_table = sin_table[0]
     inv_freq = rotary.inv_freq.to(device=device, dtype=torch.float64)
     freq_scale = compute_frequency_scaling(rotary, head_dim, dtype, device)
-    return cos_table, sin_table, inv_freq, freq_scale
+    style = getattr(rotary, "_rope_style", "half")
+    return cos_table, sin_table, inv_freq, freq_scale, style
 
 
 def build_geometric_offsets(max_length: int, device: torch.device) -> torch.Tensor:
@@ -215,8 +237,10 @@ def compute_frequency_statistics_from_means(
     q_mean_complex: torch.Tensor,
     q_abs_mean: torch.Tensor,
     k_unrot: torch.Tensor,
+    *,
+    style: str = "half",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    k_complex = to_complex_pairs(k_unrot)
+    k_complex = to_complex_pairs(k_unrot, style=style)
     q_mean_abs = torch.abs(q_mean_complex)
     k_abs = torch.abs(k_complex)
     relative = q_mean_complex.unsqueeze(0) * torch.conj(k_complex)

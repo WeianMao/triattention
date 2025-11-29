@@ -81,6 +81,7 @@ class SparseRoundPruner:
         self.rotary = build_rotary(
             config.device, config.model_path, config.dtype, config=model_config
         )
+        self.rope_style = getattr(self.rotary, "_rope_style", "half")
         self.attention_scale = float(getattr(self.rotary, "attention_scaling", 1.0))
         inv_freq = self.rotary.inv_freq.to(device=config.device, dtype=torch.float32)
         self.head_dim = int(metadata.get("head_dim", inv_freq.numel() * 2))
@@ -314,11 +315,18 @@ class SparseRoundPruner:
             gather_indices = local_indices + start_index
             k_values = key_tensor[0, kv_head].index_select(0, gather_indices)
             k_values = k_values.to(device=self.config.device, dtype=self.config.dtype)
-            k_unrot = invert_rope(k_values, cos_table, sin_table, self.attention_scale)
+            k_unrot = invert_rope(
+                k_values,
+                cos_table,
+                sin_table,
+                self.attention_scale,
+                style=self.rope_style,
+            )
             amp, phi, extra = compute_frequency_statistics_from_means(
                 stats.q_mean_complex,
                 stats.q_abs_mean,
                 k_unrot,
+                style=self.rope_style,
             )
             head_scores = score_keys_for_round(
                 key_indices=key_positions,

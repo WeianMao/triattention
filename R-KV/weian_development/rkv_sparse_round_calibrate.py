@@ -192,7 +192,9 @@ def aggregate_head_means(
     head_dim = buffers[0].q.shape[-1]
     rotary = build_rotary(device, model_path, dtype)
     attention_scale = float(getattr(rotary, "attention_scaling", 1.0))
-    cos_table, sin_table, inv_freq, freq_scale = compute_rotary_tables(rotary, seq_len, head_dim, dtype, device)
+    cos_table, sin_table, inv_freq, freq_scale, rope_style = compute_rotary_tables(
+        rotary, seq_len, head_dim, dtype, device
+    )
     omega = inv_freq[: head_dim // 2]
     freq_scale_sq = freq_scale.pow(2)
 
@@ -205,8 +207,10 @@ def aggregate_head_means(
 
         for layer, head in sampled_heads:
             q_head = buffer.q[layer, head, :local_seq_len, :].to(device=device)
-            q_unrot = invert_rope(q_head, cos_local, sin_local, attention_scale)
-            q_complex = to_complex_pairs(q_unrot)
+            q_unrot = invert_rope(
+                q_head, cos_local, sin_local, attention_scale, style=rope_style
+            )
+            q_complex = to_complex_pairs(q_unrot, style=rope_style)
             q_mean_complex = q_complex.mean(dim=0).to(torch.complex64)
             q_abs_mean = torch.abs(q_complex).mean(dim=0).to(torch.float32)
 
