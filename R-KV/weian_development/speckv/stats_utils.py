@@ -78,3 +78,19 @@ def validate_stats_metadata(
             raise ValueError(
                 f"kv_budget mismatch for stats {stats_path}: expected {expected_kv}, found {stats_kv}."
             )
+
+    expected_rope_style = expected.get("rope_style")
+    if expected_rope_style is not None:
+        stats_rope_style = _require(metadata, "rope_style", stats_path)
+        if str(stats_rope_style) != str(expected_rope_style):
+            raise ValueError(
+                f"rope_style mismatch for stats {stats_path}: expected {expected_rope_style}, found {stats_rope_style}."
+            )
+
+    expected_rope_type = expected.get("rope_type")
+    if expected_rope_type is not None:
+        stats_rope_type = _require(metadata, "rope_type", stats_path)
+        if str(stats_rope_type) != str(expected_rope_type):
+            raise ValueError(
+                f"rope_type mismatch for stats {stats_path}: expected {expected_rope_type}, found {stats_rope_type}."
+            )

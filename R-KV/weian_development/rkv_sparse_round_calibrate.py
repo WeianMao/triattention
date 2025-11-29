@@ -184,7 +184,7 @@ def aggregate_head_means(
     model_path: Path,
     dtype: torch.dtype,
     device: torch.device,
-) -> Dict[Tuple[int, int], HeadFrequencyStats]:
+) -> tuple[Dict[Tuple[int, int], HeadFrequencyStats], Dict[str, object]]:
     if not buffers:
         raise ValueError("No traces captured; cannot compute stats.")
 
@@ -233,7 +233,11 @@ def aggregate_head_means(
             q_mean_complex=payload["q_mean_sum"] / count,
             q_abs_mean=payload["q_abs_sum"] / count,
         )
-    return stats
+    rope_meta = {
+        "rope_style": rope_style,
+        "rope_type": getattr(rotary, "rope_type", None),
+    }
+    return stats, rope_meta
 
 
 def main() -> None:
@@ -295,7 +299,7 @@ def main() -> None:
         buffers.append(buffer)
         torch.cuda.empty_cache()
 
-    stats_map = aggregate_head_means(
+    stats_map, rope_meta = aggregate_head_means(
         buffers,
         sampled_heads,
         args.model_path,
@@ -314,6 +318,8 @@ def main() -> None:
         "prompt_template": PROMPT_TEMPLATE,
         "kv_budget": int(args.kv_budget),
         "attn_implementation": args.attn_implementation,
+        "rope_style": rope_meta.get("rope_style"),
+        "rope_type": rope_meta.get("rope_type"),
     }
     save_head_frequency_stats(args.output_path, sampled_heads, stats_map, metadata)
     print(f"Saved sparse round stats to {args.output_path}")

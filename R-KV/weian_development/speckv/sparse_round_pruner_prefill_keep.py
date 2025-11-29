@@ -14,6 +14,7 @@ from weian_development.speckv.round_pruning_utils import (
     build_rotary,
     compute_frequency_statistics_from_means,
     compute_frequency_scaling,
+    determine_rope_style,
     invert_rope,
     load_head_frequency_stats,
     score_keys_for_round,
@@ -49,15 +50,28 @@ class SparseRoundPruner:
         if config.max_keys < config.round_window:
             raise ValueError("max_keys must be >= round_window for round-based pruning")
         self.config = config
-        metadata, stats_map = load_head_frequency_stats(config.stats_path, config.device)
-        if config.metadata_expectations:
-            validate_stats_metadata(metadata, config.metadata_expectations, stats_path=config.stats_path)
-        sampled_heads = [tuple(item) for item in metadata.get("sampled_heads", [])]
-        if not sampled_heads:
-            raise ValueError("Stats file does not contain any sampled heads")
         model_config = AutoConfig.from_pretrained(
             str(config.model_path), trust_remote_code=True
         )
+        rope_scaling = getattr(model_config, "rope_scaling", {}) or {}
+        default_expectations: Dict[str, object] = {
+            "rope_style": determine_rope_style(model_config),
+        }
+        rope_type = rope_scaling.get("rope_type") or rope_scaling.get("type") or getattr(model_config, "rope_type", None)
+        if rope_type:
+            default_expectations["rope_type"] = rope_type
+
+        metadata, stats_map = load_head_frequency_stats(config.stats_path, config.device)
+        merged_expectations: Dict[str, object] = {}
+        if config.metadata_expectations:
+            merged_expectations.update(config.metadata_expectations)
+        merged_expectations.update({k: v for k, v in default_expectations.items() if v is not None})
+        if merged_expectations:
+            validate_stats_metadata(metadata, merged_expectations, stats_path=config.stats_path)
+
+        sampled_heads = [tuple(item) for item in metadata.get("sampled_heads", [])]
+        if not sampled_heads:
+            raise ValueError("Stats file does not contain any sampled heads")
         layer_count = int(getattr(model_config, "num_hidden_layers", len(sampled_heads)))
         filtered_heads = [
             head for head in sampled_heads if 0 <= head[0] < layer_count
