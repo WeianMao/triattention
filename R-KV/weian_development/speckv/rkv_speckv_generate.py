@@ -155,7 +155,18 @@ def apply_speckv_generate_patch(
         if getattr(outputs, "past_key_values", None) is None:
             return outputs
 
-        if past_key_values is None and state.attached:
+        # Reset pruner state if starting a new generation (empty cache).
+        # transformers.generate() may pass None or an empty DynamicCache.
+        is_empty_cache = True
+        if past_key_values is not None:
+            if isinstance(past_key_values, Cache):
+                if past_key_values.get_seq_length() > 0:
+                    is_empty_cache = False
+            elif isinstance(past_key_values, (tuple, list)):
+                if len(past_key_values) > 0 and past_key_values[0][0].shape[2] > 0:
+                    is_empty_cache = False
+        
+        if is_empty_cache and state.attached:
             state.pruner = SparseRoundPruner(state.config)
             state.attached = False
             state.initial_prefix_length = None
