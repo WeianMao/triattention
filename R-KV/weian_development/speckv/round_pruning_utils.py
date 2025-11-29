@@ -60,6 +60,24 @@ def invert_rope(
     base = rotated / scale_t
     cos_unit = cos / scale_t
     sin_unit = sin / scale_t
+    if style == "interleaved":
+        # Allow even/odd to carry different cos/sin (e.g., YaRN/llama3).
+        even = base[..., ::2]
+        odd = base[..., 1::2]
+        cos_even = cos_unit[..., ::2]
+        cos_odd = cos_unit[..., 1::2]
+        sin_even = sin_unit[..., ::2]
+        sin_odd = sin_unit[..., 1::2]
+        det = cos_even * cos_odd + sin_even * sin_odd
+        det = det.clamp_min(1e-12)
+        # Forward: y_even = x_even * cos_even - x_odd * sin_even
+        #          y_odd  = x_odd  * cos_odd  + x_even * sin_odd
+        orig_even = (even * cos_odd + odd * sin_even) / det
+        orig_odd = (odd * cos_even - even * sin_odd) / det
+        restored = torch.empty_like(base)
+        restored[..., ::2] = orig_even
+        restored[..., 1::2] = orig_odd
+        return restored
     return base * cos_unit - rotate_half(base, style=style) * sin_unit
 
 
