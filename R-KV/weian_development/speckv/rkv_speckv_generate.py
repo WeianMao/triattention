@@ -143,7 +143,6 @@ def apply_speckv_generate_patch(
             state.pruner.attach_initial_cache(pkv_tuple)
             state.initial_prefix_length = state.pruner.prefix_length
             pkv_tuple = state.pruner.enforce_max_limit(pkv_tuple)
-            pkv_tuple = state.pruner.ensure_capacity(pkv_tuple)
             state.attached = True
         else:
             seq_len = pkv_tuple[0][0].shape[2]
@@ -163,6 +162,9 @@ def apply_speckv_generate_patch(
 
             while state.pruner.should_start_next_round():
                 pkv_tuple = state.pruner.start_next_round(pkv_tuple)
+
+        # Align with R-KV budget-based compression: only prune when exceeding budget.
+        if state.pruner._dynamic_cache_size > state.pruner.max_keys:
             pkv_tuple = state.pruner.ensure_capacity(pkv_tuple)
 
         outputs = CausalLMOutputWithPast(

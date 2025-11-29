@@ -157,7 +157,7 @@ def capture_qk_single(
     text: str,
     precision: torch.dtype,
 ) -> LayerCaptureBuffer:
-    encoded = tokenizer(text, return_tensors="pt", add_special_tokens=False)
+    encoded = tokenizer(text, return_tensors="pt", add_special_tokens=True)
     input_ids = encoded["input_ids"].to(model.device)
     attention_mask = encoded["attention_mask"].to(model.device)
     text_config = model.config.get_text_config()
