@@ -97,22 +97,45 @@ def apply_speckv_generate_patch(
         position_ids_override = position_ids
 
         if past_key_values is not None and input_ids is not None:
-            # Keep absolute RoPE positions aligned with pruner state during decode.
+            # Keep RoPE absolute (matches stats), but write new keys/values into a compact cache
+            # so pruned tokens are not reintroduced as zero-filled holes.
             bsz, step = input_ids.shape
+
+            # Absolute positions for rotary.
             start_pos = state.pruner.absolute_position
-            cache_positions = torch.arange(
+            abs_positions = torch.arange(
                 start_pos,
                 start_pos + step,
                 device=input_ids.device,
                 dtype=torch.long,
             )
             if bsz > 1:
-                cache_positions = cache_positions.unsqueeze(0).expand(bsz, -1)
+                abs_positions = abs_positions.unsqueeze(0).expand(bsz, -1)
             else:
-                cache_positions = cache_positions.unsqueeze(0)
-            cache_position_override = cache_positions
-            if position_ids is None:
-                position_ids_override = cache_positions
+                abs_positions = abs_positions.unsqueeze(0)
+            position_ids_override = abs_positions
+
+            # Relative positions for cache placement (compact, contiguous).
+            current_cache_len = None
+            if isinstance(past_key_values, Cache) and hasattr(past_key_values, "get_seq_length"):
+                current_cache_len = int(past_key_values.get_seq_length())
+            elif isinstance(past_key_values, (tuple, list)) and past_key_values:
+                current_cache_len = int(past_key_values[0][0].shape[2])
+
+            if current_cache_len is not None:
+                rel_positions = torch.arange(
+                    current_cache_len,
+                    current_cache_len + step,
+                    device=input_ids.device,
+                    dtype=torch.long,
+                )
+                if bsz > 1:
+                    rel_positions = rel_positions.unsqueeze(0).expand(bsz, -1)
+                else:
+                    rel_positions = rel_positions.unsqueeze(0)
+                cache_position_override = rel_positions
+            else:
+                cache_position_override = None
 
         outputs = orig_forward(
             input_ids=input_ids,
