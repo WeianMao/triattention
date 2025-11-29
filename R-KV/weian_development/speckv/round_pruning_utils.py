@@ -29,8 +29,10 @@ DTYPE_MAP = {
 
 def determine_rope_style(config: AutoConfig) -> str:
     model_type = getattr(config, "model_type", "")
+    # HF Llama (incl. llama3 / YaRN scalings) applies RoPE by pairing the front/back
+    # halves of the head dimension, not even/odd interleaving.
     if "llama" in model_type:
-        return "interleaved"  # even/odd pairing
+        return "half"
     return "half"  # front/back pairing (Qwen)
 
 
