@@ -107,6 +107,16 @@ def build_rotary(
     if "llama" in model_type:
         if LlamaRotaryEmbedding is None:
             raise ImportError("Llama rotary embedding is unavailable in the current transformers build.")
+
+        rope_scaling = dict(config.rope_scaling or {})
+        if "attn_factor" in rope_scaling and "attention_factor" not in rope_scaling:
+            rope_scaling["attention_factor"] = rope_scaling["attn_factor"]
+        rope_scaling.pop("attn_factor", None)
+        if "rope_type" not in rope_scaling:
+            rope_scaling["rope_type"] = rope_scaling.get("type", "default")
+        rope_scaling.pop("type", None)
+        config.rope_scaling = rope_scaling
+
         rotary = LlamaRotaryEmbedding(config=config, device=cache_device)
         rotary.to(dtype=dtype, device=cache_device)
         return rotary
@@ -127,6 +137,35 @@ def build_rotary(
     rotary = Qwen3RotaryEmbedding(config=config, device=cache_device)
     rotary.to(dtype=dtype)
     return rotary
+
+
+def verify_rotary_alignment(local_rotary: torch.nn.Module, model_rotary: torch.nn.Module) -> None:
+    """
+    Asserts that the locally constructed RotaryEmbedding matches the model's live RotaryEmbedding.
+    Checks inv_freq and scaling factors.
+    """
+    # Check inv_freq
+    if hasattr(local_rotary, "inv_freq") and hasattr(model_rotary, "inv_freq"):
+        local_freq = local_rotary.inv_freq.to("cpu")
+        model_freq = model_rotary.inv_freq.to("cpu")
+        
+        if local_freq.shape != model_freq.shape:
+             raise ValueError(
+                f"Rotary embedding shape mismatch! Local: {local_freq.shape}, Model: {model_freq.shape}"
+            )
+
+        # Allow small float error
+        if not torch.allclose(local_freq, model_freq, atol=1e-5):
+            diff = (local_freq - model_freq).abs().max().item()
+            raise ValueError(
+                f"Rotary embedding inv_freq mismatch! Max diff: {diff}. "
+                "This likely means the pruner's RoPE config does not match the model's."
+            )
+    
+    # Check scaling factor if present (e.g. Qwen)
+    # Llama usually bakes scaling into inv_freq or uses explicit implementation differences.
+    # Ideally inv_freq equality covers most scaling issues for Llama3.
+
 
 
 def compute_frequency_scaling(

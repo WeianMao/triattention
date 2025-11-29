@@ -14,6 +14,7 @@ from weian_development.speckv.sparse_round_pruner_prefill_keep import (
     SparsePruningConfig,
     SparseRoundPruner,
 )
+from weian_development.speckv.round_pruning_utils import verify_rotary_alignment
 
 
 @dataclass
@@ -76,6 +77,34 @@ def apply_speckv_generate_patch(
     )
     state = _SpeckVState(pruner=SparseRoundPruner(pruner_cfg), config=pruner_cfg)
 
+    # CRITICAL SAFETY CHECK: Verify that the Pruner's internal Rotary Embedding matches the Model's live one.
+    #
+    # WHY THIS IS MANDATORY:
+    # If these do not match (e.g., due to "attn_factor" vs "factor" config mismatches in Llama/Qwen),
+    # the pruner will use WRONG frequencies to invert keys. This results in garbage scores (GIGO),
+    # causing the algorithm to randomly drop important tokens while thinking it's doing a good job.
+    # This leads to silent performance degradation ("landmines").
+    #
+    # DO NOT REMOVE OR SUPPRESS THIS CHECK.
+    model_rotary_emb = None
+    try:
+        # Robustly attempt to locate the rotary embedding in standard HF models (Llama, Qwen, etc.)
+        if hasattr(model, "model") and hasattr(model.model, "layers"):
+            layers = model.model.layers
+            if len(layers) > 0 and hasattr(layers[0], "self_attn"):
+                attn = layers[0].self_attn
+                if hasattr(attn, "rotary_emb"):
+                    model_rotary_emb = attn.rotary_emb
+    except Exception:
+        pass
+
+    if model_rotary_emb is not None:
+        # This function raises ValueError on mismatch. We MUST let it crash the process.
+        verify_rotary_alignment(state.pruner.rotary, model_rotary_emb)
+    else:
+        print("[SpeckV] WARNING: Could not locate model.model.layers[0].self_attn.rotary_emb to verify alignment.")
+        print("[SpeckV] BEWARE: Silent config mismatches are possible if architecture is non-standard.")
+
     orig_forward = model.forward
 
     def speckv_forward(
@@ -95,6 +124,7 @@ def apply_speckv_generate_patch(
     ):
         cache_position_override = cache_position
         position_ids_override = position_ids
+        attention_mask_override = attention_mask
 
         if past_key_values is not None and input_ids is not None:
             # Keep RoPE absolute (matches stats), but write new keys/values into a compact cache
@@ -134,12 +164,16 @@ def apply_speckv_generate_patch(
                 else:
                     rel_positions = rel_positions.unsqueeze(0)
                 cache_position_override = rel_positions
-            else:
-                cache_position_override = None
+
+            # After pruning, the cached KV length no longer matches the original attention_mask.
+            # Rely on cache_position + causal mask instead of a stale full-length mask.
+            attention_mask_override = None
+        else:
+            cache_position_override = None
 
         outputs = orig_forward(
             input_ids=input_ids,
-            attention_mask=attention_mask,
+            attention_mask=attention_mask_override,
             position_ids=position_ids_override,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
