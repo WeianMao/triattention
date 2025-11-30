@@ -7,20 +7,24 @@
   - 目标：锁定 SpecKV 关键路径和接口差异源。  
   - 动作：逐段标记 pruner 状态机、kv_budget 计算、position/RoPE 处理、round/窗口更新、prompt 模板、采样接口/参数、模型加载/分片、数据入口，做成对照表草稿。  
   - 验证：不跑代码，输出对照表初稿（可在差异 MD 草稿中形成表格）。  
+  - 执行计划：依次阅读三份脚本并按“pruner/kv_budget/position+RoPE/round窗口/prompt+数据/采样+前向patch/模型加载+分片”整理要点；记录在差异草稿表，标注潜在不一致点与待确认项；初步标记允许差异 vs 可能问题。
 - [ ] 定义“必须一致 vs 允许差异”清单  
   - 目标：约束后续实现不偏离关键点。  
   - 动作：基于对照表标注硬性一致项（pruner/RoPE/kv_budget/prompt/数据/模型）和可放宽项（采样温度、logprobs 开关、日志路径等）。  
   - 验证：在差异 MD 草稿中列清单，用于后续自检。  
+  - 执行计划：从对照表摘出关键一致项与允许差异项，形成分区列表；对不确定项加“需确认”标记，准备后续同步或告警。
 
 ## 二、脚本设计草稿（Qwen SpecKV 两套）
 - [ ] SpecKV on `run_rkv_aime25_official_sampled8_qwen.sh` 骨架  
   - 目标：设计改动点列表（算法换 SpecKV，其余保持 R-KV 风格）。  
   - 动作：标出需要改的函数/参数/flag（SpecKV 前向 patch、pruner 配置、kv_budget、prompt/数据源）。  
   - 验证：设计审阅，自检是否覆盖所有关键一致项。  
+  - 执行计划：基于差异清单列出需替换的模块和脚本段（模型加载、前向 hook、pruner/kv_budget 参数、prompt 数据指向）；写成修改点 bullets，注明与 LazyEviction/Qwen 基线对齐依据。
 - [ ] SpecKV on `run_speckv_aime24_official_sampled8.sh` 改模型为 Qwen  
   - 目标：明确从 Llama 切到 Qwen 的所有配置/依赖改动。  
   - 动作：列出模型路径、tokenizer、RoPE/position 适配、分布式/分片配置、采样接口调整。  
   - 验证：设计审阅，自检是否覆盖所有关键一致项。  
+  - 执行计划：梳理现有 Llama 版涉及模型/分片/采样/位置相关设置，标注替换为 Qwen 时的改动项与风险；输出为修改步骤列表，勾连到关键一致项。
 
 ## 三、核心逻辑对齐与实现
 - [ ] 抽取/复核 SpecKV 核心逻辑（pruner 状态、kv_budget、position/RoPE、round/窗口、prefix 保留），必要时从早期 Qwen 版移植。
