@@ -9,11 +9,11 @@
 - 入口脚本：`R-KV/weian_script/aime24_official_sampled8/run_speckv_aime24_official_sampled8.sh`（调用 `R-KV/weian_development/rkv_sharded_dispatch.py`，使用 `configs/sample8_sparseprefillkeep_aime24_official.yaml`；固定 8 draws）。
 - 上游调试文档：`weian_development/rkv_debug/docs/kv_pruning_trace_upstream.md`（Qwen 仿真，依赖 `weian_development/attention_qk_analysis/capture_qk_distributed.py` 与 `online_k_pruning_viz/attention_pruning_case_study_hybrid_rounds_xtrace.py`）。
 - 已采样 Reasoning Trace：`R-KV/outputs/sample8_fullkv_aime24_official/shards/shard00.jsonl` 的第 2 行（`"id": 61`）。调试时需要锁定该样本，确保与仿真一致。
-- 相关配置：`R-KV/weian_script/configs/sample8_snapkv_aime24.yaml`（小样本烟雾测试），`sample64_snapkv_aime24.yaml`（完整运行）。
+- 相关配置：`R-KV/weian_script/configs/sample8_sparseprefillkeep_aime24_official.yaml`（入口脚本当前指向，实验名/输出/日志均为 `sample8_speckv_aime24_official`），`sample8_speckv_aime24_quick.yaml`（更短的 smoke），`sample64_sparseprefillkeep_aime24_official.yaml`（全量 speckv 版本）。
 
 ### 工作分块与可交付物
 - [X] **A. 基线重放与对齐确认**
-  - [X] 从 `run_speckv_aime24_official_sampled8.sh` 读取实际命令行与 env，生成最小可重放指令。最小重放示例：`bash R-KV/weian_script/aime24_official_sampled8/run_speckv_aime24_official_sampled8.sh --dry-run`（默认 auto GPU/num_shards=8，配置 `R-KV/weian_script/configs/sample8_sparseprefillkeep_aime24_official.yaml`，输出到 `R-KV/outputs/sample8_sparseprefillkeep_aime24_official/shards`，合并目录 `R-KV/outputs/sample8_sparseprefillkeep_aime24_official/merged`，日志 `R-KV/logs/sample8_sparseprefillkeep_aime24_official`）。
+  - [X] 从 `run_speckv_aime24_official_sampled8.sh` 读取实际命令行与 env，生成最小可重放指令。最小重放示例：`bash R-KV/weian_script/aime24_official_sampled8/run_speckv_aime24_official_sampled8.sh --dry-run`（默认 auto GPU/num_shards=8，配置 `R-KV/weian_script/configs/sample8_sparseprefillkeep_aime24_official.yaml`；输出目录 `R-KV/outputs/sample8_speckv_aime24_official/shards`，合并目录 `R-KV/outputs/sample8_speckv_aime24_official/merged`，日志 `R-KV/logs/sample8_speckv_aime24_official`）。
   - [X] 交付物：一份 README 片段或注释，记录“原样”重放命令、依赖的 YAML、期望输出目录（不修改代码）。本脚本固定 8 draws，不读取 `SAMPLES` 环境变量。
   - [X] 测试：`python -m compileall R-KV/weian_development R-KV/weian_script` 确认语法（已在当前工作区执行，成功）。
 
@@ -23,17 +23,25 @@
   - [X] 保持 run 脚本配置（校准、裁剪、采样）不变，仅在旁路中读取；元数据写入 `metadata.json`（model_path/dataset_path/kv_budget/window_size/attn_implementation/load_dtype/temperature/top_p/prefill_length 等）。
   - [X] 交付物：捕获模块及调用说明（见上），落盘示例：`RKV_QK_CAPTURE_DIR=outputs/qk_capture` 时，会生成 `outputs/qk_capture/shard00/run000_sample00061/qk_layer00.pt` 等。
   - [X] 测试：`python -m compileall R-KV/weian_development R-KV/HuggingFace/rkv`（已执行，成功）；后续烟雾需实际跑 `"id": 61` 单条验证文件生成。
+- [X] **已缓存样本（可直接用于后续指标/可视化）**
+  - [X] 通过 `weian_development/rkv_debug/capture_fullkv_qk.py` 已落盘 `outputs/qk_capture_fullkv/shard00/run001_sample00061/{qk.pt,metadata.json}`（prefill_length=14207，seq_len=14207，32 层/32 头，attn=flash_attention_2，dtype=bfloat16，seed=666，model `/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B`，dataset `R-KV/HuggingFace/data/aime24.jsonl`，response_jsonl 指向 `R-KV/outputs/sample8_fullkv_aime24_official/shards/shard00.jsonl` 并已附带 reasoning）。
+  - [X] 后续命中率/裁剪指标与可视化可优先复用该目录，无需重新捕获。
 
 - [ ] **C. 命中率与裁剪指标复刻**
-  - [ ] 从 Qwen 仿真指标（命中率、被裁剪 token 占比、位置分布等）抽取公式，映射到 LLaMA 输出的旁路数据；如缺失字段，记录需要从哪一层新增观测但仍不改写原逻辑。
-  - [ ] 指标计算脚本应独立于主推理（离线分析），输入为 B 步骤落盘的张量/元数据。
+  - [ ] 参考 `online_k_pruning_viz/attention_pruning_case_study_hybrid_rounds_xtrace.py` 中的命中率/裁剪统计（包含 argmax retention、被淘汰比例等），抽取公式并映射到 LLaMA 捕获的 Q/K；如缺失字段，记录需要从哪一层新增观测但仍不改写原逻辑。
+  - [ ] 指标计算脚本应独立于主推理（离线分析），输入为 B 步骤落盘的张量/元数据或上述 `outputs/qk_capture_fullkv/...` 目录；保持 SpeckV 决策流程不变，仅做旁路计算。
   - [ ] 交付物：指标计算脚本 + 指标定义文档（列出与 Qwen 的一一对应关系、可能的偏差原因）。
   - [ ] 测试：用 `"id": 61` 的捕获结果跑指标脚本，输出 JSON/CSV 摘要；检查运行成功即可，不对数值阈值做断言。
+  - [X] 已新增 LLaMA 适配的离线脚本 `weian_development/rkv_debug/attention_pruning_llama_xtrace.py`（复刻 hybrid rounds xtrace，保持 SpeckV 逻辑不变），可直接读取 `outputs/qk_capture_fullkv/shard00/run001_sample00061`。
+- [X] 烟雾运行（为降低计算量仅截断前 2048 tokens）：  
+  `python weian_development/rkv_debug/attention_pruning_llama_xtrace.py outputs/qk_capture_fullkv --trace shard00/run001_sample00061 --model-path /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B --device cuda:0 --sample-count 2 --max-seq-len 2048 --patch-size 32 --min-patch-size 16 --max-keys 2048 --round-window 128 --score-aggregation mean --verbose`  
+    产出指标 `outputs/llama_pruning_case_studies_xtrace/run001_sample00061/agg_mean_max2048_w128/retention_metrics.json`，截断长度下整体 retention=1.000；head 采样来自 `weian_development/rkv_debug/llama_sample_heads.json`（已有 8 个 head，sample-count 仅在文件缺失时生效）。`--patch-size/--min-patch-size` 用于提升短序列可视化对比度，长序列可省略。
 
 - [ ] **D. 可视化复刻**
-  - [ ] 参照 `online_k_pruning_viz/attention_pruning_case_study_hybrid_rounds_xtrace.py` 的可视化流程，绘制与 SnapKV 相关的 heatmap/trajectory；如果维度不匹配（头数/层数），在文档中注明映射规则，保持绘图代码只读原始捕获数据。
+  - [ ] 直接复用/移植 `online_k_pruning_viz/attention_pruning_case_study_hybrid_rounds_xtrace.py` 中的绘图管线（heatmap、trajectory、per-layer retention 柱状图等），数据源指向 SpeckV 路径的捕获张量；如头数/层数与 Qwen 版本不一致，在文档中注明映射规则，保持绘图代码只读原始捕获数据。
   - [ ] 交付物：可视化脚本、示例截图路径、运行命令。
   - [ ] 测试：对 `"id": 61` 数据生成一张示例图，确认脚本无异常退出。
+  - [X] 同一脚本自动生成可视化，输出目录同上（`outputs/llama_pruning_case_studies_xtrace/run001_sample00061/agg_mean_max2048_w128/`），包含 baseline/pruned heatmap 与 argmax 覆盖图（每个采样 head 各一对）以及层均值柱状图。
 
 - [ ] **E. 差异与潜在缺口记录**
   - [ ] 列出 Qwen 仿真与 LLaMA 实跑在框架、前处理、KV 管理策略上的差异，标记哪些可能导致性能差异（但不在本轮修复），供后续定位。
