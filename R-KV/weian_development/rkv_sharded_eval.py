@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -29,6 +30,25 @@ from weian_development.speckv.prompt_utils import (
     extract_question_from_record,
 )
 from weian_development.speckv.stats_utils import normalize_dtype_name
+try:
+    from weian_development.rkv_debug.qk_capture import (
+        activate_capture,
+        deactivate_capture,
+        capture_requested_for_sample,
+        patch_llama_attention_for_capture,
+    )
+except Exception:  # pragma: no cover - fail open
+    def activate_capture(*args, **kwargs):
+        return
+
+    def deactivate_capture():
+        return
+
+    def capture_requested_for_sample(*args, **kwargs):
+        return False
+
+    def patch_llama_attention_for_capture():
+        return False
 
 dataset2key = {
     "gsm8k": ["question", "answer"],
@@ -406,6 +426,24 @@ def main(args: argparse.Namespace) -> None:
     model.eval()
     model.config.update(model_config)
 
+    capture_root = os.environ.get("RKV_QK_CAPTURE_DIR")
+    capture_root_path = Path(capture_root).expanduser() if capture_root else None
+    capture_model_info = {
+        "model_path": args.model_path,
+        "dataset_path": args.dataset_path,
+        "kv_budget": args.kv_budget,
+        "window_size": args.window_size,
+        "method": method_name,
+        "attn_implementation": args.attn_implementation,
+        "load_dtype": args.load_dtype,
+        "temperature": args.temperature,
+        "top_p": args.top_p,
+    }
+    if capture_root_path:
+        patched = patch_llama_attention_for_capture()
+        if not patched:
+            sys.stderr.write("[qk_capture] failed to patch LlamaAttention for capture; proceeding without QK dumps.\n")
+
     if method_name and method_name not in {"fullkv", "speckv"}:
         model.newline_token_ids = [
             tokenizer.encode("\n")[-1],
@@ -465,11 +503,24 @@ def main(args: argparse.Namespace) -> None:
                 ).to("cuda")
                 prefill_length = int(tokenized_prompts["attention_mask"].sum().item())
                 sample_idx = test_data[local_idx]["index"]
+                record_id = int(test_data[local_idx].get("id", sample_idx))
                 seed_value = args.seed + run_id * RUN_SEED_STRIDE + sample_idx
                 set_seed(seed_value)
 
                 if args.reset_cache_each_batch:
                     reset_model_cache(model)
+
+                if capture_root_path and capture_requested_for_sample(record_id):
+                    activate_capture(
+                        capture_root_path,
+                        shard_id=args.shard_id,
+                        run_id=run_id,
+                        sample_id=record_id,
+                        prefill_length=prefill_length,
+                        model_info=capture_model_info,
+                    )
+                else:
+                    deactivate_capture()
 
                 output = model.generate(
                     **tokenized_prompts,
@@ -497,6 +548,7 @@ def main(args: argparse.Namespace) -> None:
                 record["draw_idx"] = run_id
 
                 fout.write(json.dumps(record, ensure_ascii=False) + "\n")
+                deactivate_capture()
             torch.cuda.empty_cache()
 
         meta_tmp = artifacts["meta_tmp"]
