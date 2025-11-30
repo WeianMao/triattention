@@ -35,6 +35,7 @@ class SparsePruningConfig:
     seed: int | None = None
     head_limit: int | None = None
     metadata_expectations: Dict[str, object] | None = None
+    normalize_scores: bool = False
 
 
 class SparseRoundPruner:
@@ -126,6 +127,7 @@ class SparseRoundPruner:
         self.round_window = config.round_window
         self.max_keys = config.max_keys
         self.score_aggregation = config.score_aggregation
+        self.normalize_scores = bool(getattr(config, "normalize_scores", False))
         self.generator: torch.Generator | None = None
         self.prefix_length: int = 0
         if config.seed is not None:
@@ -356,6 +358,10 @@ class SparseRoundPruner:
             per_head_scores.append(head_scores)
 
         head_matrix = torch.stack(per_head_scores, dim=0)
+        if self.normalize_scores and head_matrix.numel() > 0:
+            mean = head_matrix.mean(dim=1, keepdim=True)
+            std = head_matrix.std(dim=1, unbiased=False, keepdim=True).clamp_min(1e-6)
+            head_matrix = (head_matrix - mean) / std
         if self.generator is not None and head_matrix.numel() > 0:
             noise = torch.rand(
                 head_matrix.shape,

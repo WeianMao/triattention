@@ -63,6 +63,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-output-dir", type=str, help="Directory to write eval results")
     parser.add_argument("--dataset", type=str, default="aime24", help="Dataset name for eval script")
     parser.add_argument("--dry-run", action="store_true", help="Print what would run without launching processes")
+    parser.add_argument(
+        "--sparse-normalize-scores",
+        dest="sparse_normalize_scores",
+        action="store_true",
+        help="Override runner arg: enable sparse score normalization for SpeckV.",
+    )
+    parser.add_argument(
+        "--no-sparse-normalize-scores",
+        dest="sparse_normalize_scores",
+        action="store_false",
+        help="Override runner arg: disable sparse score normalization for SpeckV.",
+    )
+    parser.set_defaults(sparse_normalize_scores=None)
     return parser.parse_args()
 
 
@@ -421,6 +434,8 @@ def main() -> None:
     runner_args = experiment.get("runner_args", {}).copy()
     if args.output_dir:
         runner_args["output_dir"] = args.output_dir
+    if args.sparse_normalize_scores is not None:
+        runner_args["sparse_normalize_scores"] = args.sparse_normalize_scores
     base_env = prepare_environment(experiment.get("env", {}))
     base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 

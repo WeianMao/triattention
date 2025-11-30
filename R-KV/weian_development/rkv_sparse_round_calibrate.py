@@ -68,18 +68,6 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_STATS_OUT,
         help="Destination for the serialized stats (.pt).",
     )
-    parser.add_argument(
-        "--head-sample-file",
-        type=Path,
-        default=RKV_ROOT
-        / "weian_development"
-        / "speckv"
-        / "stats"
-        / "deepseek_r1_llama8b_heads.json",
-        help="JSON file describing sampled heads; created if missing.",
-    )
-    parser.add_argument("--sample-count", type=int, default=100, help="Number of heads to sample.")
-    parser.add_argument("--sample-seed", type=int, default=42, help="Seed for head sampling.")
     parser.add_argument("--num-traces", type=int, default=3, help="Number of traces to average.")
     parser.add_argument("--system-prompt", type=str, default="", help="System prompt for chat template (unused when chat is off).")
     parser.add_argument(
@@ -276,15 +264,14 @@ def main() -> None:
     model.eval()
 
     text_config = model.config.get_text_config()
-    sampled_heads = load_or_create_sample(
-        args.head_sample_file,
-        args.sample_count,
-        args.sample_seed,
-        text_config.num_hidden_layers,
-        text_config.num_attention_heads,
-    )
+    sampled_heads = [
+        (layer, head)
+        for layer in range(text_config.num_hidden_layers)
+        for head in range(text_config.num_attention_heads)
+    ]
 
     buffers: List[LayerCaptureBuffer] = []
+    token_lengths: List[int] = []
     for idx, record in enumerate(records):
         question = extract_question_from_record(record, fallback_keys=["question", "problem"])
         response = record.get("output") or record.get("model_output") or ""
@@ -297,7 +284,13 @@ def main() -> None:
         )
         buffer = capture_qk_single(model, tokenizer, full_text, precision)
         buffers.append(buffer)
+        token_lengths.append(buffer.q.shape[2])
         torch.cuda.empty_cache()
+
+    if token_lengths:
+        total_tokens = sum(token_lengths)
+        max_tokens = max(token_lengths)
+        print(f"[calibrate] captured {len(token_lengths)} traces; total tokens={total_tokens}, max per trace={max_tokens}")
 
     stats_map, rope_meta = aggregate_head_means(
         buffers,

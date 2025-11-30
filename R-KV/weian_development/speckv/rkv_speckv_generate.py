@@ -57,6 +57,7 @@ def apply_speckv_generate_patch(
     sparse_seed: int,
     head_limit: Optional[int],
     metadata_expectations: dict[str, object] | None = None,
+    normalize_scores: bool = False,
 ) -> None:
     """Attach SparseRoundPruner to a CausalLM model so HF generate can be used."""
     device = next(model.parameters()).device
@@ -74,6 +75,7 @@ def apply_speckv_generate_patch(
         seed=sparse_seed,
         head_limit=head_limit,
         metadata_expectations=metadata_expectations,
+        normalize_scores=normalize_scores,
     )
     state = _SpeckVState(pruner=SparseRoundPruner(pruner_cfg), config=pruner_cfg)
 

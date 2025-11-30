@@ -276,6 +276,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Aggregation strategy for sparse round pruning scores.",
     )
     parser.add_argument(
+        "--sparse_normalize_scores",
+        type=str2bool,
+        default=False,
+        help="Normalize per-head sparse scores before aggregation.",
+    )
+    parser.add_argument(
         "--sparse_seed",
         type=int,
         default=0,
@@ -373,6 +379,7 @@ def main(args: argparse.Namespace) -> None:
             "sparse_score_aggregation": args.sparse_score_aggregation,
             "sparse_head_limit": args.sparse_head_limit,
             "sparse_seed": args.sparse_seed,
+            "sparse_normalize_scores": args.sparse_normalize_scores,
         }
 
     method_config = {"budget": args.kv_budget, "window_size": args.window_size}
@@ -482,6 +489,7 @@ def main(args: argparse.Namespace) -> None:
             sparse_seed=args.sparse_seed,
             head_limit=args.sparse_head_limit,
             metadata_expectations=metadata_expectations,
+            normalize_scores=args.sparse_normalize_scores,
         )
 
     for run_id in run_ids:

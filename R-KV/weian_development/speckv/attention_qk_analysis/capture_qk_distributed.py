@@ -23,12 +23,22 @@ if str(RKV_ROOT) not in sys.path:
 from weian_development.process_utils import mask_process_command
 
 try:
-    from transformers.models.qwen3.modeling_qwen3 import apply_rotary_pos_emb, repeat_kv
+    from transformers.models.qwen3.modeling_qwen3 import apply_rotary_pos_emb as apply_qwen_rotary, repeat_kv as repeat_qwen_kv
 except Exception:
-    try:
-        from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb, repeat_kv
-    except Exception as exc:  # pragma: no cover
-        raise SystemExit(f"无法导入 Qwen 模型组件: {exc}")
+    apply_qwen_rotary = None  # type: ignore[assignment]
+    repeat_qwen_kv = None  # type: ignore[assignment]
+
+try:
+    from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb as apply_qwen2_rotary, repeat_kv as repeat_qwen2_kv
+except Exception:
+    apply_qwen2_rotary = None  # type: ignore[assignment]
+    repeat_qwen2_kv = None  # type: ignore[assignment]
+
+try:
+    from transformers.models.llama.modeling_llama import apply_rotary_pos_emb as apply_llama_rotary, repeat_kv as repeat_llama_kv
+except Exception:
+    apply_llama_rotary = None  # type: ignore[assignment]
+    repeat_llama_kv = None  # type: ignore[assignment]
 
 
 DEFAULT_SYSTEM_PROMPT = "该助手为DeepSeek-R1，由深度求索公司创造。\n今天是2025年5月28日，星期一。\n"
@@ -93,6 +103,7 @@ class QKCollector:
         self.num_heads = text_config.num_attention_heads
         self.kv_heads = text_config.num_key_value_heads
         self.head_dim = text_config.head_dim if hasattr(text_config, "head_dim") else text_config.hidden_size // text_config.num_attention_heads
+        self.apply_rotary, self.repeat_kv = self._select_rotary_impl(text_config.model_type)
 
         for layer_idx, layer in enumerate(model.model.layers):
             handle = layer.self_attn.register_forward_pre_hook(
@@ -130,8 +141,8 @@ class QKCollector:
                 k_proj = module.k_norm(k_proj)
             k_states = k_proj.permute(0, 2, 1, 3).contiguous()
 
-            q_rot, k_rot = apply_rotary_pos_emb(q_states, k_states, cos, sin)
-            k_rot = repeat_kv(k_rot, module.num_key_value_groups)
+            q_rot, k_rot = self.apply_rotary(q_states, k_states, cos, sin)
+            k_rot = self.repeat_kv(k_rot, module.num_key_value_groups)
 
             self.buffer.store(layer_idx, q_rot.detach(), k_rot.detach())
 
@@ -144,6 +155,17 @@ class QKCollector:
         for handle in self.handles:
             handle.remove()
         self.handles.clear()
+
+    def _select_rotary_impl(self, model_type: str):
+        """Choose apply_rotary_pos_emb/repeat_kv per model type to match runtime."""
+        model_type = (model_type or "").lower()
+        if "llama" in model_type and apply_llama_rotary is not None and repeat_llama_kv is not None:
+            return apply_llama_rotary, repeat_llama_kv
+        if "qwen3" in model_type and apply_qwen_rotary is not None and repeat_qwen_kv is not None:
+            return apply_qwen_rotary, repeat_qwen_kv
+        if "qwen" in model_type and apply_qwen2_rotary is not None and repeat_qwen2_kv is not None:
+            return apply_qwen2_rotary, repeat_qwen2_kv
+        raise SystemExit(f"未找到匹配模型类型 {model_type} 的 apply_rotary_pos_emb/repeat_kv 实现")
 
 
 def parse_args() -> argparse.Namespace:

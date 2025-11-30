@@ -49,3 +49,19 @@
 - **剪枝触发性**：在 decode 循环中观察动态 cache 长度和 tokens_in_round，确认 round_window 触发、start_next_round 和 ensure_capacity 都被执行（排除逻辑被绕过）。
 
 > 以上为已检查项及结论，如需复现检查可直接按命令重跑。
+
+### 6) RoPE scaling 不是当前问题（已排除）
+- 校准脚本 `rkv_sparse_round_calibrate.py` 会直接读取模型 config 中的 rope_scaling（factor=8、low/high_freq 1/4、rope_type=llama3），并据此构造 rotary/cos/sin，统计与运行期 pruner 使用的是同一套频率。
+- 只有在误用旧 stats（如果曾在不带 rope_scaling 的旧代码下生成）才会出问题；本轮确认当前校准脚本默认已考虑 rope_scaling，本项不再作为疑点。
+
+### 7) RoPE 应用函数来源可能不一致（新增待查）
+- 现有校准 Q/K 捕获在 `attention_qk_analysis/capture_qk_distributed.py` 的 hook 中，直接从 `transformers.models.qwen2/qwen3` 导入 `apply_rotary_pos_emb`/`repeat_kv`（fallback 逻辑），无视模型类型。
+- 对 DeepSeek-R1-Llama 系列，校准时仍会调用 Qwen 版本的 `apply_rotary_pos_emb` 来生成 q_rot/k_rot；运行期则是模型自身的 Llama Rotary 实现。若两者在 scaling/维度处理上有细微差别，统计的 q_mean 相位可能与运行期不完全一致。
+- 需要确认两版实现是否对 llama3 rope_scaling 完全等价；若不等价，需在校准 hook 中按模型类型调用对应的 Rotary 应用函数。
+
+### 8) RoPE scaling 命名差异（已检查，非疑点）
+- 校准与运行期的 `build_rotary`（`weian_development/speckv/round_pruning_utils.py`）都会规范 `rope_scaling`：`attn_factor` → `attention_factor`，`type` → `rope_type`，保持 factor/low_freq/high_freq 等字段原样；Qwen/Llama 分支均如此。
+- `attention_scaling` 从 rotary 实例读取（Qwen/Llama 都有），统计与运行时使用同一值。故不同模型的 rope_scaling 命名差异已在代码中对齐，不再作为疑点。
+
+### 9) 头间打分聚合偏置风险（新增，详见 `debug_docs/speckv_score_aggregation_risks.md`）
+- 当前 union + max 聚合在 union 远大于 keep_count 时可能被高幅值头主导，缺少归一化/配额等均衡措施；尚未修改代码，需评估并设计可配置的归一化选项。
