@@ -24,6 +24,9 @@
 - Add targeted unit tests with `pytest` under a new `tests/` directory when introducing reusable utilities; mirror filename + `_test.py` naming.
 - For features touching logprob persistence, validate both default (enabled) and `--no_store_logprobs` flows.
 
+## Code Isolation Policy
+- 不得直接修改已有算法/脚本的核心逻辑，除非明确授权；新算法或变体应在隔离的脚本/子类上开发，复用已有 API/类接口，确保对基线实现的侵入最小化。
+
 ## Commit & Pull Request Guidelines
 - Use Conventional Commit prefixes (e.g., `feat:`, `fix:`, `docs:`) as seen in existing history: `feat: add optional logprob persistence for offline runs`.
 - Squash work into coherent commits with descriptive bodies summarizing key changes and verification steps.
