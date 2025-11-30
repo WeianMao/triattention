@@ -36,6 +36,7 @@
 - **C. 算法跑数与对齐**
   - SpeckV/SpeckV-norm/SnapKV/RKV：按原脚本参数跑，开启旁路 capture（保持默认 patch=32）；生成指标/可视化。
   - LazyEviction sparse_prefill_keep：在同步模式下生成可视化/指标，并对比 per-head 模式差异（记录偏差原因）。
+  - **测试分两套**：一套使用脚本在线统计（实时计算频域/命中率），另一套直接读已有校准参数/统计文件（如 sparse_stats_path 等），交叉核对；两套结果都需记录输出路径与版本号。
 - **D. 文档与复现**
   - 在本文件持续记录命令、输出目录、采样头文件位置（如 `/tmp/llama_heads_100.json` 等），以及同步模式的配置说明。
   - 对 Qwen 14B 入口缺失之处做 TODO 标记，待补。
