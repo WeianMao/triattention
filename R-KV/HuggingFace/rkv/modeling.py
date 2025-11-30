@@ -20,6 +20,12 @@ from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 
+try:
+    from weian_development.rkv_debug.qk_capture import maybe_capture_qk
+except Exception:  # pragma: no cover - fail open
+    def maybe_capture_qk(*args, **kwargs):
+        return
+
 from .compression import (
     R1KV,
     SnapKV,
@@ -98,6 +104,9 @@ def LlamaAttention_forward(
 
     cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
+    # Prefill-stage Q/K capture (no behavior change; best effort)
+    maybe_capture_qk(self.layer_idx, query_states, key_states, past_key_value)
 
     if past_key_value is not None:
         cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
