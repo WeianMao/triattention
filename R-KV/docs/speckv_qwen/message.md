@@ -7,3 +7,11 @@
 ## 额外备注
 - 本项目不使用多 Agent 协作，进度/记录集中在 `project_todo.md` 与 `status_overview.md`。
 - 后续新增要求或发现问题，追加在此文件末尾（保持原文，不要覆盖）。***
+
+## 新增用户指令记录
+- 用户要求严格遵守 `R-KV/docs/speckv_qwen/` 下所有文档，并开始执行项目计划中的“二、脚本设计草稿（Qwen SpecKV 两套）”与“三、核心逻辑对齐与实现”部分。
+
+## 关键告警/不一致记录（Qwen vs LazyEviction 基线）
+- Prompt 模板仍为 R-KV plain（`use_chat_template=False`），与 LazyEviction 的 chat+`<think>` 模板不一致，属于关键差异，已标注高风险。
+- 核心超参差异：当前保持 `kv_budget=2048`、`window_size=sparse_round_window=128`，LazyEviction 基线为 1492/363；需后续评估是否调整。
+- 注意 attn/dtype：环境缺失 flash_attn2，SpeckV Qwen 配置改为 `attn_implementation=sdpa`、`load_dtype=float16`（与 LazyEviction 一致），与早先 Llama 版（flash_attn2+bf16）不同；stats 已按 sdpa+fp16 重新生成。

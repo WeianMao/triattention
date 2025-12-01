@@ -16,8 +16,9 @@
   - R-KV 重构：`R-KV/weian_script/aime24_official_sampled8/run_speckv_aime24_official_sampled8.sh`（Llama，表现差，风格参考但算法需核对）。
 
 ## 3. 当前状态（2025-XX-XX）
-- 文档已迁入 `R-KV/docs/speckv_qwen/`，尚未编写新的脚本或对比文档。
+- 文档已迁入 `R-KV/docs/speckv_qwen/`，对照/设计草稿已更新（`diff_draft.md`），对比文档正文待补充。
 - 现有 R-KV Llama 版可能含配置/逻辑偏差，需边对齐边验证。
+- 已完成 Qwen SpeckV 脚本设计与初步落地：新增 `sample8_speckv_aime24_official_qwen.yaml`、`sample8_speckv_aime25_official_qwen.yaml`（sdpa+fp16，kv_budget/window=2048/128，plain prompt），脚本 `run_speckv_aime24_official_sampled8.sh`、`run_rkv_aime25_official_sampled8_qwen.sh` 指向新配置；对应 stats 已用 sdpa+fp16 生成（Qwen plain prompt）。
 
 ## 4. 已知风险与停机条件
 - 三版本若出现关键算法差异（pruner 状态、裁剪触发、kv_budget、position/RoPE、prompt 模板、模型/数据），必须先告警再开发。

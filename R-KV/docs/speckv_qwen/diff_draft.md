@@ -48,6 +48,25 @@
   - 超参：调整 `kv_budget`/`sparse_round_window`/`window_size` 至与 Qwen 基线匹配（目前 2048/128 源自 Llama 版）；确认 `max_length` 与 Qwen 上下文限制。  
 - 其他：保留 sharding/seed/num_samples 结构；评估是否开启 `sparse_normalize_scores`（默认 False）以保持与 LazyEviction 对齐；更新日志/输出目录避免覆盖 Llama 结果。***
 
+## 脚本设计细化（当前执行）
+- `run_rkv_aime25_official_sampled8_qwen.sh` → SpecKV 方案  
+  - 新建 SpeckV 配置（`sample8_speckv_aime25_official_qwen.yaml`，日志/输出目录加 `_speckv_qwen` 区分），脚本继续调用 `rkv_sharded_dispatch.py`。  
+  - `runner_args`：`method=speckv`，沿用 `kv_budget=2048`、`window_size=128`（标注与 LazyEviction 1492/363 的差异待后评估）；`attn_implementation=sdpa` + `load_dtype=float16`（对齐 LazyEviction，避开 flash_attn2 缺失）。  
+  - SpeckV 必填：`sparse_stats_path` 指向 Qwen plain-prompt stats（已用 sdpa+fp16 生成，占位 `R-KV/outputs/sample8_fullkv_aime25_official_qwen/stats/deepseek_r1_qwen7b_plain_stats.pt`）；`sparse_round_window=128`（若与 window 不同需说明）、`sparse_offset_max_length=65536`、`sparse_score_aggregation=mean`、`sparse_head_limit=-1`、`sparse_seed=0`、`sparse_normalize_scores=False`。  
+  - 数据/Prompt：保持 AIME25 JSONL（`/data/rbg/users/weian/project/rl/dc/aime25.jsonl`），SpeckV 强制 `use_chat_template=False`、`chat_system_prompt=""`；温度/Top-p 先沿用 0.6/0.95（允许差异，与 LazyEviction 温度 0 需在对比文档注明）。  
+  - 其他：保持 `reset_cache_each_batch=false`、`fp32_topk=false`、`num_samples=8`，确认路径不覆盖 Llama 或 R-KV rkv 版本输出。
+- `run_speckv_aime24_official_sampled8.sh` → Qwen 切换方案  
+  - 新建 Qwen SpeckV YAML（`sample8_speckv_aime24_official_qwen.yaml`，日志/输出目录加 `_speckv_aime24_qwen`），脚本改指向新 YAML，原 Llama 配置移至 archive 或保留备查。  
+  - `runner_args`：`model_path`/`tokenizer` 切换至 DeepSeek-R1-Distill-Qwen-7B，`method=speckv` 保持；`kv_budget/window_size` 先沿用 2048/128（与 LazyEviction 1492/363 差异需记录），`attn_implementation=sdpa` + `load_dtype=float16`（与 LazyEviction 一致，flash_attn2 缺失时可运行）。  
+  - SpeckV 字段：`sparse_stats_path` 指向 Qwen plain stats（已用 sdpa+fp16 生成，占位 `R-KV/outputs/sample8_fullkv_aime24_official_qwen/stats/deepseek_r1_qwen7b_plain_stats.pt`），`sparse_round_window` 默认同 window，`sparse_offset_max_length=65536`，`sparse_score_aggregation=mean`，`sparse_head_limit=-1`，`sparse_seed=0`，`sparse_normalize_scores=False`。  
+  - 数据/Prompt：保持 AIME24 JSONL 与 SpeckV plain prompt（`use_chat_template=False`，`chat_system_prompt=""`），温度/Top-p 沿用 0.6/0.95（允许差异），输出/日志路径避免覆盖 Llama 结果。
+
+## 核心逻辑与 Prompt 复核（当前执行）
+- SpeckV 生成绑定：`apply_speckv_generate_patch` 通过绝对 `position_ids` + 紧致 `cache_position` 写入缓存，前缀全保留；仅在超出 `max_keys - round_window` 时 prune，匹配“保持未来窗口后再 enforce”思路。  
+- RoPE/模型校验：pruner 初始化用 `AutoConfig` 推断 `rope_style/type`，`validate_stats_metadata` 硬校验 prompt_template/use_chat_template/system_prompt/attn_impl/dtype/kv_budget/rope_style/type；`verify_rotary_alignment` 强制模型 RoPE 与 stats 内部旋转一致（Qwen/Llama 不匹配会直接报错）。  
+- 评分细节：`SparseRoundPruner` 使用 freq_scale_sq 加权、head union + topk（含 1e-6 噪声），支持 `normalize_scores` 但默认关闭；kv_head 映射考虑 num_key_value_groups，兼容 Qwen/Llama 不同 kv 头数。  
+- Prompt/数据：`rkv_sharded_eval` 在 method=speckv 时强制 `use_chat_template=False`，加载数据时也用 plain prompt（`PROMPT_TEMPLATE`）；若要改 chat 模板需改代码并重算 stats，当前保持 plain 并在差异文档标注与 LazyEviction chat 的不一致。
+
 ## 校准/统计生成备注
 - R-KV Llama 版使用 `R-KV/weian_development/rkv_sparse_round_calibrate.py` 生成 stats（固定 plain prompt、禁止 chat、记录 rope_style/type/kv_budget/attn_impl/dtype）。  
 - 适配 Qwen 时需在该脚本基础上改用 Qwen 模型/Tokenizer、Qwen 数据/Prompt 模板，保持 plain prompt 与运行时一致；确保 attn_impl/dtype 与目标脚本配置一致，以生成可用的 Qwen stats。  

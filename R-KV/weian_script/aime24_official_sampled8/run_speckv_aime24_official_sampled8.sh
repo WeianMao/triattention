@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# SpeckV for AIME24, 8 draws, aligned with official R-KV settings.
+# SpeckV for AIME24 on DeepSeek-R1-Distill-Qwen-7B, 8 draws, aligned with official R-KV settings.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -12,5 +12,5 @@ export HF_HOME="${HF_HOME:-/data/rbg/users/weian/.cache/huggingface}"
 export PIP_CACHE_DIR="${PIP_CACHE_DIR:-/data/rbg/users/weian/.cache/pip}"
 
 python3 "${PROJECT_ROOT}/R-KV/weian_development/rkv_sharded_dispatch.py" \
-  --config "${PROJECT_ROOT}/R-KV/weian_script/configs/sample8_sparseprefillkeep_aime24_official.yaml" \
+  --config "${PROJECT_ROOT}/R-KV/weian_script/configs/sample8_speckv_aime24_official_qwen.yaml" \
   "$@"

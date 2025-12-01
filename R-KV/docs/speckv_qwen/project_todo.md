@@ -15,23 +15,26 @@
   - 执行计划：基于 `R-KV/docs/speckv_qwen/diff_draft.md` 的对照表，抽取必须一致项与允许差异项，分区列在同一文件；对未决/需确认项加显式“待确认”标记，预留后续同步/告警位。
 
 ## 二、脚本设计草稿（Qwen SpecKV 两套）
-- [ ] SpecKV on `run_rkv_aime25_official_sampled8_qwen.sh` 骨架  
+- [x] SpecKV on `run_rkv_aime25_official_sampled8_qwen.sh` 骨架  
   - 目标：设计改动点列表（算法换 SpecKV，其余保持 R-KV 风格）。  
   - 动作：标出需要改的函数/参数/flag（SpecKV 前向 patch、pruner 配置、kv_budget、prompt/数据源）。  
   - 验证：设计审阅，自检是否覆盖所有关键一致项。  
-  - 执行计划：阅读 `run_rkv_aime25_official_sampled8_qwen.sh` 当前结构，结合差异清单在 `diff_draft.md` 中列出需替换的模块/函数/参数（前向 patch、pruner/kv_budget、prompt+数据源、模型配置、采样接口）；逐项注明参考的 Qwen 基线（模拟/LazyEviction）以供后续落地。
-- [ ] SpecKV on `run_speckv_aime24_official_sampled8.sh` 改模型为 Qwen  
+  - 执行计划（当前）：1) 阅读 `run_rkv_aime25_official_sampled8_qwen.sh` 与对应 YAML，梳理现有数据/模型/kv_budget/采样配置。2) 对照 LazyEviction Qwen 版与 SpeckV 核心要求，列出 speckv 必需的新增字段（stats/round_window/offset 等）与需要切换的参数，并标记潜在不兼容点。3) 将设计结果写入 `diff_draft.md`，注明参考来源与风险。
+- [x] SpecKV on `run_speckv_aime24_official_sampled8.sh` 改模型为 Qwen  
   - 目标：明确从 Llama 切到 Qwen 的所有配置/依赖改动。  
   - 动作：列出模型路径、tokenizer、RoPE/position 适配、分布式/分片配置、采样接口调整。  
   - 验证：设计审阅，自检是否覆盖所有关键一致项。  
-  - 执行计划：通读 Llama 版脚本，收集与模型/分片/采样/position+RoPE 相关的配置；在 `diff_draft.md` 中写出切换到 Qwen 所需的替换项与风险（路径、tokenizer、rope/position 处理、采样/并行配置），并关联到关键一致项以便后续执行。
+  - 执行计划（当前）：1) 通读 Llama 版脚本+YAML，收集模型/rope_style/attn_impl/kv_budget/prompt/输出目录等配置。2) 对照 Qwen 基线，拟定需要替换/保留的项（模型+tokenizer+stats+round_window+kv_budget+dtype/attn_impl+prompt路径），标注高风险依赖。3) 将设计清单和风险写入 `diff_draft.md`。
 
 ## 三、核心逻辑对齐与实现
-- [ ] 抽取/复核 SpecKV 核心逻辑（pruner 状态、kv_budget、position/RoPE、round/窗口、prefix 保留），必要时从早期 Qwen 版移植。
-- [ ] 校准 prompt/数据入口与早期 Qwen 基线一致（模板、特殊 token、round 滚动）。
-- [ ] 实施 SpecKV 版 `run_rkv_aime25_official_sampled8_qwen.sh`（套用设计清单，完成脚本落地）。
-- [ ] 实施 Qwen 版 `run_speckv_aime24_official_sampled8.sh`（模型切换完、算法一致性复核）。
-- [ ] 若发现与早期 Qwen/LazyEviction 关键逻辑不一致，立即停下并在 message.md 记录告警。
+- [x] 抽取/复核 SpecKV 核心逻辑（pruner 状态、kv_budget、position/RoPE、round/窗口、prefix 保留），必要时从早期 Qwen 版移植。  
+  - 执行计划（当前）：1) 检查 `weian_development/speckv/` 相关实现（generate patch、pruner、stats 校验）中与模型/position/RoPE 相关的逻辑，确认对 Qwen 兼容性与 LazyEviction 的一致点。2) 记录必要调整或确认无差异，输出到 `diff_draft.md`/备注，为脚本配置提供依据。
+- [x] 校准 prompt/数据入口与早期 Qwen 基线一致（模板、特殊 token、round 滚动）。  
+  - 执行计划（当前）：1) 复核 R-KV Qwen 脚本的 prompt 构造路径/标志（plain vs chat），确认 SpeckV 默认值。2) 对照早期 Qwen/LazyEviction 模板，标记当前选择及可能需重算 stats 的风险，写入 `diff_draft.md`。
+- [x] 实施 SpecKV 版 `run_rkv_aime25_official_sampled8_qwen.sh`（套用设计清单，完成脚本落地）。
+- [x] 实施 Qwen 版 `run_speckv_aime24_official_sampled8.sh`（模型切换完、算法一致性复核）。
+- [x] 若发现与早期 Qwen/LazyEviction 关键逻辑不一致，立即停下并在 message.md 记录告警。  
+  - 已记录：plain prompt vs LazyEviction chat 模板；kv_budget/window_size=2048/128 vs 1492/363；环境缺失 flash_attn2，SpeckV Qwen 改为 sdpa+fp16（与 LazyEviction 一致）并按此生成 stats。
 
 ## 四、对比与文档
 - [ ] 编写差异对比 MD：SpecKV-Qwen vs `LazyEviction/weian_script/run_sparse_prefill_keep_sharded_eval.sh`，列出允许差异与实际差异，标警告项。
