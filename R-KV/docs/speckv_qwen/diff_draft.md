@@ -20,6 +20,15 @@
 - R-KV SpeckV 强制 plain prompt：`rkv_sharded_eval.py` 中禁止 `use_chat_template=True`，与 LazyEviction 的 chat+`<think>` 模板不兼容；若需 chat 必须改代码并重算 stats。  
 - AIME24/AIME25 SpeckV Qwen 配置已切到 `flash_attention_2` + `bfloat16`；对应 stats (`R-KV/outputs/sample8_fullkv_aime24_official_qwen/...`、`...aime25...`) 已重新以 flash_attn2/bf16 + plain prompt 生成（2 traces）。
 
+## 运行脚本与校准指引（Qwen SpeckV）
+- 模型：`/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Qwen-7B`。  
+- 脚本：  
+  - AIME24：`R-KV/weian_script/aime24_official_sampled8/run_speckv_aime24_official_sampled8.sh` → `sample8_speckv_aime24_official_qwen.yaml`（flash_attn2 + bf16, plain prompt）。  
+  - AIME25：`R-KV/weian_script/aime24_official_sampled8/run_rkv_aime25_official_sampled8_qwen.sh` → `sample8_speckv_aime25_official_qwen.yaml`（flash_attn2 + bf16, plain prompt）。  
+- 校准步骤（示例，需在 `conda run -n rkv` 环境下、指定空闲 GPU）：  
+  - AIME24 stats：`env CUDA_VISIBLE_DEVICES=3 conda run -n rkv python R-KV/weian_development/rkv_sparse_round_calibrate.py --trace-root R-KV/outputs/sample8_fullkv_aime24_official_qwen --model-path /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Qwen-7B --output-path R-KV/outputs/sample8_fullkv_aime24_official_qwen/stats/deepseek_r1_qwen7b_plain_stats.pt --attn-implementation flash_attention_2 --dtype bfloat16 --kv-budget 2048 --num-traces 2`  
+  - AIME25 stats：`env CUDA_VISIBLE_DEVICES=4 conda run -n rkv python R-KV/weian_development/rkv_sparse_round_calibrate.py --trace-root R-KV/outputs/sample8_fullkv_aime25_official_qwen --model-path /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Qwen-7B --output-path R-KV/outputs/sample8_fullkv_aime25_official_qwen/stats/deepseek_r1_qwen7b_plain_stats.pt --attn-implementation flash_attention_2 --dtype bfloat16 --kv-budget 2048 --num-traces 2`  
+- 运行/校准均需保持 plain prompt（`use_chat_template=False`）；切换 attn/dtype 后必须重算对应 stats。
 ## 必须一致 vs 允许差异（用于后续自检）
 - **必须一致**：  
   - 模型/Tokenizer = Qwen（含 rope_scaling/attention_scaling/rope_style/type）与生成该 stats 的模型完全匹配。  
