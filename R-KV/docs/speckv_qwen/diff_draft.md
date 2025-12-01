@@ -24,7 +24,7 @@
 - 模型：`/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Qwen-7B`。  
 - 脚本：  
   - AIME24：`R-KV/weian_script/aime24_official_sampled8/run_speckv_aime24_official_sampled8.sh` → `sample8_speckv_aime24_official_qwen.yaml`（flash_attn2 + bf16, plain prompt）。  
-  - AIME25：`R-KV/weian_script/aime24_official_sampled8/run_rkv_aime25_official_sampled8_qwen.sh` → `sample8_speckv_aime25_official_qwen.yaml`（flash_attn2 + bf16, plain prompt）。  
+  - AIME25：`R-KV/weian_script/aime24_official_sampled8/run_speckv_aime25_official_sampled8_qwen.sh` → `sample8_speckv_aime25_official_qwen.yaml`（flash_attn2 + bf16, plain prompt）。  
 - 校准步骤（示例，需在 `conda run -n rkv` 环境下、指定空闲 GPU）：  
   - AIME24 stats：`env CUDA_VISIBLE_DEVICES=3 conda run -n rkv python R-KV/weian_development/rkv_sparse_round_calibrate.py --trace-root R-KV/outputs/sample8_fullkv_aime24_official_qwen --model-path /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Qwen-7B --output-path R-KV/outputs/sample8_fullkv_aime24_official_qwen/stats/deepseek_r1_qwen7b_plain_stats.pt --attn-implementation flash_attention_2 --dtype bfloat16 --kv-budget 2048 --num-traces 2`  
   - AIME25 stats：`env CUDA_VISIBLE_DEVICES=4 conda run -n rkv python R-KV/weian_development/rkv_sparse_round_calibrate.py --trace-root R-KV/outputs/sample8_fullkv_aime25_official_qwen --model-path /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Qwen-7B --output-path R-KV/outputs/sample8_fullkv_aime25_official_qwen/stats/deepseek_r1_qwen7b_plain_stats.pt --attn-implementation flash_attention_2 --dtype bfloat16 --kv-budget 2048 --num-traces 2`  
