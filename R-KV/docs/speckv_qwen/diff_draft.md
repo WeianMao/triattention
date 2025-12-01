@@ -17,6 +17,8 @@
 - 位置处理：R-KV SpeckV 通过 `position_ids`/`cache_position` 压紧缓存；LazyEviction HF 路径未覆写 `cache_position`，依赖默认缓存布局→ 需确认两者在 Qwen 上等价，否则需调整。  
 - 采样/温度：R-KV SpeckV 走采样 (0.6/0.95) 而 LazyEviction 基线温度 0；属于允许差异但需在对比文档标注。  
 - Stats 校验：R-KV SpeckV 强校验 `prompt_template/use_chat_template/rope_style/type/dtype/kv_budget`，LazyEviction 未校验→ 替换 Qwen 版时需提供匹配 metadata 的 stats，否则会直接报错。
+- R-KV SpeckV 强制 plain prompt：`rkv_sharded_eval.py` 中禁止 `use_chat_template=True`，与 LazyEviction 的 chat+`<think>` 模板不兼容；若需 chat 必须改代码并重算 stats。  
+- AIME24/AIME25 SpeckV Qwen 配置已切到 `flash_attention_2` + `bfloat16`，但现有 stats (`R-KV/outputs/sample8_fullkv_aime24_official_qwen/...`、`...aime25...`) 元数据为 sdpa+fp16 → 未重算 stats 前运行会在校验报错或不匹配，需重算对应 flash_attn2/bf16 的 stats。
 
 ## 必须一致 vs 允许差异（用于后续自检）
 - **必须一致**：  

@@ -20,8 +20,8 @@ experiment:
     method: speckv
     kv_budget: 2048
     window_size: 128
-    attn_implementation: sdpa
-    load_dtype: float16
+    attn_implementation: flash_attention_2
+    load_dtype: bfloat16
     reset_cache_each_batch: false
     fp32_topk: false
     num_samples: 8
