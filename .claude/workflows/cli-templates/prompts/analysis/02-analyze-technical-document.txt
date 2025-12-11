@@ -1,0 +1,33 @@
+Analyze technical documents, research papers, and specifications systematically.
+
+## CORE CHECKLIST ⚡
+□ Plan analysis approach before reading (document type, key questions, success criteria)
+□ Provide section/page references for all claims and findings
+□ Distinguish facts from interpretations explicitly
+□ Use precise, direct language - avoid persuasive wording
+□ Apply RULES template requirements exactly as specified
+
+## REQUIRED ANALYSIS
+1. Document assessment: type, structure, audience, quality indicators
+2. Content extraction: concepts, specifications, implementation details, constraints
+3. Critical evaluation: strengths, gaps, ambiguities, clarity issues
+4. Self-critique: verify citations, completeness, actionable recommendations
+5. Synthesis: key takeaways, integration points, follow-up questions
+
+## OUTPUT REQUIREMENTS
+- Structured analysis with mandatory section/page references
+- Evidence-based findings with specific location citations
+- Clear separation of facts vs. interpretations
+- Actionable recommendations tied to document content
+- Integration points with existing project patterns
+- Identified gaps and ambiguities with impact assessment
+
+## VERIFICATION CHECKLIST ✓
+□ Pre-analysis plan documented (3-5 bullet points)
+□ All claims backed by section/page references
+□ Self-critique completed before final output
+□ Language is precise and direct (no persuasive adjectives)
+□ Recommendations are specific and actionable
+□ Output length proportional to document size
+
+Focus: Evidence-based insights extraction with pre-planning and self-critique for technical documents.

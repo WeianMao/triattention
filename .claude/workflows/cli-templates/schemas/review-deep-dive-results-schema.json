@@ -1,0 +1,82 @@
+[
+  {
+    "finding_id": "sec-001-a1b2c3d4",
+    "original_dimension": "security",
+    "iteration": 1,
+    "analysis_timestamp": "2025-01-25T14:40:15Z",
+    "cli_tool_used": "gemini",
+    "root_cause": {
+      "summary": "Legacy code from v1 migration, pre-ORM implementation",
+      "details": "Query builder was ported from old codebase without security review. Team unaware of injection risks in string concatenation pattern. Code review at migration time focused on functionality, not security.",
+      "affected_scope": "All query-builder.ts methods using string template literals (15 methods total)",
+      "similar_patterns": [
+        "src/database/user-queries.ts:buildEmailQuery",
+        "src/database/order-queries.ts:buildOrderSearch"
+      ]
+    },
+    "remediation_plan": {
+      "approach": "Migrate to ORM prepared statements with input validation layer",
+      "priority": "P0 - Critical (security vulnerability)",
+      "estimated_effort": "4 hours development + 2 hours testing",
+      "risk_level": "low",
+      "steps": [
+        {
+          "step": 1,
+          "action": "Replace direct string concatenation with ORM query builder",
+          "files": ["src/database/query-builder.ts:buildUserQuery:140-150"],
+          "commands": [
+            "Replace: const query = `SELECT * FROM users WHERE id = ${userId}`;",
+            "With: return db('users').where('id', userId).first();"
+          ],
+          "rationale": "ORM automatically parameterizes queries, eliminating injection risk",
+          "validation": "Run: npm test -- src/database/query-builder.test.ts"
+        },
+        {
+          "step": 2,
+          "action": "Add input validation layer before ORM",
+          "files": ["src/database/validators.ts:validateUserId:NEW"],
+          "commands": [
+            "Create validator: export function validateUserId(id: unknown): number { ... }",
+            "Add schema: z.number().positive().int()"
+          ],
+          "rationale": "Defense in depth - validate types and ranges before database layer",
+          "validation": "Run: npm test -- src/database/validators.test.ts"
+        },
+        {
+          "step": 3,
+          "action": "Apply pattern to all 15 similar methods",
+          "files": ["src/database/query-builder.ts:ALL_METHODS"],
+          "commands": ["Bulk replace string templates with ORM syntax"],
+          "rationale": "Prevent similar vulnerabilities in other query methods",
+          "validation": "Run: npm test -- src/database/"
+        }
+      ],
+      "rollback_strategy": "Git commit before each step, revert if tests fail. Staged rollout: dev → staging → production with monitoring."
+    },
+    "impact_assessment": {
+      "files_affected": [
+        "src/database/query-builder.ts (modify)",
+        "src/database/validators.ts (new)",
+        "src/database/user-queries.ts (modify)",
+        "src/database/order-queries.ts (modify)"
+      ],
+      "tests_required": [
+        "src/database/query-builder.test.ts (update existing)",
+        "src/database/validators.test.ts (new)",
+        "integration/security/sql-injection.test.ts (new)"
+      ],
+      "breaking_changes": false,
+      "dependencies_updated": ["knex@2.5.1 (ORM library)"],
+      "deployment_notes": "No downtime required. Database migrations not needed."
+    },
+    "reassessed_severity": "high",
+    "severity_change_reason": "Found existing WAF rules partially mitigate risk in production. Input validation at API gateway layer provides additional defense. Downgrade from critical to high, but still requires immediate fix.",
+    "confidence_score": 0.95,
+    "references": [
+      "Project ORM migration guide: docs/architecture/orm-guide.md",
+      "Knex.js parameterization: https://knexjs.org/guide/query-builder.html#where",
+      "Similar incident: TICKET-1234 (previous SQL injection fix)"
+    ],
+    "status": "remediation_plan_ready"
+  }
+]

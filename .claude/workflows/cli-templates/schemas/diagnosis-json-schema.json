@@ -1,0 +1,234 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Diagnosis Context Schema",
+  "description": "Bug diagnosis results from cli-explore-agent for root cause analysis",
+  "type": "object",
+  "required": [
+    "symptom",
+    "root_cause",
+    "affected_files",
+    "reproduction_steps",
+    "fix_hints",
+    "dependencies",
+    "constraints",
+    "clarification_needs",
+    "_metadata"
+  ],
+  "properties": {
+    "symptom": {
+      "type": "object",
+      "required": ["description", "error_message"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the bug symptoms"
+        },
+        "error_message": {
+          "type": ["string", "null"],
+          "description": "Exact error message if available, null if no specific error"
+        },
+        "stack_trace": {
+          "type": ["string", "null"],
+          "description": "Stack trace excerpt if available"
+        },
+        "frequency": {
+          "type": "string",
+          "enum": ["always", "intermittent", "rare", "unknown"],
+          "description": "How often the bug occurs"
+        },
+        "user_impact": {
+          "type": "string",
+          "description": "How the bug affects end users"
+        }
+      },
+      "description": "Observable symptoms and error manifestation"
+    },
+    "root_cause": {
+      "type": "object",
+      "required": ["file", "issue", "confidence"],
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "File path where the root cause is located"
+        },
+        "line_range": {
+          "type": "string",
+          "description": "Line range containing the bug (e.g., '45-60')"
+        },
+        "function": {
+          "type": "string",
+          "description": "Function or method name containing the bug"
+        },
+        "issue": {
+          "type": "string",
+          "description": "Description of what's wrong in the code"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence score 0.0-1.0 (0.8+ high, 0.5-0.8 medium, <0.5 low)"
+        },
+        "introduced_by": {
+          "type": "string",
+          "description": "Commit hash or date when bug was introduced (if known)"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["logic_error", "edge_case", "race_condition", "null_reference", "type_mismatch", "resource_leak", "validation", "integration", "configuration", "other"],
+          "description": "Bug category classification"
+        }
+      },
+      "description": "Root cause analysis with confidence score"
+    },
+    "affected_files": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"type": "string"},
+          {
+            "type": "object",
+            "required": ["path", "relevance"],
+            "properties": {
+              "path": {"type": "string", "description": "File path relative to project root"},
+              "relevance": {"type": "number", "minimum": 0, "maximum": 1, "description": "Relevance score 0.0-1.0 (0.7+ high, 0.5-0.7 medium, <0.5 low)"},
+              "rationale": {"type": "string", "description": "Brief explanation of why this file is affected from this diagnosis angle"},
+              "change_type": {
+                "type": "string",
+                "enum": ["fix_target", "needs_update", "test_coverage", "reference_only"],
+                "description": "Type of change needed for this file"
+              }
+            }
+          }
+        ]
+      },
+      "description": "Files affected by the bug. Prefer object format with relevance scores for synthesis prioritization."
+    },
+    "reproduction_steps": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 1,
+      "description": "Step-by-step instructions to reproduce the bug"
+    },
+    "fix_hints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["description", "approach"],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What needs to be fixed"
+          },
+          "approach": {
+            "type": "string",
+            "description": "Suggested fix approach with specific guidance"
+          },
+          "code_example": {
+            "type": "string",
+            "description": "Example code snippet showing the fix pattern"
+          },
+          "risk": {
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+            "description": "Risk level of implementing this fix"
+          }
+        }
+      },
+      "description": "Actionable fix suggestions from this diagnosis angle"
+    },
+    "dependencies": {
+      "type": "string",
+      "description": "External and internal dependencies relevant to the bug"
+    },
+    "constraints": {
+      "type": "string",
+      "description": "Technical constraints and limitations affecting the fix"
+    },
+    "related_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["similar_bug", "regression", "related_feature", "tech_debt"],
+            "description": "Relationship type"
+          },
+          "reference": {
+            "type": "string",
+            "description": "Issue ID, commit hash, or file reference"
+          },
+          "description": {
+            "type": "string",
+            "description": "Brief description of the relationship"
+          }
+        }
+      },
+      "description": "Related issues, regressions, or similar bugs found during diagnosis"
+    },
+    "clarification_needs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["question", "context", "options"],
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "The clarification question to ask user"
+          },
+          "context": {
+            "type": "string",
+            "description": "Background context explaining why this clarification is needed"
+          },
+          "options": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Available options for user to choose from (2-4 options)"
+          }
+        }
+      },
+      "description": "Ambiguities requiring user input before fix planning"
+    },
+    "_metadata": {
+      "type": "object",
+      "required": ["timestamp", "bug_description", "source"],
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of diagnosis"
+        },
+        "bug_description": {
+          "type": "string",
+          "description": "Original bug description that triggered diagnosis"
+        },
+        "source": {
+          "type": "string",
+          "const": "cli-explore-agent",
+          "description": "Agent that performed diagnosis"
+        },
+        "diagnosis_angle": {
+          "type": "string",
+          "description": "Diagnosis angle (e.g., 'error-handling', 'dataflow', 'state-management')"
+        },
+        "diagnosis_index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Diagnosis index (1-4) in parallel diagnosis set"
+        },
+        "total_diagnoses": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Total number of parallel diagnoses"
+        },
+        "duration_seconds": {
+          "type": "integer",
+          "description": "Diagnosis duration in seconds"
+        }
+      }
+    }
+  }
+}

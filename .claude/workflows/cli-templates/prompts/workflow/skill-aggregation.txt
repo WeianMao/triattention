@@ -1,0 +1,172 @@
+# SKILL.md Index Generation Context
+
+## Description Field Requirements
+
+When generating final aggregated output, remember to prepare data for SKILL.md description field:
+
+**Required Data Points**:
+- Project root path (to be obtained via git command)
+- Use cases: "continuing development", "analyzing past implementations", "learning from workflow history"
+- Trigger phrase: "especially when no relevant context exists in memory"
+
+**Description Format**:
+```
+Progressive workflow development history (located at {project_root}).
+Load this SKILL when continuing development, analyzing past implementations,
+or learning from workflow history, especially when no relevant context exists in memory.
+```
+
+---
+
+You are aggregating workflow session history to generate a progressive SKILL package.
+
+## Your Task
+
+Analyze archived workflow sessions and aggregate:
+1. **Lessons Learned** - Successes, challenges, and watch patterns
+2. **Conflict Patterns** - Recurring conflicts and resolutions
+3. **Implementation Summaries** - Key outcomes by functional domain
+
+## Input Data
+
+You will receive:
+- Session metadata (session_id, description, tags, metrics)
+- Lessons from each session (successes, challenges, watch_patterns)
+- IMPL_PLAN summaries
+- Context package metadata (keywords, tech_stack, complexity)
+
+## Output Requirements
+
+### 1. Aggregated Lessons
+
+**Successes by Category**:
+- Group successful patterns by functional domain (auth, testing, performance, etc.)
+- Identify practices that succeeded across multiple sessions
+- Mark best practices (success in 3+ sessions)
+
+**Challenges by Severity**:
+- HIGH: Blocked development for >4 hours OR repeated in 3+ sessions
+- MEDIUM: Required significant rework OR repeated in 2 sessions
+- LOW: Minor issues resolved quickly
+
+**Watch Patterns**:
+- Identify patterns mentioned in 2+ sessions
+- Prioritize by frequency and severity
+- Mark CRITICAL patterns (appeared in 3+ sessions with HIGH severity)
+
+**Format**:
+```json
+{
+  "successes_by_category": {
+    "auth": ["JWT implementation with refresh tokens (3 sessions)", ...],
+    "testing": ["TDD reduced bugs by 60% (2 sessions)", ...]
+  },
+  "challenges_by_severity": {
+    "high": [
+      {
+        "challenge": "Token refresh edge cases",
+        "sessions": ["WFS-user-auth", "WFS-jwt-refresh"],
+        "frequency": 2
+      }
+    ],
+    "medium": [...],
+    "low": [...]
+  },
+  "watch_patterns": [
+    {
+      "pattern": "Token concurrency issues",
+      "frequency": 3,
+      "severity": "CRITICAL",
+      "sessions": ["WFS-user-auth", "WFS-jwt-refresh", "WFS-oauth"]
+    }
+  ]
+}
+```
+
+### 2. Conflict Patterns
+
+**Analysis**:
+- Group conflicts by type (architecture, dependencies, testing, performance)
+- Identify recurring patterns (same conflict in different sessions)
+- Link successful resolutions to specific sessions
+
+**Format**:
+```json
+{
+  "architecture": [
+    {
+      "pattern": "Multiple authentication strategies conflict",
+      "description": "Different auth methods (JWT, OAuth, session) cause integration issues",
+      "sessions": ["WFS-user-auth", "WFS-oauth"],
+      "resolution": "Unified auth interface with strategy pattern",
+      "code_impact": ["src/auth/interface.ts", "src/auth/jwt.ts", "src/auth/oauth.ts"],
+      "frequency": 2,
+      "severity": "high"
+    }
+  ],
+  "dependencies": [...],
+  "testing": [...],
+  "performance": [...]
+}
+```
+
+### 3. Implementation Summary
+
+**By Functional Domain**:
+- Group sessions by primary tag/domain
+- Summarize key accomplishments
+- Link to context packages and plans
+
+**Format**:
+```json
+{
+  "auth": {
+    "session_count": 3,
+    "sessions": [
+      {
+        "session_id": "WFS-user-auth",
+        "description": "JWT authentication implementation",
+        "key_outcomes": [
+          "JWT token generation and validation",
+          "Refresh token mechanism",
+          "Secure password hashing with bcrypt"
+        ],
+        "context_package": ".workflow/.archives/WFS-user-auth/.process/context-package.json",
+        "metrics": {"task_count": 5, "success_rate": 100, "duration_hours": 4.5}
+      }
+    ],
+    "cumulative_metrics": {
+      "total_tasks": 15,
+      "avg_success_rate": 95,
+      "total_hours": 12.5
+    }
+  },
+  "payment": {...},
+  "ui": {...}
+}
+```
+
+## Analysis Guidelines
+
+1. **Identify Patterns**: Look for recurring themes across sessions
+2. **Prioritize by Impact**: Focus on high-frequency, high-impact patterns
+3. **Link Sessions**: Connect related sessions (same domain, similar challenges)
+4. **Extract Wisdom**: Surface actionable insights from lessons learned
+5. **Maintain Context**: Keep references to original sessions and files
+
+## Quality Criteria
+
+- ✅ All sessions processed and categorized
+- ✅ Patterns identified and frequency counted
+- ✅ Severity levels assigned based on impact
+- ✅ Resolutions linked to specific sessions
+- ✅ Output is valid JSON with no missing fields
+- ✅ References (paths) are accurate and complete
+
+## Important Notes
+
+- **NO hallucination**: Only aggregate data from provided sessions
+- **Preserve detail**: Keep specific session references for traceability
+- **Smart grouping**: Group similar patterns even if wording differs slightly
+- **Frequency matters**: Prioritize patterns that appear in multiple sessions
+- **Context preservation**: Keep context package paths for on-demand loading

@@ -1,0 +1,286 @@
+IMPL_PLAN.md Template - Implementation Plan Document Structure
+
+## Document Frontmatter
+
+```yaml
+---
+identifier: WFS-{session-id}
+source: "User requirements" | "File: path" | "Issue: ISS-001"
+analysis: .workflow/active//{session-id}/.process/ANALYSIS_RESULTS.md
+artifacts: .workflow/active//{session-id}/.brainstorming/
+context_package: .workflow/active//{session-id}/.process/context-package.json  # CCW smart context
+workflow_type: "standard | tdd | design"  # Indicates execution model
+verification_history:  # CCW quality gates
+  concept_verify: "passed | skipped | pending"
+  action_plan_verify: "pending"
+phase_progression: "brainstorm → context → analysis → concept_verify → planning"  # CCW workflow phases
+---
+```
+
+## Document Structure
+
+# Implementation Plan: {Project Title}
+
+## 1. Summary
+Core requirements, objectives, technical approach summary (2-3 paragraphs max).
+
+**Core Objectives**:
+- [Key objective 1]
+- [Key objective 2]
+
+**Technical Approach**:
+- [High-level approach]
+
+## 2. Context Analysis
+
+### CCW Workflow Context
+**Phase Progression**:
+- ✅ Phase 1: Brainstorming (role analyses generated)
+- ✅ Phase 2: Context Gathering (context-package.json: {N} files, {M} modules analyzed)
+- ✅ Phase 3: Enhanced Analysis (ANALYSIS_RESULTS.md: Gemini/Qwen/Codex parallel insights)
+- ✅ Phase 4: Concept Verification ({X} clarifications answered, role analyses updated | skipped)
+- ⏳ Phase 5: Action Planning (current phase - generating IMPL_PLAN.md)
+
+**Quality Gates**:
+- concept-verify: ✅ Passed (0 ambiguities remaining) | ⏭️ Skipped (user decision) | ⏳ Pending
+- action-plan-verify: ⏳ Pending (recommended before /workflow:execute)
+
+**Context Package Summary**:
+- **Focus Paths**: {list key directories from context-package.json}
+- **Key Files**: {list primary files for modification}
+- **Module Depth Analysis**: {from get_modules_by_depth.sh output}
+- **Smart Context**: {total file count} files, {module count} modules, {dependency count} dependencies identified
+
+### Project Profile
+- **Type**: Greenfield/Enhancement/Refactor
+- **Scale**: User count, data volume, complexity
+- **Tech Stack**: Primary technologies
+- **Timeline**: Duration and milestones
+
+### Module Structure
+```
+[Directory tree showing key modules]
+```
+
+### Dependencies
+**Primary**: [Core libraries and frameworks]
+**APIs**: [External services]
+**Development**: [Testing, linting, CI/CD tools]
+
+### Patterns & Conventions
+- **Architecture**: [Key patterns like DI, Event-Driven]
+- **Component Design**: [Design patterns]
+- **State Management**: [State strategy]
+- **Code Style**: [Naming, TypeScript coverage]
+
+## 3. Brainstorming Artifacts Reference
+
+### Artifact Usage Strategy
+**Primary Reference (role analyses)**:
+- **What**: Role-specific analyses from brainstorming providing multi-perspective insights
+- **When**: Every task references relevant role analyses for requirements and design decisions
+- **How**: Extract requirements, architecture decisions, UI/UX patterns from applicable role documents
+- **Priority**: Collective authoritative source - multiple role perspectives provide comprehensive coverage
+- **CCW Value**: Maintains role-specific expertise while enabling cross-role integration during planning
+
+**Context Intelligence (context-package.json)**:
+- **What**: Smart context gathered by CCW's context-gather phase
+- **Content**: Focus paths, dependency graph, existing patterns, module structure
+- **Usage**: Tasks load this via `flow_control.preparatory_steps` for environment setup
+- **CCW Value**: Automated intelligent context discovery replacing manual file exploration
+
+**Technical Analysis (ANALYSIS_RESULTS.md)**:
+- **What**: Gemini/Qwen/Codex parallel analysis results
+- **Content**: Optimization strategies, risk assessment, architecture review, implementation patterns
+- **Usage**: Referenced in task planning for technical guidance and risk mitigation
+- **CCW Value**: Multi-model parallel analysis providing comprehensive technical intelligence
+
+### Integrated Specifications (Highest Priority)
+- **role analyses**: Comprehensive implementation blueprint
+  - Contains: Architecture design, UI/UX guidelines, functional/non-functional requirements, implementation roadmap, risk assessment
+
+### Supporting Artifacts (Reference)
+- **guidance-specification.md**: Role-specific discussion points and analysis framework
+- **system-architect/analysis.md**: Detailed architecture specifications
+- **ui-designer/analysis.md**: Layout and component specifications
+- **product-manager/analysis.md**: Product vision and user stories
+
+**Artifact Priority in Development**:
+1. role analyses (primary reference for all tasks)
+2. context-package.json (smart context for execution environment)
+3. ANALYSIS_RESULTS.md (technical analysis and optimization strategies)
+4. Role-specific analyses (fallback for detailed specifications)
+
+## 4. Implementation Strategy
+
+### Execution Strategy
+**Execution Model**: [Sequential | Parallel | Phased | TDD Cycles]
+
+**Rationale**: [Why this execution model fits the project]
+
+**Parallelization Opportunities**:
+- [List independent workstreams]
+
+**Serialization Requirements**:
+- [List critical dependencies]
+
+### Architectural Approach
+**Key Architecture Decisions**:
+- [ADR references from role analyses]
+- [Justification for architecture patterns]
+
+**Integration Strategy**:
+- [How modules communicate]
+- [State management approach]
+
+### Key Dependencies
+**Task Dependency Graph**:
+```
+[High-level dependency visualization]
+```
+
+**Critical Path**: [Identify bottleneck tasks]
+
+### Testing Strategy
+**Testing Approach**:
+- Unit testing: [Tools, scope]
+- Integration testing: [Key integration points]
+- E2E testing: [Critical user flows]
+
+**Coverage Targets**:
+- Lines: ≥70%
+- Functions: ≥70%
+- Branches: ≥65%
+
+**Quality Gates**:
+- [CI/CD gates]
+- [Performance budgets]
+
+## 5. Task Breakdown Summary
+
+### Task Count
+**{N} tasks** (flat hierarchy | two-level hierarchy, sequential | parallel execution)
+
+### Task Structure
+- **IMPL-1**: [Main task title]
+- **IMPL-2**: [Main task title]
+...
+
+### Complexity Assessment
+- **High**: [List with rationale]
+- **Medium**: [List]
+- **Low**: [List]
+
+### Dependencies
+[Reference Section 4.3 for dependency graph]
+
+**Parallelization Opportunities**:
+- [Specific task groups that can run in parallel]
+
+## 6. Implementation Plan (Detailed Phased Breakdown)
+
+### Execution Strategy
+
+**Phase 1 (Weeks 1-2): [Phase Name]**
+- **Tasks**: IMPL-1, IMPL-2
+- **Deliverables**:
+  - [Specific deliverable 1]
+  - [Specific deliverable 2]
+- **Success Criteria**:
+  - [Measurable criterion]
+
+**Phase 2 (Weeks 3-N): [Phase Name]**
+...
+
+### Resource Requirements
+
+**Development Team**:
+- [Team composition and skills]
+
+**External Dependencies**:
+- [Third-party services, APIs]
+
+**Infrastructure**:
+- [Development, staging, production environments]
+
+## 7. Risk Assessment & Mitigation
+
+| Risk | Impact | Probability | Mitigation Strategy | Owner |
+|------|--------|-------------|---------------------|-------|
+| [Risk description] | High/Med/Low | High/Med/Low | [Strategy] | [Role] |
+
+**Critical Risks** (High impact + High probability):
+- [Risk 1]: [Detailed mitigation plan]
+
+**Monitoring Strategy**:
+- [How risks will be monitored]
+
+## 8. Success Criteria
+
+**Functional Completeness**:
+- [ ] All requirements from role analyses implemented
+- [ ] All acceptance criteria from task.json files met
+
+**Technical Quality**:
+- [ ] Test coverage ≥70%
+- [ ] Bundle size within budget
+- [ ] Performance targets met
+
+**Operational Readiness**:
+- [ ] CI/CD pipeline operational
+- [ ] Monitoring and logging configured
+- [ ] Documentation complete
+
+**Business Metrics**:
+- [ ] [Key business metrics from role analyses]
+
+## Template Usage Guidelines
+
+### When Generating IMPL_PLAN.md
+
+1. **Fill Frontmatter Variables**:
+   - Replace {session-id} with actual session ID
+   - Set workflow_type based on planning phase
+   - Update verification_history based on concept-verify results
+
+2. **Populate CCW Workflow Context**:
+   - Extract file/module counts from context-package.json
+   - Document phase progression based on completed workflow steps
+   - Update quality gate status (passed/skipped/pending)
+
+3. **Extract from Analysis Results**:
+   - Core objectives from ANALYSIS_RESULTS.md
+   - Technical approach and architecture decisions
+   - Risk assessment and mitigation strategies
+
+4. **Reference Brainstorming Artifacts**:
+   - List detected artifacts with correct paths
+   - Document artifact priority and usage strategy
+   - Map artifacts to specific tasks based on domain
+
+5. **Define Implementation Strategy**:
+   - Choose execution model (sequential/parallel/phased)
+   - Identify parallelization opportunities
+   - Document critical path and dependencies
+
+6. **Break Down Tasks**:
+   - List all task IDs and titles
+   - Assess complexity (high/medium/low)
+   - Create dependency graph visualization
+
+7. **Set Success Criteria**:
+   - Extract from role analyses
+   - Include measurable metrics
+   - Define quality gates
+
+### Validation Checklist
+
+Before finalizing IMPL_PLAN.md:
+- [ ] All frontmatter fields populated correctly
+- [ ] CCW workflow context reflects actual phase progression
+- [ ] Brainstorming artifacts correctly referenced
+- [ ] Task breakdown matches generated task JSONs
+- [ ] Dependencies are acyclic and logical
+- [ ] Success criteria are measurable
+- [ ] Risk assessment includes mitigation strategies
+- [ ] All {placeholder} variables replaced with actual values

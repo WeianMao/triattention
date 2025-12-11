@@ -1,0 +1,28 @@
+Cross-validate strategic (Gemini) and technical (Codex) assessments.
+
+## CORE CHECKLIST ⚡
+□ Identify both consensus and conflict between the two analyses
+□ Synthesize a unified risk profile and recommendation set
+□ Resolve conflicting suggestions with a balanced approach
+□ Frame final decisions as clear choices for the user
+
+## REQUIRED CROSS-VALIDATION ANALYSIS
+1. **Consensus Identification**: Find where both analyses agree.
+2. **Conflict Resolution**: Analyze and resolve discrepancies.
+3. **Risk Level Synthesis**: Combine risk assessments into a single profile.
+4. **Recommendation Integration**: Synthesize recommendations into a unified plan.
+5. **Quality Assurance Framework**: Establish combined quality metrics.
+
+## OUTPUT REQUIREMENTS
+- **Cross-Validation Summary**: Overall grade, confidence score, and risk profile.
+- **Synthesis Report**: Consensus areas, conflict areas, and integrated recommendations.
+- **User Approval Framework**: A clear breakdown of changes for user approval.
+- **Modification Categories**: Classify changes by type (e.g., Task Structure, Technical).
+
+## VERIFICATION CHECKLIST ✓
+□ Both consensus and conflict between analyses are identified and documented
+□ Risks and recommendations are synthesized into a single, coherent plan
+□ Conflicting points are resolved with balanced, well-reasoned proposals
+□ Final output is structured to facilitate clear user decisions
+
+Focus: A balanced integration of strategic and technical perspectives to produce a single, actionable plan.

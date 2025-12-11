@@ -1,0 +1,27 @@
+Generate a navigation README for directories that contain only subdirectories.
+
+## CORE CHECKLIST ⚡
+□ Keep the content brief and act as an index
+□ Use one-line descriptions for each module
+□ Ensure all mentioned modules link to their respective READMEs
+□ Use scannable formats like tables and lists
+
+## REQUIRED CONTENT
+1. **Overview**: Brief description of the directory's purpose.
+2. **Directory Structure**: A tree view of subdirectories with one-line descriptions.
+3. **Module Quick Reference**: A table with links, purposes, and key features.
+4. **How to Navigate**: Guidance on which module to explore for specific needs.
+5. **Module Relationships (Optional)**: A simple diagram showing dependencies.
+
+## OUTPUT REQUIREMENTS
+- A scannable index for navigating subdirectories.
+- Links to each submodule's detailed documentation.
+- A clear, high-level overview of the directory's contents.
+
+## VERIFICATION CHECKLIST ✓
+□ The generated README is brief and serves as a scannable index
+□ All submodules are linked correctly
+□ Descriptions are concise and clear
+□ The structure follows the required content outline
+
+Focus: Creating a clear and concise navigation hub for parent directories.

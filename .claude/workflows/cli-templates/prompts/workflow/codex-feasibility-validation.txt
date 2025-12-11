@@ -1,0 +1,176 @@
+Validate technical feasibility and identify implementation risks for proposed solution design.
+
+## CORE CHECKLIST ⚡
+□ Read context-package.json and gemini-solution-design.md
+□ Assess complexity, validate technology choices
+□ Evaluate performance and security implications
+□ Focus on TECHNICAL FEASIBILITY and RISK ASSESSMENT
+□ Write output to specified .workflow/active/{session_id}/.process/ path
+
+## PREREQUISITE ANALYSIS
+
+### Required Input Files
+1. **context-package.json**: Task requirements, source files, tech stack
+2. **gemini-solution-design.md**: Proposed solution design and architecture
+3. **workflow-session.json**: Session state and context
+4. **CLAUDE.md**: Project standards and conventions
+
+### Analysis Dependencies
+- Review Gemini's proposed solution design
+- Validate against actual codebase capabilities
+- Assess implementation complexity realistically
+- Identify gaps between design and execution
+
+## REQUIRED VALIDATION
+
+### 1. Feasibility Assessment
+- **Complexity Rating**: Rate technical complexity (1-5 scale)
+  - 1: Trivial - straightforward implementation
+  - 2: Simple - well-known patterns
+  - 3: Moderate - some challenges
+  - 4: Complex - significant challenges
+  - 5: Very Complex - high risk, major unknowns
+
+- **Resource Requirements**: Estimate development effort
+  - Development time (hours/days/weeks)
+  - Required expertise level
+  - Infrastructure needs
+
+- **Technology Compatibility**: Validate proposed tech stack
+  - Framework version compatibility
+  - Library maturity and support
+  - Integration with existing systems
+
+### 2. Risk Analysis
+- **Implementation Risks**: Technical challenges and blockers
+  - Unknown implementation patterns
+  - Missing capabilities or APIs
+  - Breaking changes to existing code
+
+- **Integration Challenges**: System integration concerns
+  - Data format compatibility
+  - API contract changes
+  - Dependency conflicts
+
+- **Performance Concerns**: Performance and scalability risks
+  - Resource consumption (CPU, memory, I/O)
+  - Latency and throughput impact
+  - Caching and optimization needs
+
+- **Security Concerns**: Security vulnerabilities and threats
+  - Authentication/authorization gaps
+  - Data exposure risks
+  - Compliance violations
+
+### 3. Implementation Validation
+- **Development Approach**: Validate proposed implementation strategy
+  - Verify module dependency order
+  - Assess incremental development feasibility
+  - Evaluate testing approach
+
+- **Quality Standards**: Validate quality requirements
+  - Test coverage achievability
+  - Performance benchmark realism
+  - Documentation completeness
+
+- **Maintenance Implications**: Long-term sustainability
+  - Code maintainability assessment
+  - Technical debt evaluation
+  - Evolution and extensibility
+
+### 4. Code Target Verification
+Review Gemini's proposed code targets:
+- **Validate existing targets**: Confirm file:function:lines exist
+- **Assess new file targets**: Evaluate necessity and placement
+- **Identify missing targets**: Suggest additional modification points
+- **Refine target specifications**: Provide more precise line numbers if possible
+
+### 5. Recommendations
+- **Must-Have Requirements**: Critical requirements for success
+- **Optimization Opportunities**: Performance and quality improvements
+- **Security Controls**: Essential security measures
+- **Risk Mitigation**: Strategies to reduce identified risks
+
+## OUTPUT REQUIREMENTS
+
+### Output File
+**Path**: `.workflow/active/{session_id}/.process/codex-feasibility-validation.md`
+**Format**: Follow structure from `~/.claude/workflows/cli-templates/prompts/workflow/analysis-results-structure.txt`
+
+### Required Sections
+Focus on these sections from the template:
+- Executive Summary (with Codex perspective)
+- Current State Analysis (validation findings)
+- Implementation Strategy (feasibility assessment)
+- Solution Optimization (risk mitigation)
+- Confidence Scores (technical feasibility focus)
+
+### Content Guidelines
+- ✅ Focus on technical feasibility and risk assessment
+- ✅ Verify code targets from Gemini's design
+- ✅ Provide concrete risk mitigation strategies
+- ✅ Quantify complexity and effort estimates
+- ❌ Do NOT create task breakdowns
+- ❌ Do NOT provide step-by-step implementation guides
+- ❌ Do NOT include code examples
+
+## VALIDATION METHODOLOGY
+
+### Complexity Scoring
+Rate each aspect on 1-5 scale:
+- Technical Complexity
+- Integration Complexity
+- Performance Risk
+- Security Risk
+- Maintenance Burden
+
+### Risk Classification
+- **LOW**: Minor issues, easily addressable
+- **MEDIUM**: Manageable challenges with clear mitigation
+- **HIGH**: Significant concerns requiring major mitigation
+- **CRITICAL**: Fundamental viability threats
+
+### Feasibility Judgment
+- **PROCEED**: Technically feasible with acceptable risk
+- **PROCEED_WITH_MODIFICATIONS**: Feasible but needs adjustments
+- **RECONSIDER**: High risk, major changes needed
+- **REJECT**: Not feasible with current approach
+
+## CONTEXT INTEGRATION
+
+### Gemini Analysis Integration
+- Review proposed architecture and design decisions
+- Validate assumptions and technology choices
+- Cross-check code targets against actual codebase
+- Assess realism of performance targets
+
+### Codebase Reality Check
+- Verify existing code capabilities
+- Identify actual technical constraints
+- Assess team skill compatibility
+- Evaluate infrastructure readiness
+
+### Session Context
+- Consider session history and previous decisions
+- Align with project architecture standards
+- Respect existing patterns and conventions
+
+## EXECUTION MODE
+
+**Mode**: Analysis with write permission for output file
+**CLI Tool**: Codex with --skip-git-repo-check -s danger-full-access
+**Timeout**: 60-90 minutes for complex tasks
+**Output**: Single file codex-feasibility-validation.md
+**Trigger**: Only for complex tasks (>6 modules)
+
+## VERIFICATION CHECKLIST ✓
+□ context-package.json and gemini-solution-design.md read
+□ Complexity rated on 1-5 scale with justification
+□ All risk categories assessed (technical, integration, performance, security)
+□ Code targets verified and refined
+□ Risk mitigation strategies provided
+□ Resource requirements estimated
+□ Final feasibility judgment (PROCEED/RECONSIDER/REJECT)
+□ Output written to .workflow/active/{session_id}/.process/codex-feasibility-validation.md
+
+Focus: Technical feasibility validation with realistic risk assessment and mitigation strategies.

@@ -1,0 +1,28 @@
+Assess the technical feasibility of a workflow implementation plan.
+
+## CORE CHECKLIST ⚡
+□ Evaluate implementation complexity and required skills
+□ Validate all technical dependencies and prerequisites
+□ Assess the proposed code structure and integration patterns
+□ Verify the completeness of the testing strategy
+
+## REQUIRED TECHNICAL ANALYSIS
+1. **Implementation Complexity**: Evaluate code difficulty and required skills.
+2. **Technical Dependencies**: Review libraries, versions, and build systems.
+3. **Code Structure**: Assess file organization, naming, and modularity.
+4. **Testing Completeness**: Evaluate test coverage, types, and gaps.
+5. **Execution Readiness**: Validate control flow, context, and file targets.
+
+## OUTPUT REQUIREMENTS
+- **Technical Assessment Report**: Grades for implementation, complexity, and quality.
+- **Detailed Technical Findings**: Blocking issues, performance concerns, and improvements.
+- **Implementation Recommendations**: Prerequisites, best practices, and refactoring.
+- **Risk Mitigation**: Technical, dependency, integration, and quality risks.
+
+## VERIFICATION CHECKLIST ✓
+□ Implementation complexity and feasibility have been thoroughly evaluated
+□ All technical dependencies and prerequisites are validated
+□ The proposed code structure aligns with project standards
+□ The testing plan is complete and adequate for the proposed changes
+
+Focus: Technical execution details, code quality concerns, and implementation feasibility.
