@@ -44,6 +44,18 @@ KV_COMPRESSION_MAP = {
 
 logger = logging.get_logger(__name__)
 
+
+def _get_cache_tensors(past_key_value, layer_idx: int):
+    key_cache = getattr(past_key_value, "key_cache", None)
+    value_cache = getattr(past_key_value, "value_cache", None)
+    cached_k = None
+    cached_v = None
+    if key_cache and len(key_cache) > layer_idx:
+        cached_k = key_cache[layer_idx]
+    if value_cache and len(value_cache) > layer_idx:
+        cached_v = value_cache[layer_idx]
+    return cached_k, cached_v
+
 def LlamaAttention_init(
     self, config: LlamaConfig, layer_idx: int, compression_config: dict
 ):
@@ -138,47 +150,44 @@ def LlamaAttention_forward(
                 ][:, :, -window_size:, :]
         # =============== Enable Query Cache end =========
 
-        # =============== decoding-time compression start ===============
         cached_queries = past_key_value.query_cache[self.layer_idx]
+        cached_k, cached_v = _get_cache_tensors(past_key_value, self.layer_idx)
+        prefix_len = 0
+        if cached_k is not None and cached_k.shape[-2] > 0:
+            prefix_len = cached_k.shape[-2] if not hasattr(self, "pinned_prefix_length") or self.pinned_prefix_length is None else self.pinned_prefix_length
+            self.pinned_prefix_length = prefix_len
+            key_states = torch.cat([cached_k, key_states], dim=2)
+            value_states = torch.cat([cached_v, value_states], dim=2)
+
+        # =============== decoding-time compression start ===============
         if self.config.compression is None:
             key_states_compress, value_states_compress = self.kv_cluster.update_kv(
                 key_states,
                 cached_queries,  # Use cached queries instead of current query
                 value_states,
-            )
-
-            if self.config.update_kv is True:
-                past_key_value.update(
-                    key_states_compress,
-                    value_states_compress,
-                    self.layer_idx,
-                    cache_kwargs,
-                )
-            else:
-                past_key_value.update(
-                    key_states,
-                    value_states,
-                    self.layer_idx,
-                    cache_kwargs,
-                )
-
-        elif self.config.compression is True:
-            key_states, value_states = past_key_value.update(
-                key_states,
-                value_states,
-                self.layer_idx,
-                cache_kwargs,
-            )
-
-            key_states_compress, value_states_compress = self.kv_cluster.update_kv(
-                key_states,
-                cached_queries,  # Use cached queries instead of current query
-                value_states,
+                prefix_len=prefix_len,
             )
 
             if self.config.update_kv is True:
                 past_key_value.key_cache[self.layer_idx] = key_states_compress
                 past_key_value.value_cache[self.layer_idx] = value_states_compress
+            else:
+                past_key_value.key_cache[self.layer_idx] = key_states
+                past_key_value.value_cache[self.layer_idx] = value_states
+
+        elif self.config.compression is True:
+            key_states_compress, value_states_compress = self.kv_cluster.update_kv(
+                key_states,
+                cached_queries,  # Use cached queries instead of current query
+                value_states,
+                prefix_len=prefix_len,
+            )
+            if self.config.update_kv is True:
+                past_key_value.key_cache[self.layer_idx] = key_states_compress
+                past_key_value.value_cache[self.layer_idx] = value_states_compress
+            else:
+                past_key_value.key_cache[self.layer_idx] = key_states
+                past_key_value.value_cache[self.layer_idx] = value_states
         else:
             key_states, value_states = past_key_value.update(
                 key_states, value_states, self.layer_idx, cache_kwargs
@@ -299,46 +308,44 @@ def Qwen2Attention_forward(
                 ][:, :, -window_size:, :]
         # =============== Enable Query Cache end ===============
 
-        # =============== decoding-time compression start ===============
         cached_queries = past_key_value.query_cache[self.layer_idx]
+        cached_k, cached_v = _get_cache_tensors(past_key_value, self.layer_idx)
+        prefix_len = 0
+        if cached_k is not None and cached_k.shape[-2] > 0:
+            prefix_len = cached_k.shape[-2] if not hasattr(self, "pinned_prefix_length") or self.pinned_prefix_length is None else self.pinned_prefix_length
+            self.pinned_prefix_length = prefix_len
+            key_states = torch.cat([cached_k, key_states], dim=2)
+            value_states = torch.cat([cached_v, value_states], dim=2)
+
+        # =============== decoding-time compression start ===============
         if self.config.compression is None:
             key_states_compress, value_states_compress = self.kv_cluster.update_kv(
                 key_states,
                 cached_queries,  # Use cached queries instead of current query
                 value_states,
+                prefix_len=prefix_len,
             )
 
             if self.config.update_kv is True:
-                past_key_value.update(
-                    key_states_compress,
-                    value_states_compress,
-                    self.layer_idx,
-                    cache_kwargs,
-                )
+                past_key_value.key_cache[self.layer_idx] = key_states_compress
+                past_key_value.value_cache[self.layer_idx] = value_states_compress
             else:
-                past_key_value.update(
-                    key_states,
-                    value_states,
-                    self.layer_idx,
-                    cache_kwargs,
-                )
+                past_key_value.key_cache[self.layer_idx] = key_states
+                past_key_value.value_cache[self.layer_idx] = value_states
 
         elif self.config.compression is True:
-            key_states, value_states = past_key_value.update(
-                key_states,
-                value_states,
-                self.layer_idx,
-                cache_kwargs,
-            )
-
             key_states_compress, value_states_compress = self.kv_cluster.update_kv(
                 key_states,
                 cached_queries,  # Use cached queries instead of current query
                 value_states,
+                prefix_len=prefix_len,
             )
             if self.config.update_kv is True:
                 past_key_value.key_cache[self.layer_idx] = key_states_compress
                 past_key_value.value_cache[self.layer_idx] = value_states_compress
+            else:
+                past_key_value.key_cache[self.layer_idx] = key_states
+                past_key_value.value_cache[self.layer_idx] = value_states
         else:
             key_states, value_states = past_key_value.update(
                 key_states, value_states, self.layer_idx, cache_kwargs
@@ -476,34 +483,33 @@ def Qwen3Attention_forward(
                 ][:, :, -window_size:, :]
         # =============== Enable Query Cache end =========
 
-        # =============== decoding-time compression start ===============
         cached_queries = past_key_value.query_cache[self.layer_idx]
+        cached_k, cached_v = _get_cache_tensors(past_key_value, self.layer_idx)
+        prefix_len = 0
+        if cached_k is not None and cached_k.shape[-2] > 0:
+            prefix_len = cached_k.shape[-2] if not hasattr(self, "pinned_prefix_length") or self.pinned_prefix_length is None else self.pinned_prefix_length
+            self.pinned_prefix_length = prefix_len
+            key_states = torch.cat([cached_k, key_states], dim=2)
+            value_states = torch.cat([cached_v, value_states], dim=2)
+
+        # =============== decoding-time compression start ===============
         if self.config.compression is None:
             key_states_compress, value_states_compress = self.kv_cluster.update_kv(
                 key_states,
                 cached_queries,  # Use cached queries instead of current query
                 value_states,
+                prefix_len=prefix_len,
             )
 
-            past_key_value.update(
-                key_states_compress,
-                value_states_compress,
-                self.layer_idx,
-                cache_kwargs,
-            )
+            past_key_value.key_cache[self.layer_idx] = key_states_compress
+            past_key_value.value_cache[self.layer_idx] = value_states_compress
 
         elif self.config.compression is True:
-            key_states, value_states = past_key_value.update(
-                key_states,
-                value_states,
-                self.layer_idx,
-                cache_kwargs,
-            )
-
             key_states_compress, value_states_compress = self.kv_cluster.update_kv(
                 key_states,
                 cached_queries,  # Use cached queries instead of current query
                 value_states,
+                prefix_len=prefix_len,
             )
 
             past_key_value.key_cache[self.layer_idx] = key_states_compress

@@ -4,7 +4,7 @@
 
 ## 1. 目标与交付
 - 把 R-KV 的 AIME 流程（参考 `run_rkv_aime25_official_sampled8_qwen.sh`）以 LazyEviction 的代码规范/运行方式重构，形成独立实现与可复现实验入口。
-- 与 LazyEviction 现有方法公平可比，首版对齐 `LazyEviction/weian_script/run_sparse_prefill_keep_sharded_eval.sh` 的运行/配置风格（KV budget、prefill 不压缩且不计入预算、分片调度、日志输出）。
+- 公平对比目标 = `LazyEviction/weian_script/run_sparse_prefill_keep_sharded_eval.sh`（当前为单样本贪心、前缀固定且不计入 budget），RKV 重构默认也应与之同口径，不要求 sample-8/聚合，除非额外复现官方脚本。
 - 交付物：文档体系（本目录）、隔离的调度/runner/配置、以及一键运行脚本（放在 `LazyEviction/weian_script/`）。
 
 ## 2. 范围与安全
@@ -18,10 +18,13 @@
 - 参考源实现：`R-KV/weian_script/aime24_official_sampled8/run_rkv_aime24_official_sampled8_qwen.sh` 及其 YAML（例如 `sample8_rkv_aime25_official_qwen.yaml`）。
 
 ## 4. 当前状态
-- 仅建立文档与规划；尚未创建实际 LazyEviction 版 RKV 代码/配置。新增的一键脚本会暂时作占位，防止误用。
+- 已完成：需求梳理与约束收敛（prefill 不计 budget、默认贪心单样本、隔离路径）、现有 R-KV 配置/runner 盘点（采样固定、plain prompt、max_length 计总长、kv_budget 未显式排除 prefill/padding），以及 LazyEviction 版 cfg/调度/runner 设计草案与 smoke/对比计划。
+- 实现：`run_rkv_sharded_eval.sh` + `rkv_lazy_dispatch.py` + `rkv_lazy_runner.py` 已落地，提示词/数据改为与 SparsePrefillKeep 一致（`LazyEviction/datasets/aime/test.jsonl` + Qwen chat `<think>`），默认 `count_prefill_in_budget=false`、`kv_budget=1492`、单样本贪心。
+- 运行与评测：已用 8 卡全量跑完 AIME（30 题），输出 `outputs/rkv_lazy_aime/merged/merged.jsonl`，评测使用 LazyEviction 同款提取/判分，得到 `accuracy=0.5333 (16/30)`，指标写入 `outputs/rkv_lazy_aime/merged/metrics.json`。
 - 风险/疑点罗列见 `rebuild_plan.md`；任务分解见 `project_todo.md`。
 
 ## 5. 风险与关注
-- KV budget 定义/计数方式若与 LazyEviction 不同，可能造成不公平；需要显式校准（prefill、padding、chunk、head 维度）。
-- 数据/提示词/解码策略差异（采样 vs 贪心、多样本平均等）可能放大差距，需在重构时提供可配置对齐。
+- KV budget 定义/计数方式若与 LazyEviction 不同，可能造成不公平；需要显式校准（prefill、padding、chunk、head 维度）。当前 R-KV monkeypatch 内部逻辑需确认。
+- 数据/提示词/解码策略差异（采样 vs 贪心、多样本平均等）可能放大差距；R-KV 现实现忽略 chat 模板、强制采样，需要在重构时提供可配置对齐。
 - 不允许影响现有流水线：新增 cfg 默认值需回放到旧行为；调度/日志路径需隔离，避免覆盖历史输出。
+- 现状缺陷：RKV 路径依赖外部 `R-KV/` 代码、prefix 未被固定/免预算，预算口径与 SparsePrefillKeep 不一致，eval 步骤未实现；如需复现 sample-8 仅作为可选补充，默认与基线对齐应为单样本贪心。

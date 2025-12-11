@@ -6,6 +6,7 @@
 - 检查现有 R-KV 实现是否存在不公平/“作弊”处（例：同样数字的 KV budget 计算方式不同且让 RKV 占便宜；若是 RKV 吃亏也要记录）。不允许影响 LazyEviction 已有实验与算法，必要时采取隔离式开发。
 - 任务当前阶段：立项、规划、风险识别、文档体系建立；后续可分多 Agent 执行，不要求一次性完成全部实现。
 - 最终需要一个与 `LazyEviction/weian_script/run_sparse_prefill_keep_sharded_eval.sh` 类似的“一键运行”脚本供重构版本使用。
+- 2024-12-11：已跑完 RKV 重构版 AIME（贪心单样本，kv_budget=1492，lazy_chat 提示、前缀不计费），8 卡输出 `outputs/rkv_lazy_aime/merged/merged.jsonl`，用 LazyEviction 判分得到 `accuracy=0.5333 (16/30)`，指标写入 `outputs/rkv_lazy_aime/merged/metrics.json`；评测步骤参考基线口径。
 
 ## 参考要求
 - 文档规范参考：`R-KV/docs/fullkv_ablation/*`（同结构/粒度，兼顾 LazyEviction 现有风格）。

@@ -41,6 +41,12 @@
 - 进程命名：保持 `PD-L1_binder`。
 
 ## 5. 判定标准（完成态）
-- LazyEviction 下有独立的 RKV 调度/runner + YAML + 一键脚本；默认行为不影响现有方法。  
-- KV budget/Prefill 处理、数据/模板、解码、长度等关键影响因素可配置对齐；默认遵循 LazyEviction 规则。  
+- LazyEviction 下有独立的 RKV 调度/runner + YAML + 一键脚本；默认行为不影响现有方法。
+- KV budget/Prefill 处理、数据/模板、解码、长度等关键影响因素可配置对齐；默认遵循 LazyEviction 规则。
 - 文档与 TODO 更新，列出任何仍存在的潜在不公平或待决问题。
+
+## 6. 当前执行要点（2025-02）
+- 现有 R-KV 盘点：YAML 默认 kv_budget=2048、max_length=32768（总长）、num_samples=8、temp=0.6/top_p=0.95、flash_attn2+bf16、reset_cache_each_batch=false；runner 固定 do_sample=True，忽略 use_chat_template（强制 plain prompt），max_length 计入 prefill，kv_budget 透传给 monkeypatch（未见显式排除 prefill/padding）。
+- LazyEviction 版接口草案：cfg 默认遵循 LazyEviction（chat+贪心单样本、prefill 不计 budget、max_new_tokens 16384），提供 legacy_total_max_length、采样/聚合、prompt_style plain/chat、kv_budget_mode（是否计入 prefill/padding）、attn/dtype/reset_cache/fp32_topk、trust_remote_code 等开关；runner/dispatch 放 `weian_development/rkv_lazy_*`，一键脚本+YAML 放 `LazyEviction/weian_script/`，输出前缀隔离到 `outputs/rkv_lazy/`。
+- Smoke/对照准则：先 dry-run + 单 shard/少样本/小 budget 验证预算日志与 prompt 模式切换；公平对照用 chat+贪心+相同 budget/max_new_tokens，与 LazyEviction 其他方法比较；另保留 8 样本采样+pass@1 聚合复现 R-KV 原始设置。
+- 风险/待决：需要明确 monkeypatch 内部对 kv_budget 计数（prefill/padding/head 维度）；R-KV 忽略 chat 模板可能导致提示词优势，需通过 prompt_style 开关对齐；评估需支持多样本 pass@1/majority 聚合并记录口径。
