@@ -157,11 +157,11 @@ weights = energy_per_freq / energy_per_freq.sum()
 
 **注意**：Method A 使用去除 RoPE 后的向量，Method B 使用原始旋转后的向量。两者的 "能量" 含义不同：
 - Method A：频段的"潜在"交互能力（不考虑位置）
-- Method B：频段的"实际"attention 贡献（包含位置信息）
+- Method B：频段的"实际"attention 贡献（包含位置信息）。当前实现仅采用未缩放的 causal dot product 均值（无 softmax、无 1/√d），与真实注意力概率不成比例，属于近似但先用于简化实验。（这部分与之前的attention_pruning_case_study_hybrid_rounds_xtrace.py脚本先保持一致）
 
 ### 4.3 Recommendation
 
-- **Method A (amplitude)** 作为默认选项：简单高效，与 NMS 的 unrotated K 表示一致
+- **Method A (amplitude)** 作为默认选项：简单高效，能量权重在去 RoPE 空间统计，但 NMS 在 RoPE 旋转后空间执行，属于跨空间权重近似（接受这一权衡以简化实现）。
 - **Method B (causal)** 作为对比实验：更准确但计算量大，需注意 rotated vs unrotated 的一致性
 
 ---
@@ -205,7 +205,7 @@ $$|A| \cdot \cos(\theta_{AB}) > |B| + \epsilon$$
 
 **多频段情况**：对每个频段单独计算 "coverage score"，然后按频谱能量加权求和。
 
-**定义 per-frequency coverage score**：
+**定义 per-frequency coverage score**（在 RoPE 旋转后的 K 空间，记作 $k^{rot}$；后续公式中的 $A,B$ 均为 $k^{rot}$）。在旋转后空间做 NMS 更贴近真实注意力计算（实际 attention 点积发生在 RoPE 旋转后的 Q/K），因此优于“先去 RoPE 再做 NMS”的方案：
 
 $$\text{score}_f(A, B) = |A^{(f)}| \cdot \cos(\theta_{AB}^{(f)}) - |B^{(f)}|$$
 
@@ -221,11 +221,13 @@ $$\text{total\_score}(A, B) = \sum_f w_f \cdot \left( |A^{(f)}| \cdot \cos(\thet
 
 **最终公式**：
 
-$$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \left( \frac{\text{Real}(A^{(f)} \cdot \overline{B^{(f)}})}{|B^{(f)}|} - |B^{(f)}| \right)$$
+$$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \left( \frac{\text{Real}(A^{(f)} \cdot \overline{B^{(f)}})}{|B^{(f)}| + \varepsilon_{\text{den}}} - |B^{(f)}| \right)$$
 
-化简（注意 $|A^{(f)}| \cdot \cos(\theta) = \frac{\text{Real}(A \cdot \bar{B})}{|B|}$）：
+其中 $\varepsilon_{\text{den}}$ 为防止除零/爆数的极小正数（实现中使用 $1\times 10^{-5}$）。
 
-$$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \left( \frac{\text{Real}(\tilde{k}_A^{(f)} \cdot \overline{\tilde{k}_B^{(f)}})}{|\tilde{k}_B^{(f)}|} - |\tilde{k}_B^{(f)}| \right)$$
+化简（注意 $|A^{(f)}| \cdot \cos(\theta) = \frac{\text{Real}(A \cdot \bar{B})}{|B| + \varepsilon_{\text{den}}}$）：
+
+$$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \left( \frac{\text{Real}(k^{rot,(f)}_A \cdot \overline{k^{rot,(f)}_B})}{|k^{rot,(f)}_B| + \varepsilon_{\text{den}}} - |k^{rot,(f)}_B| \right)$$
 
 **A 抑制 B 当**：$\text{coverage\_score}(A, B) > \epsilon$
 
@@ -254,7 +256,7 @@ $$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \left( \frac{\text{Real}(\tild
 **算法**（逐频段 cos_sim）：
 ```python
 def fast_parallel_nms(
-    k_complex: torch.Tensor,      # [N, F] 去RoPE后的K (复数)
+    k_complex: torch.Tensor,      # [N, F] RoPE旋转后的K (原始 qk.pt) 转为复数
     freq_weights: torch.Tensor,   # [F] 频段权重
 ) -> torch.Tensor:
     """
@@ -272,7 +274,7 @@ def fast_parallel_nms(
 
     # 1. 计算每个 K 每个频段的模长
     k_abs = torch.abs(k_complex)  # [N, F]
-    k_abs_safe = k_abs.clamp(min=1e-8)  # 避免除零
+    k_abs_safe = k_abs.clamp(min=1e-5)  # 避免除零/爆数
 
     # 2. 计算 A 在 B 方向的投影（逐频段）
     #    proj[a, b, f] = Real(k_a^f * conj(k_b^f)) / |k_b^f|
@@ -324,7 +326,7 @@ def fast_parallel_nms(
 ```
 
 **需要计算**：
-- 历史K 抑制 新K (H × N)：检查新 K 是否被历史 K 抑制
+- 历史K 抑制 新K (H × N)：检查新 K 是否被历史 K 抑制（其中“新 K”指上一轮新增并已进入缓存的片段，不允许未来 round 的 K 参与）
 - 新K 抑制 历史K (N × H)：检查历史 K 是否被新 K 抑制
 - 新K 抑制 新K (N × N)：新 K 之间互相检查
 
@@ -332,8 +334,8 @@ def fast_parallel_nms(
 
 ```python
 def incremental_fast_nms(
-    historical_k: torch.Tensor,   # [H, F] 历史 K (复数)
-    new_k: torch.Tensor,          # [N, F] 新 K (复数)
+    historical_k: torch.Tensor,   # [H, F] 历史 K (RoPE 旋转后) 复数
+    new_k: torch.Tensor,          # [N, F] 新 K (RoPE 旋转后) 复数
     freq_weights: torch.Tensor,   # [F] 频段权重
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
@@ -352,9 +354,9 @@ def incremental_fast_nms(
 
     # 预处理：计算模长
     hist_abs = torch.abs(historical_k)  # [H, F]
-    hist_abs_safe = hist_abs.clamp(min=1e-8)
+    hist_abs_safe = hist_abs.clamp(min=1e-5)
     new_abs = torch.abs(new_k)  # [N, F]
-    new_abs_safe = new_abs.clamp(min=1e-8)
+    new_abs_safe = new_abs.clamp(min=1e-5)
 
     # 1. 历史K 抑制 新K: coverage_score[h, n] = Σ_f w_f * (Real(hist_h * conj(new_n)) / |new_n| - |new_n|)
     real_dot_hist_new = torch.einsum('hf,nf->hnf', historical_k, new_k.conj()).real  # [H, N, F]
@@ -424,6 +426,8 @@ def incremental_fast_nms(
 - **简单实现**：每轮对所有 K 调用 `fast_parallel_nms()`
 - **优化实现**：使用 `incremental_fast_nms()` 跳过历史 K 之间的重复计算
 
+**Online 约束说明**：NMS 只作用于“当前已在缓存中的 K”，其中“新 K”指上一轮生成并已加入缓存的 K。未来 token 的 K/查询均不可见，不应参与 NMS。
+
 ---
 
 ## 7. Experimental Design
@@ -478,6 +482,8 @@ done
 | causal        | 0.84           | 10%           |
 ```
 
+**Baseline 说明**：baseline 运行使用新脚本但关闭 `--nms-enabled`，假设新增的参数/指标/频段权重路径在关闭 NMS 时行为与原脚本一致，仅算法变量为 NMS。
+
 ### 7.3 Evaluation (与原脚本完全一致)
 
 1. **Retention Rate**: argmax 命中率
@@ -491,6 +497,8 @@ done
 - `nms_drop_rate`: 每轮被 NMS 删除的 K 的比例
 - `nms_drop_count_per_round`: 每轮删除的 K 数量列表
 - `avg_shadow_depth`: 被删除 K 的平均 shadow depth（用于分析 epsilon 选择）
+
+**备注**：`avg_shadow_depth` 目前仅占位，尚未定义/实现，需后续明确计算方法再落地。
 
 ---
 
@@ -541,7 +549,7 @@ freq_weights = compute_frequency_energy_weights(stats_trace, method=args.energy_
 **决定**：使用投影覆盖条件（Projection Coverage）
 
 **公式**：
-$$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \left( \frac{\text{Real}(A^{(f)} \cdot \overline{B^{(f)}})}{|B^{(f)}|} - |B^{(f)}| \right) > \epsilon$$
+$$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \left( \frac{\text{Real}(A^{(f)} \cdot \overline{B^{(f)}})}{|B^{(f)}| + \varepsilon_{\text{den}}} - |B^{(f)}| \right) > \epsilon$$
 
 **几何意义**：A 在 B 方向的投影超过了 B 的模长 → A "覆盖" 了 B → B 冗余
 
