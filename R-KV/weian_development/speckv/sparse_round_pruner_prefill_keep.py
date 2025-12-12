@@ -8,6 +8,7 @@ from typing import Dict, List, Sequence, Tuple
 import torch
 from transformers import AutoConfig
 
+from rkv.utils import cal_similarity
 from weian_development.speckv.round_pruning_utils import (
     HeadFrequencyStats,
     build_geometric_offsets,
@@ -36,6 +37,9 @@ class SparsePruningConfig:
     head_limit: int | None = None
     metadata_expectations: Dict[str, object] | None = None
     normalize_scores: bool = False
+    # Similarity Deduplication parameters (SpecKV + R-KV integration)
+    sparse_use_similarity: bool = False
+    sparse_similarity_mix_lambda: float = 0.1
 
 
 class SparseRoundPruner:
@@ -128,6 +132,9 @@ class SparseRoundPruner:
         self.max_keys = config.max_keys
         self.score_aggregation = config.score_aggregation
         self.normalize_scores = bool(getattr(config, "normalize_scores", False))
+        # Similarity Deduplication parameters (SpecKV + R-KV integration)
+        self.use_similarity = bool(getattr(config, "sparse_use_similarity", False))
+        self.similarity_mix_lambda = float(getattr(config, "sparse_similarity_mix_lambda", 0.1))
         self.generator: torch.Generator | None = None
         self.prefix_length: int = 0
         if config.seed is not None:
@@ -261,7 +268,55 @@ class SparseRoundPruner:
         if per_head_scores.numel() == 0:
             return torch.empty(0, device=self.config.device, dtype=torch.long)
 
-        combined = per_head_scores.max(dim=0).values
+        # Similarity Deduplication: combine frequency scores with similarity scores per-head, then aggregate
+        # Formula: per_head_final = freq_score * mix_lambda - similarity * (1 - mix_lambda)
+        # This aligns with R-KV's per-head combination approach
+        if self.use_similarity:
+            seq_len = key_positions.shape[0]
+            device = per_head_scores.device
+
+            # Compute similarity for each unique layer, then align with sampled_heads
+            # This ensures each (layer, head) pair uses similarity from its own layer
+            unique_layers = sorted(set(layer for layer, head in self.sampled_heads))
+            layer_similarity_cache: dict[int, torch.Tensor] = {}
+
+            for layer_idx in unique_layers:
+                key_tensor = past_key_values[layer_idx][0]  # [batch=1, num_heads, seq_len, head_dim]
+                gather_indices = torch.arange(start_index, start_index + seq_len, device=key_tensor.device)
+                key_states = key_tensor[:, :, gather_indices, :]  # [1, num_heads, seq_len, head_dim]
+                # cal_similarity returns [num_heads, seq_len] after mean(dim=1).softmax(dim=-1)
+                layer_similarity = cal_similarity(
+                    key_states,
+                    threshold=0.5,
+                    retain_ratio=0.1,
+                    retain_direction="last",
+                )
+                layer_similarity_cache[layer_idx] = layer_similarity
+
+            # Build aligned similarity scores matching per_head_scores shape [num_sampled_heads, seq_len]
+            # Use same GQA head mapping as _compute_head_scores: attention_head -> kv_head
+            similarity_aligned_list = []
+            for layer, head in self.sampled_heads:
+                layer_sim = layer_similarity_cache[layer]  # [num_kv_heads, seq_len]
+                # Map attention head index to KV head index (for GQA models like DeepSeek/LLaMA)
+                kv_head = head
+                if self.num_key_value_heads and self.num_attention_heads:
+                    kv_head = min(
+                        layer_sim.shape[0] - 1,
+                        head // max(1, self.num_key_value_groups),
+                    )
+                head_sim = layer_sim[kv_head]  # [seq_len]
+                similarity_aligned_list.append(head_sim)
+            similarity_scores_aligned = torch.stack(similarity_aligned_list, dim=0)  # [num_sampled_heads, seq_len]
+
+            # Per-head combination: mix frequency and similarity scores at head level BEFORE aggregation
+            # Higher similarity = more redundant = should be removed = lower final score
+            per_head_final = per_head_scores * self.similarity_mix_lambda - similarity_scores_aligned * (1 - self.similarity_mix_lambda)
+            # Aggregate across heads using max (consistent with current score_aggregation strategy)
+            combined = per_head_final.max(dim=0).values
+        else:
+            # Original behavior: frequency-only scoring with head aggregation
+            combined = per_head_scores.max(dim=0).values
 
         candidate_count = combined.shape[0]
         if candidate_count <= keep_count:

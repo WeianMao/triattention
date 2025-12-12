@@ -76,6 +76,25 @@ def parse_args() -> argparse.Namespace:
         help="Override runner arg: disable sparse score normalization for SpeckV.",
     )
     parser.set_defaults(sparse_normalize_scores=None)
+    parser.add_argument(
+        "--sparse-use-similarity",
+        dest="sparse_use_similarity",
+        action="store_true",
+        help="Override runner arg: enable Similarity Deduplication in SpecKV.",
+    )
+    parser.add_argument(
+        "--no-sparse-use-similarity",
+        dest="sparse_use_similarity",
+        action="store_false",
+        help="Override runner arg: disable Similarity Deduplication in SpecKV.",
+    )
+    parser.set_defaults(sparse_use_similarity=None)
+    parser.add_argument(
+        "--sparse-similarity-mix-lambda",
+        type=float,
+        default=None,
+        help="Override runner arg: frequency score weight for similarity scoring (e.g., 0.1, 0.3, 0.5, 0.7, 0.9).",
+    )
     return parser.parse_args()
 
 
@@ -436,6 +455,10 @@ def main() -> None:
         runner_args["output_dir"] = args.output_dir
     if args.sparse_normalize_scores is not None:
         runner_args["sparse_normalize_scores"] = args.sparse_normalize_scores
+    if args.sparse_use_similarity is not None:
+        runner_args["sparse_use_similarity"] = args.sparse_use_similarity
+    if args.sparse_similarity_mix_lambda is not None:
+        runner_args["sparse_similarity_mix_lambda"] = args.sparse_similarity_mix_lambda
     base_env = prepare_environment(experiment.get("env", {}))
     base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 

@@ -282,6 +282,18 @@ def parse_arguments() -> argparse.Namespace:
         help="Normalize per-head sparse scores before aggregation.",
     )
     parser.add_argument(
+        "--sparse_use_similarity",
+        type=str2bool,
+        default=False,
+        help="Enable Similarity Deduplication in SpecKV (combines frequency with R-KV similarity).",
+    )
+    parser.add_argument(
+        "--sparse_similarity_mix_lambda",
+        type=float,
+        default=0.1,
+        help="Mix lambda for similarity scoring: final = freq * lambda - sim * (1-lambda). Needs search: 0.1, 0.3, 0.5, 0.7, 0.9.",
+    )
+    parser.add_argument(
         "--sparse_seed",
         type=int,
         default=0,
@@ -380,6 +392,8 @@ def main(args: argparse.Namespace) -> None:
             "sparse_head_limit": args.sparse_head_limit,
             "sparse_seed": args.sparse_seed,
             "sparse_normalize_scores": args.sparse_normalize_scores,
+            "sparse_use_similarity": args.sparse_use_similarity,
+            "sparse_similarity_mix_lambda": args.sparse_similarity_mix_lambda,
         }
 
     method_config = {"budget": args.kv_budget, "window_size": args.window_size}
@@ -490,6 +504,8 @@ def main(args: argparse.Namespace) -> None:
             head_limit=args.sparse_head_limit,
             metadata_expectations=metadata_expectations,
             normalize_scores=args.sparse_normalize_scores,
+            sparse_use_similarity=args.sparse_use_similarity,
+            sparse_similarity_mix_lambda=args.sparse_similarity_mix_lambda,
         )
 
     for run_id in run_ids:
