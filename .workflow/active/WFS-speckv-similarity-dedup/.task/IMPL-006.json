@@ -1,0 +1,175 @@
+{
+  "id": "IMPL-006",
+  "title": "Create 5 shell scripts for mix_lambda experiments",
+  "status": "completed",
+  "context_package_path": ".workflow/active/WFS-speckv-similarity-dedup/.process/context-package.json",
+  "meta": {
+    "type": "feature",
+    "agent": "@code-developer",
+    "execution_group": "parallel-configs",
+    "module": null
+  },
+  "context": {
+    "requirements": [
+      "Create new directory: R-KV/weian_script/aime24_official_sampled8/speckv_similarity/",
+      "Create 5 shell scripts: run_speckv_similarity_lambda{01,03,05,07,09}.sh",
+      "Each script references corresponding YAML config file",
+      "Base script pattern copied from run_speckv_aime24_official_sampled8_norm.sh",
+      "Set unique output/log directories per lambda variant"
+    ],
+    "focus_paths": [
+      "R-KV/weian_script/aime24_official_sampled8/speckv_similarity/"
+    ],
+    "acceptance": [
+      "New directory created: verify by test -d R-KV/weian_script/aime24_official_sampled8/speckv_similarity/",
+      "5 shell scripts created: verify by ls R-KV/weian_script/aime24_official_sampled8/speckv_similarity/run_speckv_similarity_lambda*.sh | wc -l = 5",
+      "Each script references correct config: verify lambda01 → sample8_speckv_similarity_lambda01_aime24_official.yaml",
+      "Scripts are executable: verify by test -x R-KV/weian_script/aime24_official_sampled8/speckv_similarity/run_speckv_similarity_lambda01.sh",
+      "Unique output directories: verify each script has different --method-output-dir and --log-dir"
+    ],
+    "depends_on": ["IMPL-005"],
+    "inherited": {
+      "from": "IMPL-005",
+      "context": ["5 YAML config files created for different lambda values", "Config files specify sparse_use_similarity=true and different mix_lambda values"]
+    },
+    "shared_context": {
+      "tech_stack": ["Bash", "Python"],
+      "design_pattern": "Shell script wrapper for experiment dispatch",
+      "conventions": ["Set -euo pipefail for strict error handling", "Export PYTHONPATH, VLLM_PROCESS_NAME_PREFIX, HF_HOME, PIP_CACHE_DIR", "Use absolute paths via PROJECT_ROOT variable"]
+    },
+    "artifacts": [
+      {
+        "type": "individual_role_analysis",
+        "source": "reference_script",
+        "path": "R-KV/weian_script/aime24_official_sampled8/run_speckv_aime24_official_sampled8_norm.sh",
+        "priority": "high",
+        "usage": "Template for shell script structure and environment setup",
+        "contains": "Shell script boilerplate, environment variables, dispatcher invocation pattern"
+      }
+    ]
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_context_package",
+        "action": "Load context package for artifact paths and smart context",
+        "commands": ["Read(.workflow/active/WFS-speckv-similarity-dedup/.process/context-package.json)"],
+        "output_to": "context_package",
+        "on_error": "fail"
+      },
+      {
+        "step": "load_reference_script",
+        "action": "Read reference script template for structure and patterns",
+        "commands": ["Read(R-KV/weian_script/aime24_official_sampled8/run_speckv_aime24_official_sampled8_norm.sh)"],
+        "output_to": "reference_script_template",
+        "on_error": "fail"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "Create speckv_similarity directory",
+        "description": "Create new subdirectory for similarity experiment scripts",
+        "modification_points": [
+          "Create directory R-KV/weian_script/aime24_official_sampled8/speckv_similarity/"
+        ],
+        "logic_flow": [
+          "Use mkdir -p to create directory with parents if needed",
+          "Verify directory creation"
+        ],
+        "depends_on": [],
+        "output": "speckv_similarity_directory"
+      },
+      {
+        "step": 2,
+        "title": "Create run_speckv_similarity_lambda01.sh",
+        "description": "Create shell script for lambda=0.1 experiment",
+        "modification_points": [
+          "Copy structure from run_speckv_aime24_official_sampled8_norm.sh",
+          "Set config: sample8_speckv_similarity_lambda01_aime24_official.yaml",
+          "Set output-dir: R-KV/outputs/sample8_speckv_similarity_lambda01_aime24_official/shards",
+          "Set log-dir: R-KV/logs/sample8_speckv_similarity_lambda01_aime24_official",
+          "Set method-output-dir: R-KV/outputs/sample8_speckv_similarity_lambda01_aime24_official",
+          "Add execute permission (chmod +x)"
+        ],
+        "logic_flow": [
+          "Copy reference script template",
+          "Update config path to lambda01 variant",
+          "Update output/log directories with lambda01 suffix",
+          "Keep --sparse-normalize-scores flag (from base script)",
+          "Write to speckv_similarity/run_speckv_similarity_lambda01.sh",
+          "Set execute permission"
+        ],
+        "depends_on": [1],
+        "output": "lambda01_script"
+      },
+      {
+        "step": 3,
+        "title": "Create run_speckv_similarity_lambda03.sh",
+        "description": "Create shell script for lambda=0.3 experiment",
+        "modification_points": [
+          "Same structure as step 2, change config and directories to lambda03"
+        ],
+        "logic_flow": [
+          "Follow same pattern as step 2",
+          "Update all lambda01 references to lambda03",
+          "Write to speckv_similarity/run_speckv_similarity_lambda03.sh"
+        ],
+        "depends_on": [1],
+        "output": "lambda03_script"
+      },
+      {
+        "step": 4,
+        "title": "Create run_speckv_similarity_lambda05.sh",
+        "description": "Create shell script for lambda=0.5 experiment",
+        "modification_points": [
+          "Same structure as step 2, change config and directories to lambda05"
+        ],
+        "logic_flow": [
+          "Follow same pattern as step 2",
+          "Update all lambda01 references to lambda05",
+          "Write to speckv_similarity/run_speckv_similarity_lambda05.sh"
+        ],
+        "depends_on": [1],
+        "output": "lambda05_script"
+      },
+      {
+        "step": 5,
+        "title": "Create run_speckv_similarity_lambda07.sh",
+        "description": "Create shell script for lambda=0.7 experiment",
+        "modification_points": [
+          "Same structure as step 2, change config and directories to lambda07"
+        ],
+        "logic_flow": [
+          "Follow same pattern as step 2",
+          "Update all lambda01 references to lambda07",
+          "Write to speckv_similarity/run_speckv_similarity_lambda07.sh"
+        ],
+        "depends_on": [1],
+        "output": "lambda07_script"
+      },
+      {
+        "step": 6,
+        "title": "Create run_speckv_similarity_lambda09.sh",
+        "description": "Create shell script for lambda=0.9 experiment",
+        "modification_points": [
+          "Same structure as step 2, change config and directories to lambda09"
+        ],
+        "logic_flow": [
+          "Follow same pattern as step 2",
+          "Update all lambda01 references to lambda09",
+          "Write to speckv_similarity/run_speckv_similarity_lambda09.sh"
+        ],
+        "depends_on": [1],
+        "output": "lambda09_script"
+      }
+    ],
+    "target_files": [
+      "R-KV/weian_script/aime24_official_sampled8/speckv_similarity/run_speckv_similarity_lambda01.sh",
+      "R-KV/weian_script/aime24_official_sampled8/speckv_similarity/run_speckv_similarity_lambda03.sh",
+      "R-KV/weian_script/aime24_official_sampled8/speckv_similarity/run_speckv_similarity_lambda05.sh",
+      "R-KV/weian_script/aime24_official_sampled8/speckv_similarity/run_speckv_similarity_lambda07.sh",
+      "R-KV/weian_script/aime24_official_sampled8/speckv_similarity/run_speckv_similarity_lambda09.sh"
+    ]
+  }
+}

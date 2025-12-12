@@ -1,0 +1,17 @@
+{
+  "project_name": "DeepConf (dc)",
+  "description": "Efficient parallel thinking framework built on vLLM for LLM reasoning tasks with confidence-based early stopping and multiple voting strategies",
+  "technology_stack": ["Python", "PyTorch", "vLLM", "HuggingFace Transformers"],
+  "key_modules": {
+    "deepconf": "Core library with wrapper.py, outputs.py, utils.py for parallel reasoning",
+    "R-KV": "KV cache compression algorithms (R-KV, SpecKV, SnapKV, H2O, StreamingLLM)",
+    "weian_development": "Development scripts including SpeckV sparse pruner implementation",
+    "LazyEviction": "Separate KV cache eviction subproject"
+  },
+  "conda_environments": {
+    "dc": "Default DeepConf development",
+    "lazy_evict": "LazyEviction subproject",
+    "rkv": "R-KV compression experiments"
+  },
+  "initialized_at": "2025-12-11T00:00:00Z"
+}

@@ -1,0 +1,112 @@
+{
+  "id": "IMPL-001",
+  "title": "Add similarity scoring parameters to SparsePruningConfig",
+  "status": "completed",
+  "context_package_path": ".workflow/active/WFS-speckv-similarity-dedup/.process/context-package.json",
+  "meta": {
+    "type": "feature",
+    "agent": "@code-developer",
+    "execution_group": null,
+    "module": null
+  },
+  "context": {
+    "requirements": [
+      "Add 2 new parameters to SparsePruningConfig dataclass: sparse_use_similarity (bool, default=False), sparse_similarity_mix_lambda (float, default=0.1)",
+      "Modify 1 file: R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py lines 25-38 (SparsePruningConfig dataclass)",
+      "Store 2 new instance variables in SparseRoundPruner.__init__: self.use_similarity, self.similarity_mix_lambda"
+    ],
+    "focus_paths": [
+      "R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py"
+    ],
+    "acceptance": [
+      "2 parameters added to SparsePruningConfig: verify by grep 'sparse_use_similarity\\|sparse_similarity_mix_lambda' R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py | wc -l >= 4",
+      "Default values set correctly: sparse_use_similarity=False, sparse_similarity_mix_lambda=0.1",
+      "Instance variables initialized in __init__: verify by grep 'self.use_similarity\\|self.similarity_mix_lambda' R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py | wc -l = 2"
+    ],
+    "depends_on": [],
+    "inherited": {},
+    "shared_context": {
+      "tech_stack": [
+        "Python",
+        "PyTorch",
+        "dataclasses"
+      ],
+      "design_pattern": "Configuration dataclass with backward-compatible defaults",
+      "conventions": [
+        "Follow existing parameter naming: sparse_* prefix",
+        "Default to disabled state for new features"
+      ]
+    },
+    "artifacts": []
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_context_package",
+        "action": "Load context package for artifact paths and smart context",
+        "commands": [
+          "Read(.workflow/active/WFS-speckv-similarity-dedup/.process/context-package.json)"
+        ],
+        "output_to": "context_package",
+        "on_error": "fail"
+      },
+      {
+        "step": "analyze_config_structure",
+        "action": "Examine SparsePruningConfig dataclass structure and existing parameter patterns",
+        "commands": [
+          "Read(R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py)"
+        ],
+        "output_to": "config_structure",
+        "on_error": "fail"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "Add parameters to SparsePruningConfig dataclass",
+        "description": "Insert 2 new optional parameters after existing sparse-related parameters with backward-compatible defaults",
+        "modification_points": [
+          "Add sparse_use_similarity: bool = False to SparsePruningConfig",
+          "Add sparse_similarity_mix_lambda: float = 0.1 to SparsePruningConfig"
+        ],
+        "logic_flow": [
+          "Locate SparsePruningConfig dataclass (lines 25-38)",
+          "Add sparse_use_similarity after normalize_scores parameter",
+          "Add sparse_similarity_mix_lambda after sparse_use_similarity",
+          "Use default values to ensure backward compatibility"
+        ],
+        "depends_on": [],
+        "output": "updated_config_dataclass"
+      },
+      {
+        "step": 2,
+        "title": "Initialize instance variables in SparseRoundPruner.__init__",
+        "description": "Store config parameters as instance variables for use in _select_keep_indices method",
+        "modification_points": [
+          "Add self.use_similarity = bool(getattr(config, 'sparse_use_similarity', False)) in __init__",
+          "Add self.similarity_mix_lambda = float(getattr(config, 'sparse_similarity_mix_lambda', 0.1)) in __init__"
+        ],
+        "logic_flow": [
+          "Locate SparseRoundPruner.__init__ method (lines 50-138)",
+          "Add initialization after self.normalize_scores assignment (line 130)",
+          "Use getattr with defaults for backward compatibility with existing configs"
+        ],
+        "depends_on": [
+          1
+        ],
+        "output": "initialized_instance_variables"
+      }
+    ],
+    "target_files": [
+      "R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py:SparsePruningConfig:25-38",
+      "R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py:SparseRoundPruner.__init__:50-138"
+    ]
+  },
+  "status_history": [
+    {
+      "from": "pending",
+      "to": "completed",
+      "changed_at": "2025-12-11T16:55:25-05:00"
+    }
+  ]
+}

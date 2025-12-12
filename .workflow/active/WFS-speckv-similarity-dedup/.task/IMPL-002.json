@@ -1,0 +1,137 @@
+{
+  "id": "IMPL-002",
+  "title": "Integrate similarity scoring into _select_keep_indices method",
+  "status": "completed",
+  "context_package_path": ".workflow/active/WFS-speckv-similarity-dedup/.process/context-package.json",
+  "meta": {
+    "type": "feature",
+    "agent": "@code-developer",
+    "execution_group": null,
+    "module": null
+  },
+  "context": {
+    "requirements": [
+      "Import cal_similarity function from R-KV/HuggingFace/rkv/utils.py",
+      "Modify 1 method: _select_keep_indices in sparse_round_pruner_prefill_keep.py lines 251-297",
+      "Implement conditional similarity scoring: if self.use_similarity, compute final_score = freq_score * mix_lambda - similarity_cos * (1 - mix_lambda)",
+      "Extract key_states from past_key_values for similarity calculation",
+      "Use fixed R-KV parameters: threshold=0.5, retain_ratio=0.1, retain_direction='last'"
+    ],
+    "focus_paths": [
+      "R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py",
+      "R-KV/HuggingFace/rkv/utils.py"
+    ],
+    "acceptance": [
+      "cal_similarity imported: verify by grep 'from.*rkv.utils import.*cal_similarity' R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py",
+      "Conditional block added in _select_keep_indices: verify by grep -A 10 'if self.use_similarity' R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py | grep 'cal_similarity\\|final_score'",
+      "Formula implemented correctly: final_score = combined * mix_lambda - similarity_cos * (1 - mix_lambda)",
+      "Backward compatibility preserved: when sparse_use_similarity=False, behavior identical to original (no similarity calculation)"
+    ],
+    "depends_on": ["IMPL-001"],
+    "inherited": {
+      "from": "IMPL-001",
+      "context": ["SparsePruningConfig has sparse_use_similarity and sparse_similarity_mix_lambda parameters", "Instance variables self.use_similarity and self.similarity_mix_lambda available"]
+    },
+    "shared_context": {
+      "tech_stack": ["Python", "PyTorch", "transformers"],
+      "formula": "final_score = freq_score * mix_lambda - similarity_cos * (1 - mix_lambda)",
+      "fixed_params": {"threshold": 0.5, "retain_ratio": 0.1, "retain_direction": "last"},
+      "conventions": ["Follow R-KV algorithm implementation patterns", "Preserve backward compatibility with flag-based feature toggle"]
+    },
+    "artifacts": [
+      {
+        "type": "individual_role_analysis",
+        "source": "design_document",
+        "path": "R-KV/docs/speckv_similarity_dedup_idea.md",
+        "priority": "highest",
+        "usage": "Reference for similarity scoring formula and R-KV parameter values",
+        "contains": "Algorithm design, formula derivation, R-KV integration strategy"
+      }
+    ]
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_context_package",
+        "action": "Load context package for artifact paths and smart context",
+        "commands": ["Read(.workflow/active/WFS-speckv-similarity-dedup/.process/context-package.json)"],
+        "output_to": "context_package",
+        "on_error": "fail"
+      },
+      {
+        "step": "analyze_cal_similarity",
+        "action": "Study cal_similarity function signature and return value format",
+        "commands": ["Read(R-KV/HuggingFace/rkv/utils.py)"],
+        "output_to": "cal_similarity_spec",
+        "on_error": "fail"
+      },
+      {
+        "step": "analyze_select_keep_indices",
+        "action": "Understand _select_keep_indices method structure and key_states extraction pattern",
+        "commands": ["Read(R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py)"],
+        "output_to": "method_structure",
+        "on_error": "fail"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "Add cal_similarity import",
+        "description": "Import cal_similarity function from rkv.utils module at top of file",
+        "modification_points": [
+          "Add 'from rkv.utils import cal_similarity' to imports section (after line 10)"
+        ],
+        "logic_flow": [
+          "Locate import section at top of sparse_round_pruner_prefill_keep.py",
+          "Add cal_similarity import after existing weian_development imports",
+          "Follow existing import organization pattern"
+        ],
+        "depends_on": [],
+        "output": "cal_similarity_imported"
+      },
+      {
+        "step": 2,
+        "title": "Extract key states for similarity calculation",
+        "description": "Create method to extract key_states tensor from past_key_values in format expected by cal_similarity",
+        "modification_points": [
+          "Add helper method _extract_key_states_for_similarity(past_key_values, start_index, seq_len) to SparseRoundPruner class"
+        ],
+        "logic_flow": [
+          "Extract keys from each layer in past_key_values",
+          "Format as [batch, num_heads, seq_len, head_dim] for cal_similarity",
+          "Handle start_index offset for dynamic-only pruning",
+          "Return list containing single batch (batch_size=1 assumption)"
+        ],
+        "depends_on": [1],
+        "output": "key_extraction_helper"
+      },
+      {
+        "step": 3,
+        "title": "Integrate similarity scoring in _select_keep_indices",
+        "description": "Add conditional block after frequency score computation to combine with similarity scores",
+        "modification_points": [
+          "Add conditional block after line 264 (combined = per_head_scores.max(dim=0).values)",
+          "Extract key_states using helper method when self.use_similarity is True",
+          "Call cal_similarity with fixed R-KV parameters",
+          "Compute final_score using formula: combined * mix_lambda - similarity_cos * (1 - mix_lambda)",
+          "Replace 'combined' variable with final_score for subsequent TopK selection"
+        ],
+        "logic_flow": [
+          "Check if self.use_similarity flag is enabled",
+          "If enabled: extract key_states for dynamic tokens (start_index to end)",
+          "Call cal_similarity(key_states, threshold=0.5, retain_ratio=0.1, retain_direction='last')",
+          "Compute combined score using formula with self.similarity_mix_lambda",
+          "If disabled: use original frequency scores (no modification)",
+          "Continue with existing TopK selection logic"
+        ],
+        "depends_on": [2],
+        "output": "integrated_similarity_scoring"
+      }
+    ],
+    "target_files": [
+      "R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py:imports:1-22",
+      "R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py:_select_keep_indices:251-297",
+      "R-KV/weian_development/speckv/sparse_round_pruner_prefill_keep.py:SparseRoundPruner:new_method"
+    ]
+  }
+}
