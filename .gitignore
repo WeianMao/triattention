@@ -33,3 +33,6 @@ R-KV/HuggingFace/rkv.egg-info/
 # R-KV sharded outputs/logs
 R-KV/outputs/
 R-KV/logs/
+
+# Workflow session data
+.workflow/

@@ -715,25 +715,28 @@ parser.add_argument("--high-percentile", type=float, default=80.0,
 
 ---
 
-## 14. Open Questions
+## 14. Open Questions (Resolved)
 
 1. **Q 模长统计应该基于什么数据？**
-   - 整个 stats_trace？
-   - 滑动窗口？
-   - 在线估计？
+   - **决定**：基于整个 stats_trace
+   - 在脚本开始时一次性从 stats_trace 计算所有 Q 的模长统计
+   - 统计量在整个 round-based pruning 过程中保持不变
 
 2. **高方差频段应该被惩罚还是放大？**
-   - 惩罚：因为不稳定
-   - 放大：因为可能捕捉重要信号
+   - **决定**：采用 Section 6 的保守策略
+   - 通过 low/high percentile 自动处理方差
+   - 高方差频段的 percentile 范围会自动更宽
 
 3. **Normalization 应该在什么粒度？**
-   - Per-head？
-   - Per-layer？
-   - Global？
+   - **决定**：Per-head 的所有 query
+   - 每个 head 独立计算其 Q 模长的 percentile 分布
+   - 不同 head 之间不共享权重
 
 4. **如何验证本方法的效果？**
-   - 需要设计特定的测试用例
-   - 对比有无 variance-aware 的 retention rate
+   - **决定**：与之前的脚本对齐，使用相同的评估框架
+   - 保持与 `attention_pruning_case_study_hybrid_rounds_xtrace.py` 相同的评估指标（retention rate）
+   - 保持相同的可视化方式（heatmap + argmax）
+   - 对比有无 variance-aware NMS 的 retention rate
 
 ---
 
