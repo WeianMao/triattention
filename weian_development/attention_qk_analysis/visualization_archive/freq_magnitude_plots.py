@@ -115,13 +115,18 @@ def invert_rope(
     sin: torch.Tensor,
     scale: float,
 ) -> torch.Tensor:
+    """Invert YaRN-scaled RoPE: recovers x from y = scale * (x * cos + rotate_half(x) * sin).
+
+    The inverse formula is: x = z * cos - rotate_half(z) * sin, where z = y / scale.
+    Note: cos and sin should NOT be divided by scale - they remain unit vectors.
+    """
     if scale == 0:
         raise ValueError("attention scaling factor must be non-zero")
     scale_t = torch.tensor(scale, device=rotated.device, dtype=rotated.dtype)
     base = rotated / scale_t
-    cos_unit = cos / scale_t
-    sin_unit = sin / scale_t
-    return base * cos_unit - rotate_half(base) * sin_unit
+    # Correct inversion: x = z * cos - rotate_half(z) * sin
+    # The previous bug divided cos and sin by scale, which only changed magnitude, not phase
+    return base * cos - rotate_half(base) * sin
 
 
 def angle_statistics(q_pairs: torch.Tensor, k_pairs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

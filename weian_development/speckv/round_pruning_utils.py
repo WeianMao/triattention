@@ -56,20 +56,20 @@ def invert_rope(
     *,
     style: str = "half",
 ) -> torch.Tensor:
+    """Invert YaRN-scaled RoPE: recovers x from y = scale * (x * cos + rotate_half(x) * sin)."""
     if scale == 0:
         raise ValueError("attention scaling factor must be non-zero")
     scale_t = torch.tensor(scale, device=rotated.device, dtype=rotated.dtype)
     base = rotated / scale_t
-    cos_unit = cos / scale_t
-    sin_unit = sin / scale_t
+    # Note: cos and sin should NOT be divided by scale - they remain unit vectors
     if style == "interleaved":
         # Allow even/odd to carry different cos/sin (e.g., YaRN/llama3).
         even = base[..., ::2]
         odd = base[..., 1::2]
-        cos_even = cos_unit[..., ::2]
-        cos_odd = cos_unit[..., 1::2]
-        sin_even = sin_unit[..., ::2]
-        sin_odd = sin_unit[..., 1::2]
+        cos_even = cos[..., ::2]
+        cos_odd = cos[..., 1::2]
+        sin_even = sin[..., ::2]
+        sin_odd = sin[..., 1::2]
         det = cos_even * cos_odd + sin_even * sin_odd
         det = det.clamp_min(1e-12)
         # Forward: y_even = x_even * cos_even - x_odd * sin_even
@@ -80,7 +80,8 @@ def invert_rope(
         restored[..., ::2] = orig_even
         restored[..., 1::2] = orig_odd
         return restored
-    return base * cos_unit - rotate_half(base, style=style) * sin_unit
+    # Correct inversion: x = z * cos - rotate_half(z) * sin
+    return base * cos - rotate_half(base, style=style) * sin
 
 
 def to_complex_pairs(tensor: torch.Tensor, *, style: str = "half") -> torch.Tensor:

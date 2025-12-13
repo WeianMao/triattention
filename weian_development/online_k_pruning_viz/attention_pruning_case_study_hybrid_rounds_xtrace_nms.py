@@ -166,9 +166,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--energy-method",
-        choices=["amplitude", "causal"],
+        choices=["amplitude", "causal", "meanvec"],
         default="amplitude",
-        help="Method for computing frequency band energy weights (amplitude or causal).",
+        help="Method for computing frequency band energy weights (amplitude, causal, or meanvec).",
     )
     return parser.parse_args()
 
@@ -311,6 +311,15 @@ def compute_frequency_energy_weights(
         q_abs = torch.abs(q_complex)  # [seq_len, freq_count]
         k_abs = torch.abs(k_complex)  # [seq_len, freq_count]
         energy_per_freq = (q_abs * k_abs).mean(dim=0)  # [freq_count]
+    elif method == "meanvec":
+        # Method C: E_f = |E[q_f]| * |E[k_f]|
+        # First compute mean complex vector, then take magnitude product
+        # Reference: freq_magnitude_single_plot_meanvec_scatter.py mean_vector_product()
+        q_mean = q_complex.mean(dim=0)  # [freq_count] complex
+        k_mean = k_complex.mean(dim=0)  # [freq_count] complex
+        q_mean_abs = torch.abs(q_mean)  # [freq_count]
+        k_mean_abs = torch.abs(k_mean)  # [freq_count]
+        energy_per_freq = q_mean_abs * k_mean_abs  # [freq_count]
     elif method == "causal":
         # Method B: Causal attention weighted (using rotated Q/K)
         # Memory-efficient chunked computation to avoid O(n^2 * F) tensor
@@ -914,15 +923,15 @@ def main() -> None:
 
             # Pre-compute frequency weights from stats_trace if NMS enabled
             if args.nms_enabled:
-                if args.energy_method == "amplitude":
-                    # Use unrotated Q/K for amplitude method
+                if args.energy_method in ("amplitude", "meanvec"):
+                    # Use unrotated Q/K for amplitude and meanvec methods
                     stats_k_unrot = invert_rope(
                         stats_k_head, stats_cos_table, stats_sin_table, attention_scale
                     )
                     q_unrot_complex = stats_complex  # already computed above
                     k_unrot_complex = to_complex_pairs(stats_k_unrot)
                     fw = compute_frequency_energy_weights(
-                        q_unrot_complex, k_unrot_complex, "amplitude", device
+                        q_unrot_complex, k_unrot_complex, args.energy_method, device
                     )
                 else:  # causal - use rotated Q/K
                     q_rotated_complex = to_complex_pairs(stats_q_head)
