@@ -46,7 +46,9 @@
 
 回顾 coverage_score 公式：
 
-$$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \underbrace{\left( \frac{\text{Real}(A^{(f)} \cdot \overline{B^{(f)}})}{|B^{(f)}|} - |B^{(f)}| \right)}_{\text{per\_freq\_score}_f}$$
+$$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \underbrace{\left( \frac{\text{Real}(A^{(f)} \cdot \overline{B^{(f)}})}{|B^{(f)}| + \varepsilon_{\text{den}}} - |B^{(f)}| \right)}_{\text{per\_freq\_score}_f}$$
+
+其中 $\varepsilon_{\text{den}}$ 为防止除零/爆数的极小正数（实现中使用 $1\times 10^{-5}$）。
 
 **关键观察**：每个频段的贡献 $\text{per\_freq\_score}_f$ 可正可负：
 - **正分**（$\text{per\_freq\_score}_f > 0$）：A 的投影覆盖了 B，贡献于抑制
@@ -140,7 +142,7 @@ w_low, w_high = compute_percentile_weights(stats_trace)
 
 ```python
 def variance_aware_fast_nms(
-    k_complex: torch.Tensor,      # [N, F] 去RoPE后的K (复数)
+    k_complex: torch.Tensor,      # [N, F] RoPE旋转后的K (原始 qk.pt) 转为复数
     w_low: torch.Tensor,          # [F] 5th percentile weights
     w_high: torch.Tensor,         # [F] 95th percentile weights
 ) -> torch.Tensor:
@@ -160,7 +162,7 @@ def variance_aware_fast_nms(
 
     # 1. 计算每个 K 每个频段的模长
     k_abs = torch.abs(k_complex)  # [N, F]
-    k_abs_safe = k_abs.clamp(min=1e-8)
+    k_abs_safe = k_abs.clamp(min=1e-5)  # 避免除零/爆数
 
     # 2. 计算 A 在 B 方向的投影（逐频段）
     real_dot = torch.einsum('af,bf->abf', k_complex, k_complex.conj()).real  # [N, N, F]
@@ -198,8 +200,8 @@ def variance_aware_fast_nms(
 
 ```python
 def variance_aware_incremental_nms(
-    historical_k: torch.Tensor,   # [H, F] 历史 K (复数)
-    new_k: torch.Tensor,          # [N, F] 新 K (复数)
+    historical_k: torch.Tensor,   # [H, F] 历史 K (RoPE 旋转后) 复数
+    new_k: torch.Tensor,          # [N, F] 新 K (RoPE 旋转后) 复数
     w_low: torch.Tensor,          # [F] 5th percentile weights
     w_high: torch.Tensor,         # [F] 95th percentile weights
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -214,9 +216,9 @@ def variance_aware_incremental_nms(
 
     # 预处理
     hist_abs = torch.abs(historical_k)
-    hist_abs_safe = hist_abs.clamp(min=1e-8)
+    hist_abs_safe = hist_abs.clamp(min=1e-5)
     new_abs = torch.abs(new_k)
-    new_abs_safe = new_abs.clamp(min=1e-8)
+    new_abs_safe = new_abs.clamp(min=1e-5)
 
     # --- Block 1: 历史K 抑制 新K ---
     real_dot_hist_new = torch.einsum('hf,nf->hnf', historical_k, new_k.conj()).real
