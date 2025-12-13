@@ -252,7 +252,7 @@ $$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \left( \frac{\text{Real}(k^{ro
 
 1. **Q 的模长不是固定的**：不同 query position 下，每个频段的 Q 模长会有变化
 2. **存在方差**：同一频段的 Q 模长在不同 position 下有一个范围
-3. **极端值问题**：某些 query 的 Q 模长可能处于 top 5% 或 bottom 5% 的极端值
+3. **极端值问题**：某些 query 的 Q 模长可能处于 top 20% 或 bottom 20% 的极端值
 
 **核心问题**：当前的判断 `coverage_score > 0` 只考虑了 Q 模长的期望值，没有考虑方差可能导致的极端情况。
 
@@ -260,14 +260,14 @@ $$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \left( \frac{\text{Real}(k^{ro
 
 考虑这样的情况：
 - 频段 f 的平均 Q 模长是 $E[|q^{(f)}|] = 0.1$
-- 但它的方差很大，95% 区间是 $[0.01, 0.5]$
+- 但它的方差很大，80% 区间是 $[0.01, 0.5]$
 
-如果用期望值作为权重计算 coverage_score，在极端情况下（top 5%），这个频段的 Q 模长可能是 0.5，远超期望值。
+如果用期望值作为权重计算 coverage_score，在极端情况下（top 20%），这个频段的 Q 模长可能是 0.5，远超期望值。
 
 **问题**：如果 B 只在某些极端 Q 模长情况下"逃脱" A 的覆盖，我们是否仍应该删除 B？
 
 **可能的答案**：
-- **保守策略**：只有当 B 在 95% 的 Q 模长情况下都被 A 覆盖时，才删除 B
+- **保守策略**：只有当 B 在 80% 的 Q 模长情况下都被 A 覆盖时，才删除 B
 - **激进策略**：只要 B 在期望 Q 模长情况下被 A 覆盖，就删除 B
 
 ### 6.3 Design Goal
@@ -298,8 +298,8 @@ $$\text{coverage\_score}(A, B) = \sum_f w_f \cdot \underbrace{\left( \frac{\text
 
 对每个频段 f，从 stats_trace 中统计 **Q 的模长分布**：
 
-- $w_f^{\text{low}}$ = 5th percentile of $|q^{(f)}|$ across all queries
-- $w_f^{\text{high}}$ = 95th percentile of $|q^{(f)}|$ across all queries
+- $w_f^{\text{low}}$ = 20th percentile of $|q^{(f)}|$ across all queries
+- $w_f^{\text{high}}$ = 80th percentile of $|q^{(f)}|$ across all queries
 
 **注意**：**不需要归一化**。因为 $\epsilon = 0$，判断条件是 `coverage_score > 0`，归一化不影响正负号判断。
 
@@ -335,8 +335,8 @@ $$\text{A 抑制 B 当且仅当 } \text{conservative\_coverage\_score}(A, B) > 0
 ```python
 def compute_q_magnitude_percentile_weights(
     q_complex: torch.Tensor,  # [num_samples, freq_count] Q 向量（去除RoPE后的复数表示）
-    low_percentile: float = 5.0,
-    high_percentile: float = 95.0,
+    low_percentile: float = 20.0,
+    high_percentile: float = 80.0,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     计算每个频段的 Q 模长分布的 low 和 high percentile 权重。
@@ -346,12 +346,12 @@ def compute_q_magnitude_percentile_weights(
 
     Args:
         q_complex: 从 stats_trace 加载的 Q 向量（去除RoPE后的复数表示）
-        low_percentile: 低百分位数 (default 5%)
-        high_percentile: 高百分位数 (default 95%)
+        low_percentile: 低百分位数 (default 20%)
+        high_percentile: 高百分位数 (default 80%)
 
     Returns:
-        w_low: [freq_count] 5th percentile Q-magnitude weights
-        w_high: [freq_count] 95th percentile Q-magnitude weights
+        w_low: [freq_count] 20th percentile Q-magnitude weights
+        w_high: [freq_count] 80th percentile Q-magnitude weights
     """
     # 计算每个 Q 在每个频段的模长
     q_magnitudes = torch.abs(q_complex)  # [num_samples, freq_count]
@@ -377,8 +377,8 @@ w_low, w_high = compute_q_magnitude_percentile_weights(q_complex)
 ```python
 def variance_aware_fast_nms(
     k_complex: torch.Tensor,      # [N, F] RoPE旋转后的K (原始 qk.pt) 转为复数
-    w_low: torch.Tensor,          # [F] 5th percentile Q-magnitude weights
-    w_high: torch.Tensor,         # [F] 95th percentile Q-magnitude weights
+    w_low: torch.Tensor,          # [F] 20th percentile Q-magnitude weights
+    w_high: torch.Tensor,         # [F] 80th percentile Q-magnitude weights
 ) -> torch.Tensor:
     """
     Variance-Aware Fast Parallel NMS：使用保守的 Q 模长权重选择
@@ -439,8 +439,8 @@ def variance_aware_fast_nms(
 def variance_aware_incremental_nms(
     historical_k: torch.Tensor,   # [H, F] 历史 K (RoPE 旋转后) 复数
     new_k: torch.Tensor,          # [N, F] 新 K (RoPE 旋转后) 复数
-    w_low: torch.Tensor,          # [F] 5th percentile Q-magnitude weights
-    w_high: torch.Tensor,         # [F] 95th percentile Q-magnitude weights
+    w_low: torch.Tensor,          # [F] 20th percentile Q-magnitude weights
+    w_high: torch.Tensor,         # [F] 80th percentile Q-magnitude weights
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Variance-Aware 增量 Fast NMS（可选优化版本）
@@ -541,8 +541,8 @@ def variance_aware_incremental_nms(
 | 参数 | 选项 | 说明 |
 |-----|------|------|
 | `--nms-enabled` | True/False | 是否启用 NMS |
-| `--low-percentile` | 1, 5, 10, 25 | Q 模长 low percentile |
-| `--high-percentile` | 75, 90, 95, 99 | Q 模长 high percentile |
+| `--low-percentile` | 10, 20, 30, 40 | Q 模长 low percentile |
+| `--high-percentile` | 60, 70, 80, 90 | Q 模长 high percentile |
 
 > **Note**: `epsilon` 固定为 0（见 Section 5.4），不作为搜索参数。
 
@@ -553,8 +553,8 @@ def variance_aware_incremental_nms(
 **搜索空间**：
 ```python
 SEARCH_SPACE = {
-    "low_percentile": [5, 10, 25],
-    "high_percentile": [75, 90, 95],
+    "low_percentile": [10, 20, 30],
+    "high_percentile": [70, 80, 90],
     # epsilon 固定为 0，不搜索
 }
 ```
@@ -669,10 +669,10 @@ weian_development/online_k_pruning_viz/
 ```python
 parser.add_argument("--nms-enabled", action="store_true", default=False,
                     help="Enable Q-magnitude weighted NMS before scoring")
-parser.add_argument("--low-percentile", type=float, default=5.0,
-                    help="Low percentile for Q-magnitude weights (default: 5)")
-parser.add_argument("--high-percentile", type=float, default=95.0,
-                    help="High percentile for Q-magnitude weights (default: 95)")
+parser.add_argument("--low-percentile", type=float, default=20.0,
+                    help="Low percentile for Q-magnitude weights (default: 20)")
+parser.add_argument("--high-percentile", type=float, default=80.0,
+                    help="High percentile for Q-magnitude weights (default: 80)")
 # Note: epsilon 固定为 0，不提供参数配置（见 Section 5.4）
 ```
 
@@ -705,13 +705,13 @@ parser.add_argument("--high-percentile", type=float, default=95.0,
 
 | 参数 | 默认值 | 说明 |
 |-----|--------|------|
-| `low_percentile` | 5.0 | 用于正分频段的权重（假设 Q 模长小） |
-| `high_percentile` | 95.0 | 用于负分频段的权重（假设 Q 模长大） |
+| `low_percentile` | 20.0 | 用于正分频段的权重（假设 Q 模长小） |
+| `high_percentile` | 80.0 | 用于负分频段的权重（假设 Q 模长大） |
 | `epsilon` | 0 (固定) | 抑制阈值（不可配置） |
 
 **调参方向**：
 - 更保守：降低 `low_percentile`（如 1%），提高 `high_percentile`（如 99%）
-- 更激进：提高 `low_percentile`（如 25%），降低 `high_percentile`（如 75%）
+- 更激进：提高 `low_percentile`（如 30%），降低 `high_percentile`（如 70%）
 
 ---
 
