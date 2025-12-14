@@ -36,3 +36,4 @@ R-KV/logs/
 
 # Workflow session data
 .workflow/
+post_rope_nms_viz/
