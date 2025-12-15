@@ -360,6 +360,8 @@ def sparse_attention_with_fallback(Q, kv_cache, bin_assignments, neural_net_quer
 
 > **监控要求**：即使使用 masking 策略，仍需监控 bin 分布均匀性。如果大量 bin 为空，说明 Key binning 网络需要优化（可能需要 Load Balancing Loss）。
 
+> **训推不一致说明（允许）**：训练时数据分布可能较均匀，空 bin 较少；但推理时可能出现更多空 bin。这种不一致是**允许的**，因为空 bin masking（-inf）机制会在推理时自动处理。模型无需在训练时学习"避开空 bin"的行为。
+
 ### Multi-bin Query
 
 **当前决策**：暂不实现，只 attend 单一 bin。
@@ -553,3 +555,4 @@ def compute_actual_computation_reduction(keys_per_query_sparse, num_history_keys
 | 2025-12-15 | 重构评估指标：添加 Argmax Hit Rate、Keys per Query、Computation Reduction 核心指标及 Full Attention/Random Binning baseline；添加指标计算代码 |
 | 2025-12-15 | 添加 Round 内新 Key 处理说明（Full Attention）；更新空 bin 策略为 Masking（-inf）而非 Fallback |
 | 2025-12-15 | 修正评估指标：明确只评估 Sparse 部分，添加实际计算量估算公式；添加首个 round/历史 Key 为空的短路处理 |
+| 2025-12-15 | 添加训推不一致说明（允许）：空 bin 在训练时可能较少，推理时由 masking 机制自动处理 |

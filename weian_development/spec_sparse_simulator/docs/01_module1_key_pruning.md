@@ -276,9 +276,11 @@ def get_position_weight_with_softplus(x, anchor_positions, anchor_weights_raw):
 
 形式化定义：
 ```
-label(K_i) = 0  iff  ∃ Q_j (j > i): argmax_k Attention(Q_j, K_k) == i  (会被 attend，不 drop)
+label(K_i) = 0  iff  ∃ Q_j (j >= round_start): argmax_k Attention(Q_j, K_k) == i  (会被 attend，不 drop)
 label(K_i) = 1  otherwise  (不会被 attend，drop)
 ```
+
+> **注意**：这里 `j >= round_start` 表示从当前 round 开始及之后的所有 Query（包括当前 round 内的 Query 和未来的 Query）。K_i 是位置 < round_start 的历史 Key。
 
 ### 要点
 
@@ -286,6 +288,41 @@ label(K_i) = 1  otherwise  (不会被 attend，drop)
 - **只要有一个**未来的 Q attend 到这个 K，标签就为 0（不 drop）
 - label = 1 表示应该 drop，对应模型输出的 drop 概率目标为 1
 - 这是一个相对严格的定义，"应该保留"（label=0）的 Key 可能较少
+
+### 训练时排除末尾 Key
+
+> **重要**：训练时，**位置**在序列末尾 1k 范围内的 Key **不计算 loss**。
+
+**原因**：
+- 末尾 Key 的后续 Query 数量有限
+- 一个本来重要的 Key 可能因为后续 Query 太少而一直没被 attend 到
+- 这会导致标签噪声：本该保留的 Key 被错误标注为 drop（label=1）
+
+**实现**：
+```python
+def compute_module1_loss(drop_probs, labels, key_positions, seq_len, exclude_tail=1000):
+    """
+    计算 Module 1 loss，排除位置在末尾的 Key
+
+    Args:
+        drop_probs: (num_keys,) - 模型预测的 drop 概率
+        labels: (num_keys,) - 真实标签
+        key_positions: (num_keys,) - 每个 Key 的位置
+        seq_len: 序列总长度
+        exclude_tail: 排除末尾多少个位置（默认 1000）
+    """
+    # 只对位置 < (seq_len - exclude_tail) 的 Key 计算 loss
+    valid_mask = key_positions < (seq_len - exclude_tail)
+
+    if valid_mask.sum() == 0:
+        return torch.tensor(0.0)
+
+    loss = F.binary_cross_entropy(
+        drop_probs[valid_mask],
+        labels[valid_mask]
+    )
+    return loss
+```
 
 ---
 
@@ -414,3 +451,4 @@ def compute_module1_metrics(drop_probs, labels, threshold=0.5):
 | 2025-12-15 | 重构评估指标：添加 Argmax Hit Rate、Keys per Query、Computation Reduction 核心指标及 Full Attention baseline；添加指标计算代码；移除 Focal Loss |
 | 2025-12-15 | 修正模型输出语义：从"保留概率"改为"drop 概率"；相应调整判断逻辑（`p < threshold` 保留）和标签定义（label=1 表示应 drop） |
 | 2025-12-15 | 添加 Position Scaling 设计（Module 1 专用）：log 尺度锚点插值，乘在 Sigmoid 之前的 logit 上 |
+| 2025-12-15 | 修正标签定义形式化表达：从 `j > i` 改为 `j >= round_start`；添加"训练时排除末尾 Key"说明 |

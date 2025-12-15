@@ -88,7 +88,7 @@ def extract_pruning_labels(attention_trace, round_start, round_end, seq_len):
 
 ### 1.3 训练时排除末尾 Key
 
-> **重要**：训练时，序列**最后 1k 个 token 对应的 Key 不计算 loss**。
+> **重要**：训练时，**位置**在序列末尾 1k 范围内的 Key **不计算 loss**。
 
 **原因**：
 - 末尾 Key 的后续 Query 数量有限
@@ -97,25 +97,26 @@ def extract_pruning_labels(attention_trace, round_start, round_end, seq_len):
 
 **实现**：
 ```python
-def compute_module1_loss(drop_probs, labels, seq_len, exclude_tail=1000):
+def compute_module1_loss(drop_probs, labels, key_positions, seq_len, exclude_tail=1000):
     """
-    计算 Module 1 loss，排除末尾 Key
+    计算 Module 1 loss，排除位置在末尾的 Key
 
     Args:
         drop_probs: (num_keys,) - 模型预测的 drop 概率
         labels: (num_keys,) - 真实标签
+        key_positions: (num_keys,) - 每个 Key 的位置（通常是 0, 1, 2, ..., round_start-1）
         seq_len: 序列总长度
-        exclude_tail: 排除末尾多少个 token（默认 1000）
+        exclude_tail: 排除末尾多少个位置（默认 1000）
     """
-    # 只对前 (seq_len - exclude_tail) 个 Key 计算 loss
-    valid_len = max(0, seq_len - exclude_tail)
+    # 只对位置 < (seq_len - exclude_tail) 的 Key 计算 loss
+    valid_mask = key_positions < (seq_len - exclude_tail)
 
-    if valid_len == 0:
+    if valid_mask.sum() == 0:
         return torch.tensor(0.0)
 
     loss = F.binary_cross_entropy(
-        drop_probs[:valid_len],
-        labels[:valid_len]
+        drop_probs[valid_mask],
+        labels[valid_mask]
     )
     return loss
 ```
@@ -149,15 +150,19 @@ def build_groups(attention_matrix):
 
     Args:
         attention_matrix: (num_queries, num_keys) attention weights
+                          注意：传入的矩阵应该已经只包含历史 Key
+                          例如：attention[round_start:round_end, :round_start]
 
     Returns:
         groups: dict, key_idx -> list of query_idx that attend to this key
     """
+    num_queries = attention_matrix.shape[0]
     groups = defaultdict(list)
 
     for q_idx in range(num_queries):
         # 每个 query 只取 top-1 key
-        argmax_key = attention_matrix[q_idx, :q_idx].argmax()
+        # 注意：直接用 `:` 而非 `:q_idx`，因为传入的矩阵已经只包含历史 Key
+        argmax_key = attention_matrix[q_idx, :].argmax()
         groups[argmax_key].append(q_idx)
 
     return groups
@@ -213,23 +218,30 @@ L_attract = Σ_i [ -p_i · log(r_{k(i)}) - r_{k(i)} · log(p_i) ]
 
 **实现**：
 ```python
-def bidirectional_cross_entropy(p, r, query_to_key):
+def bidirectional_cross_entropy(p, log_p, r, log_r, query_to_key):
     """
     双向交叉熵：拉近同 group 的 Q-K bin 分布
 
     Args:
-        p: (num_queries, num_bins) - query soft bin distributions
-        r: (num_keys, num_bins) - key soft bin distributions
+        p: (num_queries, num_bins) - query soft bin distributions (softmax)
+        log_p: (num_queries, num_bins) - query log distributions (log_softmax)
+        r: (num_keys, num_bins) - key soft bin distributions (softmax)
+        log_r: (num_keys, num_bins) - key log distributions (log_softmax)
         query_to_key: (num_queries,) - 每个 query 的 argmax key 索引
 
-    ⚠️ 使用 log_softmax 提高数值稳定性
+    ⚠️ 使用 log_softmax 提高数值稳定性，避免 log(softmax + eps) 的数值问题
     """
-    loss = 0
-    for i in range(num_queries):
-        k_i = query_to_key[i]
-        # 双向交叉熵
-        loss += -(p[i] * torch.log(r[k_i] + eps)).sum()  # CE(p_i, r_k)
-        loss += -(r[k_i] * torch.log(p[i] + eps)).sum()  # CE(r_k, p_i)
+    num_queries = p.shape[0]
+
+    # 获取匹配的 key 分布
+    r_matched = r[query_to_key]        # (num_queries, num_bins)
+    log_r_matched = log_r[query_to_key]  # (num_queries, num_bins)
+
+    # 双向交叉熵（向量化）
+    # CE(p_i, r_k) = -sum(p * log_r)
+    # CE(r_k, p_i) = -sum(r * log_p)
+    loss = -(p * log_r_matched).sum() - (r_matched * log_p).sum()
+
     return loss
 ```
 
@@ -293,20 +305,24 @@ L_repel_log = Σ_i Σ_{j ∉ g(i)} p_i · log(r_j)
 
 **实现**：
 ```python
-def log_repel_loss(p, r, group_masks, eps=1e-6):
+def log_repel_loss(p, log_r, group_masks):
     """
     交叉熵形式的推远 loss
 
+    Args:
+        p: (num_queries, num_bins) - query soft bin distributions (softmax)
+        log_r: (num_keys, num_bins) - key log distributions (log_softmax)
+        group_masks: (num_queries, num_keys) - True if (q, k) in same group
+
     注意：这里是 p · log(r)，希望 p 和非 group 的 r 分布不同
+    ⚠️ 使用 log_softmax 替代 log(softmax + eps)，提高数值稳定性
     """
     non_group_masks = ~group_masks
 
-    loss = 0
-    for i in range(num_queries):
-        for j in range(num_keys):
-            if non_group_masks[i, j]:
-                # 交叉熵：p_i · log(r_j)
-                loss += (p[i] * torch.log(r[j] + eps)).sum()
+    # 向量化实现
+    # p: (Q, B), log_r: (K, B) -> ce_matrix: (Q, K)
+    ce_matrix = torch.mm(p, log_r.T)  # p_i · log(r_j) for all i, j
+    loss = (ce_matrix * non_group_masks.float()).sum()
 
     return loss
 ```
@@ -328,16 +344,25 @@ L_B = L_attract + λ * L_repel_log
 #### 向量化实现（完整）
 
 ```python
-def compute_loss_exp_a(p, r, query_to_key, group_masks, lambda_repel=1.0, eps=1e-6):
+def compute_loss_exp_a(p, log_p, r, log_r, query_to_key, group_masks, lambda_repel=1.0):
     """
     Experiment A: 双向交叉熵 + Linear Repel
-    """
-    num_queries = p.shape[0]
 
+    Args:
+        p: (num_queries, num_bins) - query soft bin distributions (softmax)
+        log_p: (num_queries, num_bins) - query log distributions (log_softmax)
+        r: (num_keys, num_bins) - key soft bin distributions (softmax)
+        log_r: (num_keys, num_bins) - key log distributions (log_softmax)
+        query_to_key: (num_queries,) - 每个 query 的 argmax key 索引
+        group_masks: (num_queries, num_keys) - True if (q, k) in same group
+        lambda_repel: repel loss 的权重
+
+    ⚠️ 使用 log_softmax 替代 log(softmax + eps)，提高数值稳定性
+    """
     # 1. 拉近项：双向交叉熵
-    r_matched = r[query_to_key]  # (num_queries, num_bins)
-    attract = -(p * torch.log(r_matched + eps)).sum()
-    attract += -(r_matched * torch.log(p + eps)).sum()
+    r_matched = r[query_to_key]          # (num_queries, num_bins)
+    log_r_matched = log_r[query_to_key]  # (num_queries, num_bins)
+    attract = -(p * log_r_matched).sum() - (r_matched * log_p).sum()
 
     # 2. 推远项：Linear
     s = torch.mm(p, r.T)  # (num_queries, num_keys)
@@ -346,19 +371,27 @@ def compute_loss_exp_a(p, r, query_to_key, group_masks, lambda_repel=1.0, eps=1e
     return attract + lambda_repel * repel
 
 
-def compute_loss_exp_b(p, r, query_to_key, group_masks, lambda_repel=1.0, eps=1e-6):
+def compute_loss_exp_b(p, log_p, r, log_r, query_to_key, group_masks, lambda_repel=1.0):
     """
     Experiment B: 双向交叉熵 + Log Repel
-    """
-    num_queries = p.shape[0]
 
+    Args:
+        p: (num_queries, num_bins) - query soft bin distributions (softmax)
+        log_p: (num_queries, num_bins) - query log distributions (log_softmax)
+        r: (num_keys, num_bins) - key soft bin distributions (softmax)
+        log_r: (num_keys, num_bins) - key log distributions (log_softmax)
+        query_to_key: (num_queries,) - 每个 query 的 argmax key 索引
+        group_masks: (num_queries, num_keys) - True if (q, k) in same group
+        lambda_repel: repel loss 的权重
+
+    ⚠️ 使用 log_softmax 替代 log(softmax + eps)，提高数值稳定性
+    """
     # 1. 拉近项：双向交叉熵
-    r_matched = r[query_to_key]
-    attract = -(p * torch.log(r_matched + eps)).sum()
-    attract += -(r_matched * torch.log(p + eps)).sum()
+    r_matched = r[query_to_key]          # (num_queries, num_bins)
+    log_r_matched = log_r[query_to_key]  # (num_queries, num_bins)
+    attract = -(p * log_r_matched).sum() - (r_matched * log_p).sum()
 
     # 2. 推远项：Log (交叉熵形式)
-    log_r = torch.log(r + eps)  # (num_keys, num_bins)
     # p: (Q, B), log_r: (K, B) -> cross_entropy: (Q, K)
     ce_matrix = torch.mm(p, log_r.T)  # p_i · log(r_j) for all i, j
     repel = (ce_matrix * (~group_masks).float()).sum()
@@ -759,3 +792,4 @@ def augment_trace_with_offset(Q, K, round_window=128):
 | 2025-12-15 | 统一标签定义：与 01 文档一致（label=0 不 drop，label=1 drop）；修正时序范围为 round_start 开始；添加 Log Repel 数学直觉解释 |
 | 2025-12-15 | 添加"未来实验注意事项"：GQA 下 Key 丢弃决策规则（AND 逻辑）；数据增强策略（随机偏移 round 起始位置） |
 | 2025-12-15 | 添加 Module 1 训练时排除末尾 1k Key（避免标签噪声） |
+| 2025-12-15 | 修复 `build_groups` 索引 bug：`:q_idx` 改为 `:`；修正排除末尾 Key 逻辑：基于位置而非 seq_len；所有 Loss 函数使用 `log_softmax` 提高数值稳定性 |
