@@ -20,7 +20,7 @@ weian_development/spec_sparse_simulator/hybrid_sample_heads_lowret_top10.json
 
 ### 2. 参考实现
 
-没有在文档中明确规定的实现细节，默认遵守以下脚本中的实现：
+没有在文档中明确规定的实现细节，默认遵守以下脚本（这个脚本任何情况下都不允许修改）中的实现：
 
 ```
 weian_development/spec_sparse_simulator/attention_pruning_case_study_hybrid_rounds_xtrace.py
