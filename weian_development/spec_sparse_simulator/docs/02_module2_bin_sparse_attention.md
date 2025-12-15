@@ -220,11 +220,82 @@ def sparse_attention_with_fallback(Q, kv_cache, bin_assignments, neural_net_quer
 
 ## 评估指标
 
+### 核心指标（最重要）
+
+| 指标 | 定义 | 目标 | Baseline (Full Attention) |
+|------|------|------|---------------------------|
+| **Argmax Hit Rate** | Query 仍能 attend 到原 argmax Key 的比例（即 Q 和其 argmax K 在同一 bin） | 越高越好（>99%） | 100% |
+| **Keys per Query** | 每个 Query 参与 attention 的平均 Key 数量（= 平均 bin 大小） | 越低越好 | N（所有历史 Key） |
+| **Computation Reduction** | 1 - (avg bin size / total keys) | 越高越好 | 0% |
+
+> **Argmax Hit Rate 是最关键指标**：如果 Q 和其 argmax K 不在同一个 bin，Query 将无法 attend 到正确的 Key。
+
+### 辅助指标
+
 | 指标 | 定义 | 目标 |
 |------|------|------|
-| Attention Recall | 同 bin 中包含 argmax Key 的比例 | 越高越好 |
-| Computation Reduction | 1 - (avg bin size / total keys) | 越高越好 |
 | Bin Balance | bin 大小的方差 | 越低越好（均匀分布） |
+| Empty Bin Rate | 空 bin 的比例 | 越低越好 |
+| Bin Utilization | 实际使用的 bin 数量 / 总 bin 数量 | 越高越好 |
+
+### 指标计算示例
+
+```python
+def compute_module2_metrics(query_bins, key_bins, query_to_argmax_key, num_keys):
+    """
+    计算 Module 2 评估指标
+
+    Args:
+        query_bins: (num_queries,) - 每个 Query 分配的 bin ID
+        key_bins: (num_keys,) - 每个 Key 分配的 bin ID
+        query_to_argmax_key: (num_queries,) - 每个 Query 的 argmax Key 索引
+        num_keys: 总 Key 数量
+    """
+    num_queries = len(query_bins)
+
+    # Argmax Hit Rate（关键指标）
+    # 检查每个 Query 和其 argmax Key 是否在同一个 bin
+    argmax_key_bins = key_bins[query_to_argmax_key]
+    hits = (query_bins == argmax_key_bins).sum()
+    argmax_hit_rate = hits / num_queries
+
+    # Keys per Query（平均 bin 大小）
+    bin_sizes = []
+    for q_bin in query_bins:
+        bin_size = (key_bins == q_bin).sum()
+        bin_sizes.append(bin_size)
+    keys_per_query = sum(bin_sizes) / num_queries
+
+    # Computation Reduction
+    computation_reduction = 1 - (keys_per_query / num_keys)
+
+    # Bin Balance（方差）
+    unique_bins, counts = torch.unique(key_bins, return_counts=True)
+    bin_balance_var = counts.float().var()
+
+    # Empty Bin Rate
+    num_bins = 128
+    empty_bin_rate = 1 - len(unique_bins) / num_bins
+
+    return {
+        'argmax_hit_rate': argmax_hit_rate,
+        'keys_per_query': keys_per_query,
+        'computation_reduction': computation_reduction,
+        'bin_balance_var': bin_balance_var,
+        'empty_bin_rate': empty_bin_rate,
+    }
+```
+
+### Baseline 对比
+
+| 方法 | Argmax Hit Rate | Keys per Query | Computation Reduction |
+|------|-----------------|----------------|----------------------|
+| **Full Attention** | 100% | N | 0% |
+| **Random Binning** | ~1/128 ≈ 0.78% | N/128 | ~99% |
+| **Oracle Binning** | 100% | 取决于 bin 分布 | 取决于 bin 分布 |
+| **Neural Network** | 目标 >99% | 目标 N/128 | 目标 ~99% |
+
+> **Random Binning 提供下界**：如果 Q 和 K 随机分 bin，命中率约为 1/128。神经网络必须显著高于此。
 
 ---
 
@@ -266,3 +337,4 @@ def sparse_attention_with_fallback(Q, kv_cache, bin_assignments, neural_net_quer
 |------|----------|
 | 2025-12-14 | 初始化文档 |
 | 2025-12-14 | 添加向量化实现注释；确定空 bin fallback 策略；Multi-bin Query 暂不实现 |
+| 2025-12-15 | 重构评估指标：添加 Argmax Hit Rate、Keys per Query、Computation Reduction 核心指标及 Full Attention/Random Binning baseline；添加指标计算代码 |

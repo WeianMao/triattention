@@ -143,11 +143,59 @@ mask = predictions >= threshold
 
 ## 评估指标
 
+### 核心指标（最重要）
+
+| 指标 | 定义 | 目标 | Baseline (Full Attention) |
+|------|------|------|---------------------------|
+| **Argmax Hit Rate** | Query 仍能 attend 到原 argmax Key 的比例 | 越高越好（>99%） | 100% |
+| **Keys per Query** | 每个 Query 参与 attention 的平均 Key 数量 | 越低越好 | N（所有历史 Key） |
+| **Computation Reduction** | 1 - (Keys per Query / N) | 越高越好 | 0% |
+
+> **Argmax Hit Rate 是最关键指标**：如果 Query 无法 attend 到原来的 argmax Key，可能严重影响生成质量。
+
+### 辅助指标
+
 | 指标 | 定义 | 目标 |
 |------|------|------|
 | Retention Rate | 保留的 Key 数量 / 总 Key 数量 | 越低越好（更多压缩） |
-| Attention Recall | 被保留的 Key 中，真正会被 attend 的比例 | 越高越好 |
-| False Negative Rate | 被错误丢弃的"会被 attend"的 Key 比例 | 越低越好（关键指标） |
+| False Negative Rate | 被错误丢弃的"会被 attend"的 Key 比例 | 越低越好 |
+
+### 指标计算示例
+
+```python
+def compute_module1_metrics(predictions, labels, threshold=0.5):
+    """
+    计算 Module 1 评估指标
+
+    Args:
+        predictions: (num_keys,) - 模型预测的保留概率
+        labels: (num_keys,) - 真实标签（1=会被 attend，0=不会）
+        threshold: 保留阈值
+    """
+    retained_mask = predictions >= threshold
+
+    # Retention Rate
+    retention_rate = retained_mask.sum() / len(predictions)
+
+    # Argmax Hit Rate（关键指标）
+    # 被标记为 1 的 Key 中，有多少被保留了？
+    argmax_keys = labels == 1
+    argmax_hit_rate = (retained_mask & argmax_keys).sum() / argmax_keys.sum()
+
+    # False Negative Rate
+    false_negatives = (~retained_mask & argmax_keys).sum()
+    false_negative_rate = false_negatives / argmax_keys.sum()
+
+    # Keys per Query（需要结合具体 round 计算）
+    keys_per_query = retained_mask.sum()  # 简化：保留的 key 数量
+
+    return {
+        'retention_rate': retention_rate,
+        'argmax_hit_rate': argmax_hit_rate,
+        'false_negative_rate': false_negative_rate,
+        'keys_per_query': keys_per_query,
+    }
+```
 
 ---
 
@@ -172,7 +220,6 @@ mask = predictions >= threshold
 
 - [ ] MLP 的 hidden dimension
 - [ ] threshold 如何设定（固定 / 自适应 / 可学习）
-- [ ] 训练时正负样本不平衡的处理（Focal Loss?）
 
 ---
 
@@ -182,3 +229,4 @@ mask = predictions >= threshold
 |------|----------|
 | 2025-12-14 | 初始化文档 |
 | 2025-12-14 | 明确 Sparse Attention vs KV Cache 压缩区别；选择 Soft Pruning；添加向量化实现注释 |
+| 2025-12-15 | 重构评估指标：添加 Argmax Hit Rate、Keys per Query、Computation Reduction 核心指标及 Full Attention baseline；添加指标计算代码；移除 Focal Loss |

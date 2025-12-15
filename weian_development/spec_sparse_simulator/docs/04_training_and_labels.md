@@ -564,12 +564,33 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 
 ### 5.5 观察指标
 
+#### 训练指标
 - [ ] Loss 是否收敛
 - [ ] L_attract 和 L_repel 的收敛曲线
-- [ ] 最终的 bin 分布（是否均匀）
-- [ ] 同 group 的 Q-K 是否落在同一 bin（argmax 一致率）
-- [ ] 空 bin 数量
 - [ ] λ (lambda_repel) 对结果的影响
+
+#### 核心评估指标（最重要）
+
+| 指标 | 定义 | 目标 | Baseline (Full Attention) |
+|------|------|------|---------------------------|
+| **Argmax Hit Rate** | Q 和其 argmax K 在同一 bin 的比例 | >99% | 100% |
+| **Keys per Query** | 每个 Q 参与 attention 的平均 K 数量 | 越低越好 | N |
+| **Computation Reduction** | 1 - (Keys per Query / N) | 越高越好 | 0% |
+
+> **Argmax Hit Rate 是最关键指标**：直接衡量 sparse attention 是否能保持生成质量。
+
+#### 辅助指标
+- [ ] 最终的 bin 分布（是否均匀）
+- [ ] 空 bin 数量
+- [ ] Bin 利用率
+
+#### Baseline 对比
+
+| 方法 | Argmax Hit Rate | Keys per Query | Computation Reduction |
+|------|-----------------|----------------|----------------------|
+| Full Attention | 100% | N | 0% |
+| Random Binning | ~0.78% | N/128 | ~99% |
+| 目标（Neural） | >99% | N/128 | ~99% |
 
 ### 5.6 状态
 
@@ -603,3 +624,4 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 | 2025-12-14 | 添加 POC 阶段说明；完善 Ground Truth 构建规则（一对多关系）；添加 Loss Function 设计（Linear/Log）；添加训练/推理不对齐说明；添加 Sanity Check 实验规划 |
 | 2025-12-15 | 修正 Loss 设计：添加双向交叉熵拉近项；修正 Exp B 公式为 `p·log(r)`；优化实现使用直接 mask；简化参考向量说明（指向 03 文档）；添加负载均衡 Loss 待办事项 |
 | 2025-12-15 | 简化 Module 1 Loss：移除 FocalLoss、正负样本重采样、时序衰减权重 |
+| 2025-12-15 | 添加核心评估指标：Argmax Hit Rate、Keys per Query、Computation Reduction 及 Full Attention/Random Binning baseline |
