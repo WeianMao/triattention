@@ -20,26 +20,26 @@
 # ⚠️ 实现注意：以下代码使用循环仅为了表达算法逻辑清晰。
 # 实际实现时应使用 tensor 操作，避免 Python 循环：
 #   - 批量处理所有 Key：neural_net(kv_cache)  # shape: (n,)
-#   - 使用 boolean indexing：kv_cache[predictions >= threshold]
+#   - 使用 boolean indexing：kv_cache[predictions < threshold]
 #
 def key_pruning(kv_cache, neural_net, threshold):
     """
     Input:
         kv_cache: 当前 KV Cache 中的所有 Key {K_1, K_2, ..., K_n}
         neural_net: Key Pruning 神经网络
-        threshold: 保留阈值
+        threshold: drop 阈值
     Output:
         保留的 Key 集合
     """
     retained_keys = []
 
     for K_i in kv_cache:
-        # 预测 K_i 未来被 attend 的概率
-        p_i = neural_net(K_i)  # 输出经过 Sigmoid
+        # 预测 K_i 应该被 drop 的概率（即未来不会被 attend 的概率）
+        p_i = neural_net(K_i)  # 输出经过 Sigmoid，表示 drop 概率
 
-        if p_i >= threshold:
-            retained_keys.append(K_i)
-        # else: drop K_i
+        if p_i < threshold:
+            retained_keys.append(K_i)  # drop 概率低，保留
+        # else: drop K_i（drop 概率高，丢弃）
 
     return retained_keys
 ```
@@ -52,14 +52,14 @@ def key_pruning_vectorized(kv_cache, neural_net, threshold):
 
     kv_cache: (num_keys, head_dim)
     """
-    # 批量预测
-    predictions = neural_net(kv_cache)  # (num_keys,)
+    # 批量预测 drop 概率
+    drop_probs = neural_net(kv_cache)  # (num_keys,)
 
-    # Boolean indexing
-    mask = predictions >= threshold
-    retained_keys = kv_cache[mask]
+    # Boolean indexing: 保留 drop 概率低的 Key
+    retain_mask = drop_probs < threshold
+    retained_keys = kv_cache[retain_mask]
 
-    return retained_keys, mask
+    return retained_keys, retain_mask
 ```
 
 ---
@@ -87,32 +87,40 @@ Input: K (post-RoPE, 在旋转参考系下)
 ┌─────────────────────────────────┐
 │   Sigmoid                      │
 │   Output: p ∈ [0, 1]           │
+│   (p = drop 概率)               │
 └─────────────────────────────────┘
 ```
 
 **特点**：比 Module 2 的网络稍重（多一层 MLP）
 
+**输出语义**：
+- p 接近 1 → Key 很可能不会被未来 Query attend → 应该 drop
+- p 接近 0 → Key 很可能会被未来 Query attend → 应该保留
+
 ---
 
 ## 标签定义
 
-### "被 attend 到" 的定义
+### Drop 标签定义
 
-一个 Key K_i 被认为"会被未来的 Query attend 到"，当且仅当：
+> **标签 = drop 概率的目标值**
 
-> **存在**某个未来的 Query Q_j (j > current_round)，使得 K_i 是 Q_j 的 attention 最大值对应的 Key
+一个 Key K_i 的标签定义如下：
+- **label = 0**（不应 drop）：存在某个未来的 Query 会 attend 到这个 Key
+- **label = 1**（应该 drop）：没有任何未来的 Query 会 attend 到这个 Key
 
 形式化定义：
 ```
-label(K_i) = 1  iff  ∃ Q_j (j > i): argmax_k Attention(Q_j, K_k) == i
-label(K_i) = 0  otherwise
+label(K_i) = 0  iff  ∃ Q_j (j > i): argmax_k Attention(Q_j, K_k) == i  (会被 attend，不 drop)
+label(K_i) = 1  otherwise  (不会被 attend，drop)
 ```
 
 ### 要点
 
 - 使用 **argmax** 而非 threshold
-- **只要有一个**未来的 Q attend 到这个 K，标签就为 1
-- 这是一个相对严格的定义，可能会有较多的 negative samples
+- **只要有一个**未来的 Q attend 到这个 K，标签就为 0（不 drop）
+- label = 1 表示应该 drop，对应模型输出的 drop 概率目标为 1
+- 这是一个相对严格的定义，"应该保留"（label=0）的 Key 可能较少
 
 ---
 
@@ -135,8 +143,10 @@ label(K_i) = 0  otherwise
 
 ```python
 # Soft Pruning: 没有 max_keys 限制
-mask = predictions >= threshold
-# mask 决定哪些 Key 参与后续 attention，而非物理删除
+# drop_probs: 模型预测的 drop 概率
+# retain_mask: drop 概率低于阈值的 Key 被保留
+retain_mask = drop_probs < threshold
+# retain_mask 决定哪些 Key 参与后续 attention，而非物理删除
 ```
 
 ---
@@ -163,31 +173,33 @@ mask = predictions >= threshold
 ### 指标计算示例
 
 ```python
-def compute_module1_metrics(predictions, labels, threshold=0.5):
+def compute_module1_metrics(drop_probs, labels, threshold=0.5):
     """
     计算 Module 1 评估指标
 
     Args:
-        predictions: (num_keys,) - 模型预测的保留概率
-        labels: (num_keys,) - 真实标签（1=会被 attend，0=不会）
-        threshold: 保留阈值
+        drop_probs: (num_keys,) - 模型预测的 drop 概率
+        labels: (num_keys,) - 真实标签（0=会被 attend 应保留，1=不会被 attend 应 drop）
+        threshold: drop 阈值
     """
-    retained_mask = predictions >= threshold
+    # 保留 drop 概率低的 Key
+    retain_mask = drop_probs < threshold
 
     # Retention Rate
-    retention_rate = retained_mask.sum() / len(predictions)
+    retention_rate = retain_mask.sum() / len(drop_probs)
 
     # Argmax Hit Rate（关键指标）
-    # 被标记为 1 的 Key 中，有多少被保留了？
-    argmax_keys = labels == 1
-    argmax_hit_rate = (retained_mask & argmax_keys).sum() / argmax_keys.sum()
+    # label=0 表示会被 attend（应该保留），检查这些 Key 是否被保留
+    should_retain = labels == 0
+    argmax_hit_rate = (retain_mask & should_retain).sum() / should_retain.sum()
 
     # False Negative Rate
-    false_negatives = (~retained_mask & argmax_keys).sum()
-    false_negative_rate = false_negatives / argmax_keys.sum()
+    # 应该保留但被错误 drop 的比例
+    false_negatives = (~retain_mask & should_retain).sum()
+    false_negative_rate = false_negatives / should_retain.sum()
 
     # Keys per Query（需要结合具体 round 计算）
-    keys_per_query = retained_mask.sum()  # 简化：保留的 key 数量
+    keys_per_query = retain_mask.sum()  # 简化：保留的 key 数量
 
     return {
         'retention_rate': retention_rate,
@@ -230,3 +242,4 @@ def compute_module1_metrics(predictions, labels, threshold=0.5):
 | 2025-12-14 | 初始化文档 |
 | 2025-12-14 | 明确 Sparse Attention vs KV Cache 压缩区别；选择 Soft Pruning；添加向量化实现注释 |
 | 2025-12-15 | 重构评估指标：添加 Argmax Hit Rate、Keys per Query、Computation Reduction 核心指标及 Full Attention baseline；添加指标计算代码；移除 Focal Loss |
+| 2025-12-15 | 修正模型输出语义：从"保留概率"改为"drop 概率"；相应调整判断逻辑（`p < threshold` 保留）和标签定义（label=1 表示应 drop） |
