@@ -662,6 +662,22 @@ def get_rope_omega(num_freqs=64, base=10000):
 ROPE_OMEGA = get_rope_omega()  # shape: (64,)
 ```
 
+> **⚠️ RoPE 基数假设**：
+>
+> 上述代码固定使用 `base=10000`（标准 RoPE）。若目标模型使用不同配置，参考角度计算会与真实位置编码错位：
+>
+> | 模型变体 | 可能差异 |
+> |----------|----------|
+> | **RoPE Scaling** | 如 LLaMA 的 NTK-aware scaling、YaRN 等 |
+> | **不同 base** | 如某些 Qwen 变体使用 base=1000000 |
+> | **不同 head_dim** | 影响 num_freqs |
+>
+> **后续实验应**：
+> - 从模型配置文件读取 `rope_base` / `rope_scaling` 参数
+> - 或将 `base` 作为实验可调参数
+>
+> **当前 POC 阶段**：假设标准 RoPE (base=10000)，与参考实现一致。
+
 ### 5.2 完整的 Round 初始化流程
 
 ```python
@@ -709,3 +725,4 @@ def initialize_round(round_start, mu, round_window=128):
 | 2025-12-15 | 增加表达能力：每个频段从 1 个改为 3 个 von Mises Kernel；更新参数量计算；添加初始化建议（kappa 初始化较小避免梯度消失） |
 | 2025-12-15 | 添加 Kappa 正数约束待实验说明（无约束 vs Softplus） |
 | 2025-12-15 | 添加 Position Scaling Layer（Module 1 专用）：log 尺度锚点插值，乘在 logit 上；明确 Module 2 不使用位置编码 |
+| 2025-12-15 | 添加 RoPE 基数假设警告：固定 base=10000，后续需支持 RoPE scaling 和不同 base |
