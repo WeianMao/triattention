@@ -13,7 +13,7 @@
 这是一个 **KV Cache 压缩** 的模拟器，用于评估基于频率的 Key 剪枝算法。
 
 **核心机制**：
-- 每 `round_window`（默认 64）次解码执行一次 cache maintenance
+- 每 `round_window`（默认 128）次解码执行一次 cache maintenance
 - 使用 **频率统计** 给每个 Key 打分（基于 RoPE 频段的 amplitude、phase 等特征）
 - 保留得分最高的 `max_keys` 个 Key，丢弃其余
 
@@ -166,3 +166,4 @@
 |------|----------|
 | 2025-12-14 | 初始化文档结构 |
 | 2025-12-14 | 添加背景介绍：现有代码说明、项目动机 |
+| 2025-12-15 | 修正 round_window 默认值为 128 |

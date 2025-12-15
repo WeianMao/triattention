@@ -419,11 +419,7 @@ def prepare_training_data(trace_dir, round_window=128):
 #### Module 1: Binary Classification
 
 ```python
-# 基础版本
 loss = BCEWithLogitsLoss(predictions, labels)
-
-# 处理不平衡（可选）
-loss = FocalLoss(predictions, labels, gamma=2.0)
 ```
 
 #### Module 2: 双向交叉熵 + 推远项
@@ -584,9 +580,8 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 ## 6. 待定设计细节
 
 ### Module 1
-- [ ] Focal Loss gamma 值
-- [ ] 正负样本重采样策略
-- [ ] 时序衰减权重（更老的 key 权重更低？）
+
+（暂无待定项）
 
 ### Module 2
 - [ ] Experiment A vs B 对比结果
@@ -607,3 +602,4 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 | 2025-12-14 | 初始化文档 |
 | 2025-12-14 | 添加 POC 阶段说明；完善 Ground Truth 构建规则（一对多关系）；添加 Loss Function 设计（Linear/Log）；添加训练/推理不对齐说明；添加 Sanity Check 实验规划 |
 | 2025-12-15 | 修正 Loss 设计：添加双向交叉熵拉近项；修正 Exp B 公式为 `p·log(r)`；优化实现使用直接 mask；简化参考向量说明（指向 03 文档）；添加负载均衡 Loss 待办事项 |
+| 2025-12-15 | 简化 Module 1 Loss：移除 FocalLoss、正负样本重采样、时序衰减权重 |

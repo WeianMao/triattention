@@ -138,36 +138,90 @@ def normalized_von_mises_kernel(angle, mu, kappa):
 - `mu`: 可学习，kernel 中心位置
 - `kappa`: 可学习，集中度（类似 1/σ²）
 
-### 2.2 单个输出的计算
+### 2.2 多 Kernel 结构
 
-对于输出 bin i（共 128 个 bin），在频段 j 上的计算：
+> **设计决策**：每个频段使用 **3 个 von Mises Kernel**，增强表达能力。
+
+#### 结构说明
+
+对于输出 bin i（共 128 个 bin）和频段 j（共 64 个频段）：
+- 有 **3 个独立的 von Mises Kernel**（索引 m = 0, 1, 2）
+- 每个 kernel 有 3 个参数：`mu_ijm`, `kappa_ijm`, `weight_ijm`
+- 同一频段的 3 个 kernel 输出**累加**后，再乘以该频段的模长
+
+```
+bin_i_freq_j_contribution = magnitude_j × Σ_m [weight_ijm × vM(angle_j, mu_ijm, kappa_ijm)]
+```
+
+#### 参数初始化
+
+> **重要**：kappa 初始化要**足够小**（方差足够大），确保 kernel 覆盖接近一整周 (2π)，避免远离 mu 的区域概率接近零导致梯度消失。
 
 ```python
-def compute_output_i_freq_j(magnitude_j, angle_j, params_i_j, reference_angle_j):
+def initialize_kernel_params(num_bins=128, num_freqs=64, num_kernels=3):
+    """
+    初始化 Kernel Encoding Layer 参数
+
+    关键：kappa 初始化较小（~1.0），确保 kernel 较宽，覆盖接近 2π
+    """
+    # mu: 均匀分布在 [-π, π]
+    # 3 个 kernel 的 mu 初始位置间隔 2π/3
+    mu = torch.zeros(num_bins, num_freqs, num_kernels)
+    for m in range(num_kernels):
+        mu[:, :, m] = torch.randn(num_bins, num_freqs) * 0.1 + (2 * math.pi * m / num_kernels - math.pi)
+
+    # kappa: 初始化较小，确保覆盖范围大
+    # kappa ≈ 1.0 时，von Mises 的"标准差"约为 1 弧度，覆盖大部分圆周
+    kappa = torch.ones(num_bins, num_freqs, num_kernels) * 1.0
+
+    # weight: 初始化为较小值，防止输出过大
+    weight = torch.randn(num_bins, num_freqs, num_kernels) * 0.1
+
+    # bias: 初始化为零
+    bias = torch.zeros(num_bins)
+
+    return mu, kappa, weight, bias
+```
+
+### 2.3 单个输出的计算
+
+```python
+def compute_output_i_freq_j(magnitude_j, angle_j, params_i_j, reference_angle_j, num_kernels=3):
     """
     计算第 i 个 bin 在第 j 个频段的贡献
 
-    注意：reference_angle 在 mu 端处理，而非 angle 端
+    Args:
+        params_i_j: 包含 3 个 kernel 的参数
+            - mu: (num_kernels,)
+            - kappa: (num_kernels,)
+            - weight: (num_kernels,)
     """
-    mu_ij = params_i_j['mu']         # 可学习（基础值）
-    kappa_ij = params_i_j['kappa']   # 可学习
-    weight_ij = params_i_j['weight'] # 可学习
+    kernel_sum = 0
 
-    # 关键：将 reference_angle 加到 mu 中，而非从 angle 中减去
-    mu_effective = mu_ij + reference_angle_j
+    for m in range(num_kernels):
+        mu_ijm = params_i_j['mu'][m]
+        kappa_ijm = params_i_j['kappa'][m]
+        weight_ijm = params_i_j['weight'][m]
 
-    # angle_j 是原始角度，无需预处理
-    kernel_output = normalized_von_mises_kernel(angle_j, mu_effective, kappa_ij)
+        # 将 reference_angle 加到 mu 中
+        mu_effective = mu_ijm + reference_angle_j
 
-    return kernel_output * weight_ij * magnitude_j
+        # 计算单个 kernel 输出
+        kernel_output = normalized_von_mises_kernel(angle_j, mu_effective, kappa_ijm)
+
+        # 加权累加
+        kernel_sum += weight_ijm * kernel_output
+
+    # 乘以该频段的模长
+    return kernel_sum * magnitude_j
 ```
 
-> **注意**：`reference_angle_j` 在每个 round 开头计算一次，然后加到所有 kernel 的 mu 中。这比在每个 K 上减去 reference_angle 更高效。
+> **注意**：`reference_angle_j` 在每个 round 开头计算一次，然后加到所有 kernel 的 mu 中。
 
-### 2.3 完整前向传播
+### 2.4 完整前向传播
 
 ```python
-def kernel_encoding_layer(K, params, reference_angles, num_bins=128, num_freqs=64):
+def kernel_encoding_layer(K, params, reference_angles, num_bins=128, num_freqs=64, num_kernels=3):
     """
     Kernel Encoding Layer 前向传播
 
@@ -177,6 +231,7 @@ def kernel_encoding_layer(K, params, reference_angles, num_bins=128, num_freqs=6
         reference_angles: shape (num_freqs,) - 当前 round 的参考角度
         num_bins: 输出维度 (128)
         num_freqs: 频段数量 (64)
+        num_kernels: 每个频段的 kernel 数量 (3)
 
     Output:
         logits: shape (num_bins,)
@@ -188,10 +243,10 @@ def kernel_encoding_layer(K, params, reference_angles, num_bins=128, num_freqs=6
     for i in range(num_bins):
         for j in range(num_freqs):
             magnitude_j = get_magnitude(K, freq_j)
-            angle_j = get_angle(K, freq_j)  # 原始角度，无需减去 reference
+            angle_j = get_angle(K, freq_j)
 
             outputs[i] += compute_output_i_freq_j(
-                magnitude_j, angle_j, params[i][j], reference_angles[j]
+                magnitude_j, angle_j, params[i][j], reference_angles[j], num_kernels
             )
 
         # 加 bias
@@ -206,24 +261,26 @@ def kernel_encoding_layer(K, params, reference_angles, num_bins=128, num_freqs=6
 
 ### 3.1 Kernel Encoding Layer 参数
 
+> **设计**：每个频段 3 个 von Mises Kernel
+
 | 参数类型 | 数量计算 | 值 |
 |----------|----------|-----|
-| mu | num_bins × num_freqs | 128 × 64 = 8,192 |
-| kappa | num_bins × num_freqs | 128 × 64 = 8,192 |
-| weight | num_bins × num_freqs | 128 × 64 = 8,192 |
+| mu | num_bins × num_freqs × num_kernels | 128 × 64 × 3 = 24,576 |
+| kappa | num_bins × num_freqs × num_kernels | 128 × 64 × 3 = 24,576 |
+| weight | num_bins × num_freqs × num_kernels | 128 × 64 × 3 = 24,576 |
 | bias | num_bins | 128 |
 
-**Kernel Layer 总参数**: 8,192 × 3 + 128 = **24,704 per head**
+**Kernel Layer 总参数**: 24,576 × 3 + 128 = **73,856 per head**
 
 ### 3.2 各模块总参数
 
 | 模块 | 结构 | 参数量 (per head) |
 |------|------|-------------------|
-| Module 1 (Key Pruning) | Kernel + MLP(128→h→1) | 24,704 + MLP |
-| Module 2 Key Binning | Kernel only | 24,704 |
-| Module 2 Query Routing | Kernel only | 24,704 |
+| Module 1 (Key Pruning) | Kernel + MLP(128→h→1) | 73,856 + MLP |
+| Module 2 Key Binning | Kernel only | 73,856 |
+| Module 2 Query Routing | Kernel only | 73,856 |
 
-**每个 Query Head 总参数**: ~74,000 + MLP (约 75K-100K)
+**每个 Query Head 总参数**: ~221,000 + MLP (约 225K-250K)
 
 ### 3.3 Module 2 参数共享选项
 
@@ -240,7 +297,7 @@ Key 网络和 Query 网络完全独立，不共享任何参数。
 | weight | 独立 | 独立 |
 | bias | 独立 | 独立 |
 
-**总参数**: 24,704 × 2 = **49,408 per Query head**
+**总参数**: 73,856 × 2 = **147,712 per Query head**
 
 #### 选项 B: 共享 Kernel 参数（mu, kappa）
 
@@ -253,9 +310,9 @@ Key 网络和 Query 网络共享 kernel 的中心位置（mu）和集中度（ka
 | weight | 独立 | 独立 | 否 |
 | bias | 独立 | 独立 | 否 |
 
-**共享参数**: 128 × 64 × 2 = 16,384
-**独立参数**: (128 × 64 + 128) × 2 = 16,640
-**总参数**: 16,384 + 16,640 = **33,024 per Query head**
+**共享参数**: 128 × 64 × 3 × 2 = 49,152
+**独立参数**: (128 × 64 × 3 + 128) × 2 = 49,408
+**总参数**: 49,152 + 49,408 = **98,560 per Query head**
 
 **直觉**：mu 和 kappa 定义了"bin 的位置和形状"，这对 K 和 Q 应该是一致的。weight 和 bias 决定"如何组合"，可以不同。
 
@@ -273,34 +330,38 @@ Key 网络和 Query 网络共享 kernel 的中心位置（mu）和集中度（ka
 ```python
 def kernel_encoding_layer_vectorized(K, mu, kappa, weight, bias, reference_angles):
     """
-    向量化实现
+    向量化实现（3 kernels per frequency band）
 
     Args:
         K: (head_dim,)
-        mu: (num_bins, num_freqs) - 基础 mu 值
-        kappa: (num_bins, num_freqs)
-        weight: (num_bins, num_freqs)
+        mu: (num_bins, num_freqs, num_kernels) - 基础 mu 值
+        kappa: (num_bins, num_freqs, num_kernels)
+        weight: (num_bins, num_freqs, num_kernels)
         bias: (num_bins,)
         reference_angles: (num_freqs,) - 当前 round 的参考角度
 
     Returns:
         logits: (num_bins,)
     """
+    num_bins, num_freqs, num_kernels = mu.shape  # 128, 64, 3
+
     # 提取模长和角度（原始值，无需预处理）
     K_complex = K.view(-1, 2)  # (num_freqs, 2)
     magnitude = K_complex.norm(dim=1)  # (num_freqs,)
     angle = atan2(K_complex[:, 1], K_complex[:, 0])  # (num_freqs,)
 
     # 关键优化：将 reference_angles 加到 mu 中（广播）
-    # reference_angles: (num_freqs,) -> (1, num_freqs)
-    mu_effective = mu + reference_angles.unsqueeze(0)  # (num_bins, num_freqs)
+    # reference_angles: (num_freqs,) -> (1, num_freqs, 1)
+    mu_effective = mu + reference_angles.view(1, -1, 1)  # (num_bins, num_freqs, num_kernels)
 
     # 计算 kernel（广播）
-    # angle: (num_freqs,) -> (1, num_freqs)
-    kernel = exp(kappa * (cos(angle.unsqueeze(0) - mu_effective) - 1))  # (num_bins, num_freqs)
+    # angle: (num_freqs,) -> (1, num_freqs, 1)
+    angle_expanded = angle.view(1, -1, 1)  # (1, num_freqs, 1)
+    kernel = exp(kappa * (cos(angle_expanded - mu_effective) - 1))  # (num_bins, num_freqs, num_kernels)
 
-    # 加权求和
-    weighted = kernel * weight * magnitude.unsqueeze(0)  # (num_bins, num_freqs)
+    # 加权求和：先对 kernels 求和，再乘以 magnitude，最后对 freqs 求和
+    weighted_kernels = (kernel * weight).sum(dim=2)  # (num_bins, num_freqs)
+    weighted = weighted_kernels * magnitude.unsqueeze(0)  # (num_bins, num_freqs)
     logits = weighted.sum(dim=1) + bias  # (num_bins,)
 
     return logits
@@ -314,22 +375,37 @@ def kernel_encoding_layer_vectorized(K, mu, kappa, weight, bias, reference_angle
 def prepare_round(mu, reference_angles):
     """
     在 round 开头调用一次，预计算 mu_effective
+
+    Args:
+        mu: (num_bins, num_freqs, num_kernels)
+        reference_angles: (num_freqs,)
+
+    Returns:
+        mu_effective: (num_bins, num_freqs, num_kernels)
     """
     # 只计算一次，用于该 round 内所有 K 和 Q
-    mu_effective = mu + reference_angles.unsqueeze(0)
+    mu_effective = mu + reference_angles.view(1, -1, 1)
     return mu_effective
 
 def kernel_encoding_fast(K, mu_effective, kappa, weight, bias):
     """
     使用预计算的 mu_effective，更高效
+
+    Args:
+        mu_effective: (num_bins, num_freqs, num_kernels)
+        kappa: (num_bins, num_freqs, num_kernels)
+        weight: (num_bins, num_freqs, num_kernels)
     """
     K_complex = K.view(-1, 2)
-    magnitude = K_complex.norm(dim=1)
-    angle = atan2(K_complex[:, 1], K_complex[:, 0])
+    magnitude = K_complex.norm(dim=1)  # (num_freqs,)
+    angle = atan2(K_complex[:, 1], K_complex[:, 0])  # (num_freqs,)
 
-    kernel = exp(kappa * (cos(angle.unsqueeze(0) - mu_effective) - 1))
-    weighted = kernel * weight * magnitude.unsqueeze(0)
-    logits = weighted.sum(dim=1) + bias
+    angle_expanded = angle.view(1, -1, 1)  # (1, num_freqs, 1)
+    kernel = exp(kappa * (cos(angle_expanded - mu_effective) - 1))  # (num_bins, num_freqs, num_kernels)
+
+    weighted_kernels = (kernel * weight).sum(dim=2)  # (num_bins, num_freqs)
+    weighted = weighted_kernels * magnitude.unsqueeze(0)  # (num_bins, num_freqs)
+    logits = weighted.sum(dim=1) + bias  # (num_bins,)
 
     return logits
 ```
@@ -397,3 +473,4 @@ def initialize_round(round_start, mu, round_window=128):
 | 2025-12-14 | 初始化文档；记录 von Mises vs 截断 Gaussian 讨论 |
 | 2025-12-14 | 优化参考系处理：reference_angle 加到 mu 而非从 angle 减去；删除截断 Gaussian 选项；添加 K/Q 网络参数共享选项 |
 | 2025-12-15 | 简化参考向量：从 Q 平均向量改为零角度向量 (1,0)；参考角度直接由 RoPE 位置决定（`ref_position × ω_j`）；移除 PRETRAINED_Q_MEAN 依赖 |
+| 2025-12-15 | 增加表达能力：每个频段从 1 个改为 3 个 von Mises Kernel；更新参数量计算；添加初始化建议（kappa 初始化较小避免梯度消失） |
