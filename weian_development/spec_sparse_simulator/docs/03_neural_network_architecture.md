@@ -138,6 +138,14 @@ def normalized_von_mises_kernel(angle, mu, kappa):
 - `mu`: 可学习，kernel 中心位置
 - `kappa`: 可学习，集中度（类似 1/σ²）
 
+> **待实验**：Kappa 正数约束
+>
+> Von Mises kernel 要求 `kappa > 0`。两种处理方式待对比：
+> - **无约束**：直接学习 kappa，可能变负（行为未定义）
+> - **Softplus 约束**：`kappa_positive = F.softplus(kappa_raw)` 确保正数
+>
+> 需要实验对比哪种方式训练更稳定、效果更好。
+
 ### 2.2 多 Kernel 结构
 
 > **设计决策**：每个频段使用 **3 个 von Mises Kernel**，增强表达能力。
@@ -257,6 +265,223 @@ def kernel_encoding_layer(K, params, reference_angles, num_bins=128, num_freqs=6
 
 ---
 
+## 2.5 Position Scaling Layer（Module 1 专用）
+
+> **重要**：此层**仅用于 Module 1 (Key Pruning)**，Module 2 (Bin-based Sparse Attention) **不使用**位置编码。
+>
+> Module 2 不需要位置编码的原因：Binning 只关心 Q-K 的语义相似性，位置信息已经通过 RoPE 编码在向量中。
+
+### 2.5.1 设计概述
+
+在 MLP 输出的 logit 上乘一个位置相关的可学习权重，调整不同位置 Key 的 drop 倾向。
+
+```
+MLP Output (logit)
+    │
+    ▼
+┌─────────────────────────────────┐
+│   Position Scaling             │
+│   scaled_logit = logit × w(x)  │
+│   w(x) = log-scale interpolated│
+└─────────────────────────────────┘
+    │
+    ▼
+Sigmoid
+```
+
+### 2.5.2 锚点权重结构
+
+使用 **log 尺度**上的锚点进行线性插值：
+
+| 锚点索引 | 位置 | log₁₀(位置) | 可学习权重 |
+|----------|------|-------------|------------|
+| 0 | 1,000 | 3 | w₀ |
+| 1 | 10,000 | 4 | w₁ |
+| 2 | 100,000 | 5 | w₂ |
+
+**参数量**：3 个标量（可扩展为更多锚点）
+
+### 2.5.3 向量化实现
+
+```python
+class PositionScalingLayer(nn.Module):
+    """
+    Position Scaling Layer (Module 1 专用)
+
+    在 log 尺度上的锚点之间线性插值，得到位置权重
+    使用 softplus 保证权重非负
+    """
+    def __init__(self, anchor_positions=[1000, 10000, 100000]):
+        super().__init__()
+        self.num_anchors = len(anchor_positions)
+
+        # 预计算 log 尺度的锚点位置（常量）
+        self.register_buffer(
+            'log_anchors',
+            torch.log10(torch.tensor(anchor_positions, dtype=torch.float32))
+        )
+
+        # 可学习的锚点权重（原始参数）
+        # 初始化为 softplus 的逆值，使得 softplus(raw) ≈ 1.0
+        # softplus(x) = log(1 + exp(x))，要使结果为 1.0，x = log(e - 1) ≈ 0.5413
+        init_value = math.log(math.exp(1.0) - 1)  # ≈ 0.5413
+        self.anchor_weights_raw = nn.Parameter(
+            torch.full((self.num_anchors,), init_value)
+        )
+
+    @property
+    def anchor_weights(self):
+        """通过 softplus 保证权重非负"""
+        return F.softplus(self.anchor_weights_raw)
+
+    def forward(self, logits, positions):
+        """
+        Args:
+            logits: (num_keys,) - MLP 输出的 logits
+            positions: (num_keys,) - 每个 Key 的位置（绝对或相对）
+
+        Returns:
+            scaled_logits: (num_keys,) - 位置缩放后的 logits
+        """
+        # 计算每个位置的权重
+        pos_weights = self._interpolate_weights(positions)
+
+        # 乘到 logits 上
+        return logits * pos_weights
+
+    def _interpolate_weights(self, positions):
+        """
+        在 log 尺度上线性插值
+
+        Args:
+            positions: (num_keys,) - 位置值（>= 1）
+
+        Returns:
+            weights: (num_keys,) - 插值得到的权重（非负）
+        """
+        # 获取经过 softplus 的非负权重
+        anchor_weights = self.anchor_weights  # (num_anchors,)
+
+        # 避免 log(0)
+        positions = positions.clamp(min=1)
+        log_pos = torch.log10(positions.float())  # (num_keys,)
+
+        # 初始化为第一个锚点权重
+        weights = torch.full_like(log_pos, anchor_weights[0])
+
+        # 遍历每个区间进行插值
+        for i in range(self.num_anchors - 1):
+            log_left = self.log_anchors[i]
+            log_right = self.log_anchors[i + 1]
+            w_left = anchor_weights[i]
+            w_right = anchor_weights[i + 1]
+
+            # 找到在此区间内的位置
+            in_interval = (log_pos >= log_left) & (log_pos < log_right)
+
+            # 计算插值系数 t ∈ [0, 1]
+            t = (log_pos - log_left) / (log_right - log_left)
+            t = t.clamp(0, 1)
+
+            # 线性插值
+            interpolated = w_left * (1 - t) + w_right * t
+            weights = torch.where(in_interval, interpolated, weights)
+
+        # 大于最大锚点的位置使用最后一个权重
+        above_max = log_pos >= self.log_anchors[-1]
+        weights = torch.where(above_max, anchor_weights[-1], weights)
+
+        return weights
+```
+
+> **非负约束**：
+> - 原始参数 `anchor_weights_raw` 初始化为 `log(e-1) ≈ 0.5413`
+> - 通过 `softplus` 变换后，初始权重 ≈ 1.0
+> - 训练过程中权重始终非负
+
+### 2.5.4 与 Module 1 网络的集成
+
+```python
+class Module1KeyPruningNetwork(nn.Module):
+    """
+    Module 1: Key Pruning 完整网络
+    """
+    def __init__(self, num_bins=128, num_freqs=64, num_kernels=3,
+                 mlp_hidden=64, anchor_positions=[1000, 10000, 100000]):
+        super().__init__()
+
+        # Kernel Encoding Layer（与 Module 2 共享设计）
+        self.kernel_layer = KernelEncodingLayer(num_bins, num_freqs, num_kernels)
+
+        # MLP Layer（Module 1 专用）
+        self.mlp = nn.Sequential(
+            nn.Linear(num_bins, mlp_hidden),
+            nn.ReLU(),
+            nn.Linear(mlp_hidden, 1)
+        )
+
+        # Position Scaling Layer（Module 1 专用）
+        self.position_scaling = PositionScalingLayer(anchor_positions)
+
+    def forward(self, K, key_positions, reference_angles):
+        """
+        Args:
+            K: (num_keys, head_dim) - Key 向量
+            key_positions: (num_keys,) - Key 的位置
+            reference_angles: (num_freqs,) - 当前 round 的参考角度
+
+        Returns:
+            drop_probs: (num_keys,) - drop 概率
+        """
+        # 1. Kernel Encoding
+        encoded = self.kernel_layer(K, reference_angles)  # (num_keys, num_bins)
+
+        # 2. MLP
+        logits = self.mlp(encoded).squeeze(-1)  # (num_keys,)
+
+        # 3. Position Scaling（Module 1 专用）
+        scaled_logits = self.position_scaling(logits, key_positions)
+
+        # 4. Sigmoid
+        drop_probs = torch.sigmoid(scaled_logits)
+
+        return drop_probs
+```
+
+### 2.5.5 Module 2 网络结构（无 Position Scaling）
+
+> **对比**：Module 2 的网络更简洁，没有 MLP 和 Position Scaling。
+
+```python
+class Module2BinningNetwork(nn.Module):
+    """
+    Module 2: Key Binning / Query Routing 网络
+    注意：没有 MLP，没有 Position Scaling
+    """
+    def __init__(self, num_bins=128, num_freqs=64, num_kernels=3):
+        super().__init__()
+        self.kernel_layer = KernelEncodingLayer(num_bins, num_freqs, num_kernels)
+
+    def forward(self, x, reference_angles):
+        """
+        Args:
+            x: (num_tokens, head_dim) - K 或 Q 向量
+            reference_angles: (num_freqs,)
+
+        Returns:
+            bin_probs: (num_tokens, num_bins) - softmax 后的 bin 概率
+        """
+        # 1. Kernel Encoding
+        logits = self.kernel_layer(x, reference_angles)  # (num_tokens, num_bins)
+
+        # 2. 直接 Softmax（无 MLP，无 Position Scaling）
+        bin_probs = F.softmax(logits, dim=-1)
+
+        return bin_probs
+```
+
+---
+
 ## 3. 参数量分析
 
 ### 3.1 Kernel Encoding Layer 参数
@@ -276,11 +501,19 @@ def kernel_encoding_layer(K, params, reference_angles, num_bins=128, num_freqs=6
 
 | 模块 | 结构 | 参数量 (per head) |
 |------|------|-------------------|
-| Module 1 (Key Pruning) | Kernel + MLP(128→h→1) | 73,856 + MLP |
+| Module 1 (Key Pruning) | Kernel + MLP(128→h→1) + **Position Scaling** | 73,856 + MLP + **3** |
 | Module 2 Key Binning | Kernel only | 73,856 |
 | Module 2 Query Routing | Kernel only | 73,856 |
 
-**每个 Query Head 总参数**: ~221,000 + MLP (约 225K-250K)
+> **注意**：Position Scaling 仅用于 Module 1，只增加 3 个参数（锚点权重）。
+
+**Module 1 详细参数**（假设 mlp_hidden=64）：
+- Kernel Encoding: 73,856
+- MLP: 128×64 + 64 + 64×1 + 1 = 8,256 + 65 = **8,321**
+- Position Scaling: **3**
+- **Module 1 总计**: ~82,180 per head
+
+**每个 Query Head 总参数**: ~230,000 (Module 1 + Module 2 Key + Module 2 Query)
 
 ### 3.3 Module 2 参数共享选项
 
@@ -474,3 +707,5 @@ def initialize_round(round_start, mu, round_window=128):
 | 2025-12-14 | 优化参考系处理：reference_angle 加到 mu 而非从 angle 减去；删除截断 Gaussian 选项；添加 K/Q 网络参数共享选项 |
 | 2025-12-15 | 简化参考向量：从 Q 平均向量改为零角度向量 (1,0)；参考角度直接由 RoPE 位置决定（`ref_position × ω_j`）；移除 PRETRAINED_Q_MEAN 依赖 |
 | 2025-12-15 | 增加表达能力：每个频段从 1 个改为 3 个 von Mises Kernel；更新参数量计算；添加初始化建议（kappa 初始化较小避免梯度消失） |
+| 2025-12-15 | 添加 Kappa 正数约束待实验说明（无约束 vs Softplus） |
+| 2025-12-15 | 添加 Position Scaling Layer（Module 1 专用）：log 尺度锚点插值，乘在 logit 上；明确 Module 2 不使用位置编码 |

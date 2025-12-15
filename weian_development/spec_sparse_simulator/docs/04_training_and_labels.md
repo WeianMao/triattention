@@ -36,17 +36,21 @@ POC 成功后再考虑：
 
 ### 1.1 标签定义
 
+> **标签语义**：label 表示 **drop 概率的目标值**（与 01_module1_key_pruning.md 一致）
+> - label = 0：会被 attend → **不应 drop**
+> - label = 1：不会被 attend → **应该 drop**
+
 一个 Key K_i 的标签定义为：
 
 ```
-label(K_i) = 1  iff  ∃ Q_j (j > round_end): argmax_k Attention(Q_j, K_k) == i
-label(K_i) = 0  otherwise
+label(K_i) = 0  iff  ∃ Q_j (j >= round_start): argmax_k Attention(Q_j, K_k) == i  (会被 attend，不 drop)
+label(K_i) = 1  otherwise  (不会被 attend，drop)
 ```
 
 **解释**：
-- 考察范围：当前 round 之后的所有 Query
+- 考察范围：当前 round 开始及之后的**所有** Query（包括当前 round 内的 Query）
 - 判定标准：argmax（attention 最大值）
-- **只要有一个** future Query 的 argmax 是 K_i，则 label = 1
+- **只要有一个** Query 的 argmax 是 K_i，则 label = 0（不 drop）
 
 ### 1.2 从 Trace 提取标签
 
@@ -63,17 +67,21 @@ def extract_pruning_labels(attention_trace, round_start, round_end, seq_len):
 
     Returns:
         labels: (round_start,) binary labels for each key
+                label=0: 会被 attend（不 drop）
+                label=1: 不会被 attend（drop）
     """
-    labels = zeros(round_start)
+    # 默认所有历史 key 都应该 drop（label=1）
+    labels = ones(round_start)
 
-    # 遍历未来的所有 query
-    for q_idx in range(round_end, seq_len):
-        # 找到该 query 的 argmax key（只考虑历史 key）
-        attn_weights = attention_trace[q_idx, :q_idx]
+    # 遍历当前 round 及之后的所有 query
+    # 注意：从 round_start 开始，包括当前 round 内的 query
+    for q_idx in range(round_start, seq_len):
+        # 找到该 query 的 argmax key（只考虑历史 key，即 < round_start）
+        attn_weights = attention_trace[q_idx, :round_start]
         argmax_key = attn_weights.argmax()
 
-        if argmax_key < round_start:
-            labels[argmax_key] = 1
+        # 这个 key 会被 attend，标记为不 drop
+        labels[argmax_key] = 0
 
     return labels
 ```
@@ -235,6 +243,19 @@ L_A = L_attract + λ * L_repel_linear
 ```
 L_repel_log = Σ_i Σ_{j ∉ g(i)} p_i · log(r_j)
 ```
+
+> **为什么是 `+p·log(r)` 而非 `-p·log(r)`？**
+>
+> 这里**不是**标准交叉熵 `-p·log(r)`（用于拉近分布），而是其**负形式**。
+>
+> **数学直觉**：
+> - `p·log(r)` 由于 log(概率) < 0，所以 `p·log(r)` 总是负数
+> - 当 p 和 r **越相似**时，`p·log(r)` 越大（更接近 0）
+> - 当 p 和 r **越不同**时，`p·log(r)` 越小（更负）
+>
+> **最小化 `p·log(r)`** 会让 `p·log(r)` 更负，即让 p 和 r 更不同（推远）。
+>
+> 这与 KL 散度的关系：`-p·log(r) = H(p) + KL(p||r)`，所以最小化 `p·log(r)` 等价于最大化 `KL(p||r)`。
 
 **实现**：
 ```python
@@ -625,3 +646,4 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 | 2025-12-15 | 修正 Loss 设计：添加双向交叉熵拉近项；修正 Exp B 公式为 `p·log(r)`；优化实现使用直接 mask；简化参考向量说明（指向 03 文档）；添加负载均衡 Loss 待办事项 |
 | 2025-12-15 | 简化 Module 1 Loss：移除 FocalLoss、正负样本重采样、时序衰减权重 |
 | 2025-12-15 | 添加核心评估指标：Argmax Hit Rate、Keys per Query、Computation Reduction 及 Full Attention/Random Binning baseline |
+| 2025-12-15 | 统一标签定义：与 01 文档一致（label=0 不 drop，label=1 drop）；修正时序范围为 round_start 开始；添加 Log Repel 数学直觉解释 |

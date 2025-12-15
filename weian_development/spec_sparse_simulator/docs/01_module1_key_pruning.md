@@ -81,6 +81,14 @@ Input: K (post-RoPE, 在旋转参考系下)
 ┌─────────────────────────────────┐
 │   MLP Layer (1 层)              │
 │   128 → hidden → 1             │
+│   Output: logit (标量)          │
+└─────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────┐
+│   Position Scaling             │
+│   (Module 1 专用，见下方说明)    │
+│   logit = logit × pos_weight   │
 └─────────────────────────────────┘
     │
     ▼
@@ -91,11 +99,168 @@ Input: K (post-RoPE, 在旋转参考系下)
 └─────────────────────────────────┘
 ```
 
-**特点**：比 Module 2 的网络稍重（多一层 MLP）
+**特点**：比 Module 2 的网络稍重（多一层 MLP + Position Scaling）
 
 **输出语义**：
 - p 接近 1 → Key 很可能不会被未来 Query attend → 应该 drop
 - p 接近 0 → Key 很可能会被未来 Query attend → 应该保留
+
+---
+
+## Position Scaling（Module 1 专用）
+
+> **注意**：此设计仅用于 Module 1 (Key Pruning)，Module 2 (Bin-based Sparse Attention) **不使用**位置编码。
+
+### 设计动机
+
+不同位置的 Key 可能有不同的"drop 倾向基线"：
+- **早期 Key**（距离当前位置很远）：可能更容易被 drop
+- **近期 Key**（距离当前位置较近）：通常更重要，不易被 drop
+
+通过在 log 尺度上的可学习权重插值，可以让模型学习到位置相关的 drop 倾向。
+
+### 核心思想
+
+1. 在 **log 尺度**上设置若干**锚点位置**（如 1k, 10k, 100k）
+2. 每个锚点有一个**可学习权重**
+3. 对于任意位置 x，在锚点之间**线性插值**得到该位置的权重
+4. 将权重**乘到 logit 上**（Sigmoid 之前）
+
+### 锚点设计
+
+| 锚点索引 | 位置 | log₁₀(位置) | 可学习权重 |
+|----------|------|-------------|------------|
+| 0 | 1,000 | 3 | w₀ |
+| 1 | 10,000 | 4 | w₁ |
+| 2 | 100,000 | 5 | w₂ |
+
+> **可扩展**：锚点数量和位置可以根据实际序列长度调整。
+
+### 插值规则
+
+给定当前位置 x：
+
+```python
+def get_position_weight(x, anchor_positions=[1000, 10000, 100000], anchor_weights=learnable):
+    """
+    在 log 尺度上线性插值得到位置权重
+
+    Args:
+        x: 当前位置（Key 的绝对位置或相对位置，见下方讨论）
+        anchor_positions: 锚点位置列表（升序）
+        anchor_weights: 每个锚点对应的可学习权重
+
+    Returns:
+        weight: 该位置的插值权重
+    """
+    # 边界情况：小于最小锚点
+    if x <= anchor_positions[0]:
+        return anchor_weights[0]
+
+    # 边界情况：大于最大锚点
+    if x >= anchor_positions[-1]:
+        return anchor_weights[-1]
+
+    # 找到 x 所在的区间 [anchor_i, anchor_{i+1}]
+    log_x = log10(x)
+    log_anchors = [log10(p) for p in anchor_positions]
+
+    for i in range(len(log_anchors) - 1):
+        if log_anchors[i] <= log_x < log_anchors[i + 1]:
+            # 在 log 尺度上线性插值
+            t = (log_x - log_anchors[i]) / (log_anchors[i + 1] - log_anchors[i])
+            weight = anchor_weights[i] * (1 - t) + anchor_weights[i + 1] * t
+            return weight
+```
+
+### 插值示例
+
+| 位置 x | log₁₀(x) | 插值结果 |
+|--------|----------|----------|
+| 500 | 2.7 | w₀（小于 1k，直接取 w₀） |
+| 1,000 | 3.0 | w₀ |
+| 3,162 | 3.5 | 0.5 × w₀ + 0.5 × w₁（1k 和 10k 的中点） |
+| 10,000 | 4.0 | w₁ |
+| 31,623 | 4.5 | 0.5 × w₁ + 0.5 × w₂ |
+| 100,000 | 5.0 | w₂ |
+| 200,000 | 5.3 | w₂（大于 100k，直接取 w₂） |
+
+### 应用方式
+
+```python
+def forward_with_position_scaling(K, key_position, mlp, anchor_weights):
+    """
+    带位置缩放的前向传播
+
+    Args:
+        K: Key 向量
+        key_position: Key 的位置（绝对位置或相对位置）
+        mlp: MLP 层
+        anchor_weights: 位置锚点的可学习权重
+    """
+    # 1. 原有流程：Kernel Encoding + MLP
+    logit = mlp(kernel_encoding(K))  # 标量
+
+    # 2. 获取位置权重
+    pos_weight = get_position_weight(key_position, anchor_weights)
+
+    # 3. 位置缩放（在 Sigmoid 之前）
+    scaled_logit = logit * pos_weight
+
+    # 4. Sigmoid 得到 drop 概率
+    drop_prob = sigmoid(scaled_logit)
+
+    return drop_prob
+```
+
+### 位置定义选项
+
+> **待实验**：确定 `key_position` 使用哪种定义。
+
+| 选项 | 定义 | 特点 |
+|------|------|------|
+| **A. 绝对位置** | `key_position = i`（Key 在序列中的位置） | 简单直接；不同 round 同一位置的 Key 权重相同 |
+| **B. 相对距离** | `key_position = round_start - i`（Key 距离当前 round 的距离） | 反映"多久以前"的信息；更符合 attention 的时效性 |
+
+**建议先用选项 B（相对距离）**，因为更符合 "越远越可能被 drop" 的直觉。
+
+### 参数初始化与非负约束
+
+```python
+def init_position_weights(num_anchors=3):
+    """
+    初始化位置权重
+
+    初始值为 1.0，表示初始时位置不影响 logit
+    使用 softplus 的逆函数初始化，使得 softplus(raw) ≈ 1.0
+    """
+    # softplus(x) = log(1 + exp(x))
+    # 要使 softplus(x) ≈ 1.0，需要 x ≈ log(exp(1) - 1) ≈ 0.5413
+    init_value = math.log(math.exp(1.0) - 1)  # ≈ 0.5413
+    return nn.Parameter(torch.full((num_anchors,), init_value))
+
+def get_position_weight_with_softplus(x, anchor_positions, anchor_weights_raw):
+    """
+    带 softplus 非负约束的位置权重获取
+
+    anchor_weights_raw: 原始可学习参数
+    实际权重 = softplus(anchor_weights_raw)，保证非负
+    """
+    # 通过 softplus 保证权重非负
+    anchor_weights = F.softplus(anchor_weights_raw)
+
+    # 后续插值逻辑不变...
+    return interpolated_weight
+```
+
+> **非负约束**：使用 `softplus` 确保权重始终非负。初始化时使用 `softplus` 的逆值，使初始权重 ≈ 1.0。
+
+### 设计理由
+
+1. **Log 尺度**：长序列中位置跨度很大（1 到 100k+），log 尺度可以更均匀地覆盖
+2. **线性插值**：计算简单高效，梯度友好
+3. **乘法作用**：乘在 logit 上相当于调整 Sigmoid 的"尖锐度"，权重 > 1 使预测更极端，权重 < 1 使预测更温和
+4. **Module 1 专用**：因为只有 Key Pruning 需要考虑"距离越远越可能被 drop"的先验
 
 ---
 
@@ -232,6 +397,8 @@ def compute_module1_metrics(drop_probs, labels, threshold=0.5):
 
 - [ ] MLP 的 hidden dimension
 - [ ] threshold 如何设定（固定 / 自适应 / 可学习）
+- [ ] Position Scaling 的位置定义（绝对位置 vs 相对距离）
+- [ ] Position Scaling 的锚点数量和位置（当前：1k, 10k, 100k）
 
 ---
 
@@ -243,3 +410,4 @@ def compute_module1_metrics(drop_probs, labels, threshold=0.5):
 | 2025-12-14 | 明确 Sparse Attention vs KV Cache 压缩区别；选择 Soft Pruning；添加向量化实现注释 |
 | 2025-12-15 | 重构评估指标：添加 Argmax Hit Rate、Keys per Query、Computation Reduction 核心指标及 Full Attention baseline；添加指标计算代码；移除 Focal Loss |
 | 2025-12-15 | 修正模型输出语义：从"保留概率"改为"drop 概率"；相应调整判断逻辑（`p < threshold` 保留）和标签定义（label=1 表示应 drop） |
+| 2025-12-15 | 添加 Position Scaling 设计（Module 1 专用）：log 尺度锚点插值，乘在 Sigmoid 之前的 logit 上 |

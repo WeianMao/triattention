@@ -157,6 +157,7 @@
 | [02_module2_bin_sparse_attention.md](./02_module2_bin_sparse_attention.md) | Module 2: Bin-based Sparse Attention 详细设计 |
 | [03_neural_network_architecture.md](./03_neural_network_architecture.md) | 神经网络架构与 Kernel 编码 |
 | [04_training_and_labels.md](./04_training_and_labels.md) | 训练数据与标签定义 |
+| [05_experiment_conventions.md](./05_experiment_conventions.md) | **实验规范**：目录结构与文件组织 |
 
 ---
 

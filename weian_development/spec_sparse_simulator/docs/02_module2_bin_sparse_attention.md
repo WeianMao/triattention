@@ -169,18 +169,178 @@ Input: K (post-RoPE, 在旋转参考系下)
 
 ---
 
+## Round 内新 Key 的处理
+
+> **关键设计**：当前 round 内新生成的 Key **全部参与 attention**（Full Attention），只有**历史 Key** 需要做 Sparse Attention。
+
+### 处理规则
+
+在第 N 个 round 内（假设 round_start = N × 128）：
+- **历史 Key**（位置 < round_start）：经过 binning，只与同 bin 的 Query 做 attention（Sparse）
+- **当前 round 内新 Key**（位置 >= round_start）：**不做 binning**，与所有 Query 做 attention（Full）
+
+### 示例
+
+假设当前是 round 2（round_start = 256），正在解码第 356 个 token（round 内第 100 个）：
+
+| Key 位置 | 处理方式 |
+|----------|----------|
+| 0 ~ 255（历史 Key） | Sparse Attention（只与同 bin 的 Query 计算） |
+| 256 ~ 355（当前 round 内的 99 个 Key） | Full Attention（全部参与计算） |
+
+### 实现
+
+```python
+def sparse_attention_with_recent_keys(Q, kv_cache, bin_assignments, neural_net_query, round_start):
+    """
+    混合 Sparse + Full Attention
+
+    Args:
+        Q: 当前 Query
+        kv_cache: 所有 Key（包括历史 + 当前 round）
+        bin_assignments: (round_start,) - 只有历史 Key 有 bin 分配
+        round_start: 当前 round 的起始位置
+    """
+    # 1. 历史 Key：Sparse Attention
+    history_keys = kv_cache[:round_start]
+    logits = neural_net_query(Q.unsqueeze(0))
+    bin_q = logits.argmax(dim=1).item()
+
+    mask = bin_assignments == bin_q
+    sparse_keys = history_keys[mask]
+
+    # 2. 当前 round 内的 Key：Full Attention
+    recent_keys = kv_cache[round_start:]  # 全部参与
+
+    # 3. 合并计算 attention
+    all_relevant_keys = concat([sparse_keys, recent_keys])
+    output = attention(Q, all_relevant_keys)
+
+    return output
+```
+
+### 设计理由
+
+- **简化实现**：避免在 round 内频繁更新 bin_index
+- **保证近期信息**：最近的 Key 通常更重要，full attention 保证不遗漏
+- **计算开销可控**：每个 round 最多 128 个新 Key，full attention 开销有限
+
+---
+
 ## 边界情况处理
 
 ### 空 bin 问题
 
 如果 Query 的 bin 中没有 Key：
 
-**策略：Fallback 到 Full Attention + Warning**
+**策略：空 Bin Masking + 短路处理（推荐）**
+
+> **核心思想**：在 round 开头统计空 bin，Query routing 时将空 bin 的 logits 设为 -inf，确保 Query 不会被分配到空 bin。
+>
+> **边界情况**：首个 round（round_start=0）或历史 Key 为空时，跳过 Sparse Attention，直接使用 Full Attention。
 
 ```python
+def get_empty_bin_mask(bin_assignments, num_bins=128):
+    """
+    在每个 round 开头调用，统计哪些 bin 是空的
+
+    Args:
+        bin_assignments: (num_keys,) - 每个历史 Key 的 bin ID
+        num_bins: bin 总数
+
+    Returns:
+        empty_mask: (num_bins,) - True 表示该 bin 为空
+        all_empty: bool - True 表示所有 bin 都为空（没有历史 Key）
+    """
+    # 边界情况：没有历史 Key
+    if len(bin_assignments) == 0:
+        return torch.ones(num_bins, dtype=torch.bool), True  # 所有 bin 为空
+
+    bin_counts = torch.zeros(num_bins)
+    for bin_id in range(num_bins):
+        bin_counts[bin_id] = (bin_assignments == bin_id).sum()
+
+    empty_mask = bin_counts == 0  # (num_bins,)
+    all_empty = empty_mask.all().item()
+
+    return empty_mask, all_empty
+
+
+def sparse_attention_with_empty_mask(Q, history_keys, recent_keys, bin_assignments,
+                                      neural_net_query, empty_bin_mask, all_bins_empty):
+    """
+    使用空 bin mask 的 sparse attention，带短路处理
+
+    Args:
+        Q: 当前 Query
+        history_keys: (num_history_keys, head_dim) - 历史 Key（做 Sparse）
+        recent_keys: (num_recent_keys, head_dim) - 当前 round 新 Key（做 Full）
+        bin_assignments: (num_history_keys,) - 历史 Key 的 bin ID
+        neural_net_query: Query routing 网络
+        empty_bin_mask: (num_bins,) - True 表示该 bin 为空
+        all_bins_empty: bool - 是否所有 bin 都为空（首个 round）
+    """
+    # ========== 短路处理：首个 round 或历史 Key 为空 ==========
+    if all_bins_empty or len(history_keys) == 0:
+        # 没有历史 Key，只与 recent_keys 做 Full Attention
+        if len(recent_keys) == 0:
+            # 极端情况：完全没有 Key（不应该发生）
+            return None
+        return attention(Q, recent_keys)
+
+    # ========== 正常流程：Sparse + Full ==========
+    # 1. Query routing
+    logits = neural_net_query(Q.unsqueeze(0))  # (1, num_bins)
+
+    # 将空 bin 的 logits 设为 -inf，确保不会被选中
+    logits = logits.masked_fill(empty_bin_mask.unsqueeze(0), float('-inf'))
+
+    bin_q = logits.argmax(dim=1).item()
+
+    # 2. 获取同 bin 的历史 Key（Sparse 部分）
+    mask = bin_assignments == bin_q
+    sparse_keys = history_keys[mask]
+
+    # 3. 合并 Sparse + Full
+    all_relevant_keys = torch.cat([sparse_keys, recent_keys], dim=0)
+
+    output = attention(Q, all_relevant_keys)
+    return output
+```
+
+### 首个 Round 处理
+
+> **重要**：首个 round（round_start=0）时没有历史 Key，必须短路处理。
+
+| 场景 | round_start | 历史 Key | 处理方式 |
+|------|-------------|----------|----------|
+| 首个 round | 0 | 空 | 跳过 Sparse，只用 round 内新 Key 做 Full Attention |
+| 后续 round | > 0 | 非空 | 正常 Sparse + Full |
+
+```python
+def should_skip_sparse_attention(round_start, history_key_bins):
+    """
+    判断是否应该跳过 Sparse Attention
+
+    Returns:
+        True: 跳过 Sparse，直接走 Full Attention
+        False: 正常执行 Sparse + Full
+    """
+    return round_start == 0 or len(history_key_bins) == 0
+```
+
+**优点**：
+- 从源头避免空 bin 问题，无需 fallback
+- 模型会自动选择有 Key 的、可能性最大的 bin
+- 计算开销极小（只在 round 开头统计一次）
+
+**备选策略：Fallback 到 Full Attention（不推荐）**
+
+```python
+# 仅作为参考，不推荐使用
 def sparse_attention_with_fallback(Q, kv_cache, bin_assignments, neural_net_query):
     """
-    带空 bin fallback 的 sparse attention
+    ⚠️ 不推荐：fallback 策略会导致计算量不可预测
     """
     logits = neural_net_query(Q.unsqueeze(0))
     bin_q = logits.argmax(dim=1).item()
@@ -189,18 +349,8 @@ def sparse_attention_with_fallback(Q, kv_cache, bin_assignments, neural_net_quer
     num_relevant = mask.sum().item()
 
     if num_relevant == 0:
-        # ⚠️ WARNING: 空 bin，fallback 到 full attention
-        # 这种情况应该非常罕见，如果频繁发生需要检查：
-        #   1. 神经网络训练是否充分
-        #   2. Bin 数量是否过多
-        #   3. 数据分布是否异常
-        warnings.warn(
-            f"Empty bin detected! bin_id={bin_q}, "
-            f"falling back to full attention. "
-            f"This should be rare - investigate if frequent.",
-            RuntimeWarning
-        )
-        relevant_keys = kv_cache  # 使用所有 Key
+        warnings.warn(f"Empty bin detected! bin_id={bin_q}")
+        relevant_keys = kv_cache  # Fallback 到 full attention
     else:
         relevant_keys = kv_cache[mask]
 
@@ -208,7 +358,7 @@ def sparse_attention_with_fallback(Q, kv_cache, bin_assignments, neural_net_quer
     return output
 ```
 
-> **监控要求**：生产环境需要监控空 bin 发生频率。如果频繁发生（如 > 1%），需要调查原因。
+> **监控要求**：即使使用 masking 策略，仍需监控 bin 分布均匀性。如果大量 bin 为空，说明 Key binning 网络需要优化（可能需要 Load Balancing Loss）。
 
 ### Multi-bin Query
 
@@ -222,13 +372,36 @@ def sparse_attention_with_fallback(Q, kv_cache, bin_assignments, neural_net_quer
 
 ### 核心指标（最重要）
 
+> **注意**：以下指标**仅评估历史 Key 的 Sparse Attention 部分**。Round 内新 Key 始终走 Full Attention，其计算量在实际部署时需单独计算。
+
 | 指标 | 定义 | 目标 | Baseline (Full Attention) |
 |------|------|------|---------------------------|
 | **Argmax Hit Rate** | Query 仍能 attend 到原 argmax Key 的比例（即 Q 和其 argmax K 在同一 bin） | 越高越好（>99%） | 100% |
-| **Keys per Query** | 每个 Query 参与 attention 的平均 Key 数量（= 平均 bin 大小） | 越低越好 | N（所有历史 Key） |
-| **Computation Reduction** | 1 - (avg bin size / total keys) | 越高越好 | 0% |
+| **Keys per Query (Sparse)** | 每个 Query 参与 Sparse Attention 的平均历史 Key 数量（= 平均 bin 大小） | 越低越好 | N_history（所有历史 Key） |
+| **Computation Reduction (Sparse)** | 1 - (avg bin size / num_history_keys) | 越高越好 | 0% |
 
 > **Argmax Hit Rate 是最关键指标**：如果 Q 和其 argmax K 不在同一个 bin，Query 将无法 attend 到正确的 Key。
+
+### 实际计算量估算
+
+实际部署时，每个 Query 的 attention 计算量 = **Sparse 部分 + Full 部分**：
+
+```
+Keys per Query (实际) = avg_bin_size + num_recent_keys
+                      = avg_bin_size + (query_pos - round_start)
+```
+
+| 组成部分 | Key 来源 | 计算方式 |
+|----------|----------|----------|
+| Sparse 部分 | 历史 Key（< round_start） | 只与同 bin 的 Key 计算 |
+| Full 部分 | 当前 round 新 Key（>= round_start） | 与所有新 Key 计算 |
+
+**示例**（round_start=1024，当前解码到第 1100 个 token）：
+- 历史 Key 数量：1024
+- 当前 round 新 Key 数量：76（1100 - 1024）
+- 假设平均 bin 大小：8
+- Keys per Query (实际) = 8 + 76 = 84
+- Computation Reduction (实际) = 1 - 84/1100 ≈ 92.4%
 
 ### 辅助指标
 
@@ -241,36 +414,51 @@ def sparse_attention_with_fallback(Q, kv_cache, bin_assignments, neural_net_quer
 ### 指标计算示例
 
 ```python
-def compute_module2_metrics(query_bins, key_bins, query_to_argmax_key, num_keys):
+def compute_module2_metrics_sparse_only(query_bins, history_key_bins, query_to_argmax_history_key):
     """
-    计算 Module 2 评估指标
+    计算 Module 2 评估指标（仅 Sparse 部分，不含 round 内新 Key 的 Full Attention）
+
+    ⚠️ 注意：此函数只评估历史 Key 的 Sparse Attention 效果。
+    实际计算量需要额外加上 round 内新 Key 的 Full Attention 开销。
 
     Args:
         query_bins: (num_queries,) - 每个 Query 分配的 bin ID
-        key_bins: (num_keys,) - 每个 Key 分配的 bin ID
-        query_to_argmax_key: (num_queries,) - 每个 Query 的 argmax Key 索引
-        num_keys: 总 Key 数量
+        history_key_bins: (num_history_keys,) - 每个**历史** Key 分配的 bin ID
+                          （不含 round 内新 Key，因为它们不做 binning）
+        query_to_argmax_history_key: (num_queries,) - 每个 Query 在历史 Key 中的 argmax 索引
+                                      （如果 argmax 落在 round 内新 Key，则不参与此指标计算）
     """
     num_queries = len(query_bins)
+    num_history_keys = len(history_key_bins)
+
+    # 边界情况：没有历史 Key（首个 round）
+    if num_history_keys == 0:
+        return {
+            'argmax_hit_rate': 1.0,  # 无历史 Key 时定义为 100%
+            'keys_per_query_sparse': 0,
+            'computation_reduction_sparse': 1.0,
+            'bin_balance_var': 0,
+            'empty_bin_rate': 1.0,
+        }
 
     # Argmax Hit Rate（关键指标）
-    # 检查每个 Query 和其 argmax Key 是否在同一个 bin
-    argmax_key_bins = key_bins[query_to_argmax_key]
+    # 检查每个 Query 和其 argmax 历史 Key 是否在同一个 bin
+    argmax_key_bins = history_key_bins[query_to_argmax_history_key]
     hits = (query_bins == argmax_key_bins).sum()
     argmax_hit_rate = hits / num_queries
 
-    # Keys per Query（平均 bin 大小）
+    # Keys per Query - Sparse 部分（平均 bin 大小）
     bin_sizes = []
     for q_bin in query_bins:
-        bin_size = (key_bins == q_bin).sum()
+        bin_size = (history_key_bins == q_bin).sum()
         bin_sizes.append(bin_size)
-    keys_per_query = sum(bin_sizes) / num_queries
+    keys_per_query_sparse = sum(bin_sizes) / num_queries
 
-    # Computation Reduction
-    computation_reduction = 1 - (keys_per_query / num_keys)
+    # Computation Reduction - Sparse 部分
+    computation_reduction_sparse = 1 - (keys_per_query_sparse / num_history_keys)
 
     # Bin Balance（方差）
-    unique_bins, counts = torch.unique(key_bins, return_counts=True)
+    unique_bins, counts = torch.unique(history_key_bins, return_counts=True)
     bin_balance_var = counts.float().var()
 
     # Empty Bin Rate
@@ -279,11 +467,35 @@ def compute_module2_metrics(query_bins, key_bins, query_to_argmax_key, num_keys)
 
     return {
         'argmax_hit_rate': argmax_hit_rate,
-        'keys_per_query': keys_per_query,
-        'computation_reduction': computation_reduction,
+        'keys_per_query_sparse': keys_per_query_sparse,
+        'computation_reduction_sparse': computation_reduction_sparse,
         'bin_balance_var': bin_balance_var,
         'empty_bin_rate': empty_bin_rate,
     }
+
+
+def compute_actual_computation_reduction(keys_per_query_sparse, num_history_keys,
+                                          num_recent_keys, query_pos):
+    """
+    计算实际的计算量节省（包含 Sparse + Full 两部分）
+
+    Args:
+        keys_per_query_sparse: Sparse 部分的平均 Key 数量（从上面函数获取）
+        num_history_keys: 历史 Key 数量（= round_start）
+        num_recent_keys: 当前 round 内新 Key 数量（= query_pos - round_start）
+        query_pos: 当前 Query 位置
+
+    Returns:
+        实际的 computation reduction
+    """
+    # Full Attention baseline: 所有 Key
+    full_attention_keys = num_history_keys + num_recent_keys
+
+    # Sparse Attention: 同 bin 的历史 Key + 所有新 Key
+    sparse_attention_keys = keys_per_query_sparse + num_recent_keys
+
+    actual_reduction = 1 - (sparse_attention_keys / full_attention_keys)
+    return actual_reduction
 ```
 
 ### Baseline 对比
@@ -326,8 +538,9 @@ def compute_module2_metrics(query_bins, key_bins, query_to_argmax_key, num_keys)
 
 ### 已确定
 
-- [x] 空 bin fallback 策略：**Fallback 到 full attention + Warning**
+- [x] 空 bin 处理策略：**空 Bin Masking**（Query routing 时将空 bin logits 设为 -inf）
 - [x] Multi-bin Query：**暂不实现**，待实验结果决定
+- [x] Round 内新 Key：**Full Attention**，只有历史 Key 做 Sparse
 
 ---
 
@@ -338,3 +551,5 @@ def compute_module2_metrics(query_bins, key_bins, query_to_argmax_key, num_keys)
 | 2025-12-14 | 初始化文档 |
 | 2025-12-14 | 添加向量化实现注释；确定空 bin fallback 策略；Multi-bin Query 暂不实现 |
 | 2025-12-15 | 重构评估指标：添加 Argmax Hit Rate、Keys per Query、Computation Reduction 核心指标及 Full Attention/Random Binning baseline；添加指标计算代码 |
+| 2025-12-15 | 添加 Round 内新 Key 处理说明（Full Attention）；更新空 bin 策略为 Masking（-inf）而非 Fallback |
+| 2025-12-15 | 修正评估指标：明确只评估 Sparse 部分，添加实际计算量估算公式；添加首个 round/历史 Key 为空的短路处理 |
