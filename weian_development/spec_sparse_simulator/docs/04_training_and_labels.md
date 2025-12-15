@@ -86,7 +86,41 @@ def extract_pruning_labels(attention_trace, round_start, round_end, seq_len):
     return labels
 ```
 
-### 1.3 样本特点
+### 1.3 训练时排除末尾 Key
+
+> **重要**：训练时，序列**最后 1k 个 token 对应的 Key 不计算 loss**。
+
+**原因**：
+- 末尾 Key 的后续 Query 数量有限
+- 一个本来重要的 Key 可能因为后续 Query 太少而一直没被 attend 到
+- 这会导致标签噪声：本该保留的 Key 被错误标注为 drop（label=1）
+
+**实现**：
+```python
+def compute_module1_loss(drop_probs, labels, seq_len, exclude_tail=1000):
+    """
+    计算 Module 1 loss，排除末尾 Key
+
+    Args:
+        drop_probs: (num_keys,) - 模型预测的 drop 概率
+        labels: (num_keys,) - 真实标签
+        seq_len: 序列总长度
+        exclude_tail: 排除末尾多少个 token（默认 1000）
+    """
+    # 只对前 (seq_len - exclude_tail) 个 Key 计算 loss
+    valid_len = max(0, seq_len - exclude_tail)
+
+    if valid_len == 0:
+        return torch.tensor(0.0)
+
+    loss = F.binary_cross_entropy(
+        drop_probs[:valid_len],
+        labels[:valid_len]
+    )
+    return loss
+```
+
+### 1.4 样本特点
 
 | 特点 | 描述 |
 |------|------|
@@ -637,6 +671,82 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 
 ---
 
+## 7. 未来实验注意事项
+
+> **重要**：以下内容在当前 POC/模拟实验阶段**暂不需要处理**，但在后续实际部署实验时必须考虑。
+
+### 7.1 GQA 下 Key 丢弃决策规则
+
+当多个 Query head 共享一个 KV head（GQA）时，需要定义 Key 丢弃的决策规则：
+
+| 场景 | 决策规则 |
+|------|----------|
+| 所有 Query head 都认为应该 drop | **Drop** 该 Key |
+| 任一 Query head 认为应该 retain | **Retain** 该 Key |
+
+**实现**：对同一 KV head 对应的所有 Query head 的预测取 **AND**（全部认为 drop 才 drop）。
+
+```python
+def gqa_key_pruning_decision(drop_probs_all_heads, threshold):
+    """
+    GQA 场景下的 Key 丢弃决策
+
+    Args:
+        drop_probs_all_heads: (num_q_heads, num_keys) - 每个 Q head 对每个 K 的 drop 概率
+        threshold: drop 阈值
+
+    Returns:
+        final_drop_mask: (num_keys,) - True 表示应该 drop
+    """
+    # 每个 Q head 的 drop 决策
+    drop_decisions = drop_probs_all_heads >= threshold  # (num_q_heads, num_keys)
+
+    # 只有所有 Q head 都认为应该 drop，才最终 drop（AND 逻辑）
+    final_drop_mask = drop_decisions.all(dim=0)  # (num_keys,)
+
+    return final_drop_mask
+```
+
+> **当前阶段**：模拟实验中每个 Query head 独立处理，暂不考虑 GQA 共享。
+
+### 7.2 数据增强：随机偏移 Round 起始位置
+
+**问题**：如果每次训练同一个 trace，round 的中心位置始终固定（如 64, 192, 320, ...），可能导致模型对特定位置过拟合。
+
+**解决方案**：每次训练时，随机丢弃句子开头的 0 ~ `round_window` 个 token，使 round 的中心位置随机偏移。
+
+```python
+def augment_trace_with_offset(Q, K, round_window=128):
+    """
+    数据增强：随机偏移 round 起始位置
+
+    Args:
+        Q: (seq_len, head_dim) - Query 序列
+        K: (seq_len, head_dim) - Key 序列
+        round_window: round 大小
+
+    Returns:
+        Q_aug, K_aug: 偏移后的序列
+    """
+    # 随机偏移量：0 ~ round_window-1
+    offset = random.randint(0, round_window - 1)
+
+    # 丢弃开头的 offset 个 token
+    Q_aug = Q[offset:]
+    K_aug = K[offset:]
+
+    return Q_aug, K_aug, offset
+```
+
+**效果**：
+- 原始 round 中心：64, 192, 320, ...
+- 偏移后 round 中心：(64-offset), (192-offset), (320-offset), ...
+- 类似图像数据增强中的随机裁剪，提高模型对位置的泛化能力
+
+> **当前阶段**：POC 阶段暂不实现，待 overfit 验证通过后再考虑。
+
+---
+
 ## 更新日志
 
 | 日期 | 更新内容 |
@@ -647,3 +757,5 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 | 2025-12-15 | 简化 Module 1 Loss：移除 FocalLoss、正负样本重采样、时序衰减权重 |
 | 2025-12-15 | 添加核心评估指标：Argmax Hit Rate、Keys per Query、Computation Reduction 及 Full Attention/Random Binning baseline |
 | 2025-12-15 | 统一标签定义：与 01 文档一致（label=0 不 drop，label=1 drop）；修正时序范围为 round_start 开始；添加 Log Repel 数学直觉解释 |
+| 2025-12-15 | 添加"未来实验注意事项"：GQA 下 Key 丢弃决策规则（AND 逻辑）；数据增强策略（随机偏移 round 起始位置） |
+| 2025-12-15 | 添加 Module 1 训练时排除末尾 1k Key（避免标签噪声） |

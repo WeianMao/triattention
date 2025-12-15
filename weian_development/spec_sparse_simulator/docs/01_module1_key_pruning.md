@@ -289,29 +289,31 @@ label(K_i) = 1  otherwise  (不会被 attend，drop)
 
 ---
 
-## Sparse Attention vs KV Cache 压缩
+## Hard Pruning 策略
 
-> **重要区别**：本项目是 **Sparse Attention**，不是 KV Cache 压缩。
+> **本项目采用 Hard Pruning**：预测为 drop 的 Key **直接从 KV Cache 中删除**，同时减少显存和计算量。
 
-| 对比项 | KV Cache 压缩 | Sparse Attention (本项目) |
-|--------|--------------|--------------------------|
-| **max_keys** | 有硬限制 | **不存在** |
-| **Key 处理** | 物理删除 | 保留，但选择性计算 |
-| **目标** | 减少显存 | 减少计算量 |
+| 对比项 | 传统 KV Cache 压缩 | 本项目 (Neural Hard Pruning) |
+|--------|-------------------|------------------------------|
+| **max_keys** | 有硬限制 | **不存在**，由神经网络动态决定 |
+| **Key 处理** | 基于规则删除 | 基于神经网络预测删除 |
+| **打分方式** | 手工特征（频率等） | **神经网络学习** |
+| **目标** | 减少显存 + 计算量 | 减少显存 + 计算量 |
 
-### Pruning 策略
+### Pruning 执行
 
-采用 **Soft Pruning**：
-- 只根据 threshold 决定是否参与后续 attention
+采用 **Hard Pruning**：
+- 根据 threshold 决定是否 drop
 - 不存在 max_keys 限制
-- 被 "pruned" 的 Key 仍在显存中，只是不参与当前 round 的 attention 计算
+- 被 pruned 的 Key **直接从 KV Cache 中物理删除**
 
 ```python
-# Soft Pruning: 没有 max_keys 限制
+# Hard Pruning: 没有 max_keys 限制，直接删除
 # drop_probs: 模型预测的 drop 概率
 # retain_mask: drop 概率低于阈值的 Key 被保留
 retain_mask = drop_probs < threshold
-# retain_mask 决定哪些 Key 参与后续 attention，而非物理删除
+# 直接删除 drop 的 Key，只保留 retain 的
+retained_kv_cache = kv_cache[retain_mask]
 ```
 
 ---
@@ -407,7 +409,8 @@ def compute_module1_metrics(drop_probs, labels, threshold=0.5):
 | 日期 | 更新内容 |
 |------|----------|
 | 2025-12-14 | 初始化文档 |
-| 2025-12-14 | 明确 Sparse Attention vs KV Cache 压缩区别；选择 Soft Pruning；添加向量化实现注释 |
+| 2025-12-14 | 明确 Sparse Attention vs KV Cache 压缩区别；添加向量化实现注释 |
+| 2025-12-15 | 修正 Pruning 策略：从 Soft Pruning 改为 Hard Pruning（直接从 KV Cache 中物理删除） |
 | 2025-12-15 | 重构评估指标：添加 Argmax Hit Rate、Keys per Query、Computation Reduction 核心指标及 Full Attention baseline；添加指标计算代码；移除 Focal Loss |
 | 2025-12-15 | 修正模型输出语义：从"保留概率"改为"drop 概率"；相应调整判断逻辑（`p < threshold` 保留）和标签定义（label=1 表示应 drop） |
 | 2025-12-15 | 添加 Position Scaling 设计（Module 1 专用）：log 尺度锚点插值，乘在 Sigmoid 之前的 logit 上 |
