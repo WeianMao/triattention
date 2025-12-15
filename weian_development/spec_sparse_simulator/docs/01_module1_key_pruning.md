@@ -213,16 +213,18 @@ def forward_with_position_scaling(K, key_position, mlp, anchor_weights):
     return drop_prob
 ```
 
-### 位置定义选项
+### 位置定义
 
-> **待实验**：确定 `key_position` 使用哪种定义。
+> **已确定**：使用**绝对位置**。
 
-| 选项 | 定义 | 特点 |
-|------|------|------|
-| **A. 绝对位置** | `key_position = i`（Key 在序列中的位置） | 简单直接；不同 round 同一位置的 Key 权重相同 |
-| **B. 相对距离** | `key_position = round_start - i`（Key 距离当前 round 的距离） | 反映"多久以前"的信息；更符合 attention 的时效性 |
+| 定义 | 说明 |
+|------|------|
+| `key_position = i` | Key 在序列中的绝对位置（0, 1, 2, ...） |
 
-**建议先用选项 B（相对距离）**，因为更符合 "越远越可能被 drop" 的直觉。
+**选择理由**：
+- 简单直接，实现无歧义
+- 锚点位置（1k, 10k, 100k）本身就是按绝对位置设计的
+- 不同 round 同一位置的 Key 权重相同，行为一致
 
 ### 参数初始化与非负约束
 
@@ -436,8 +438,11 @@ def compute_module1_metrics(drop_probs, labels, threshold=0.5):
 
 - [ ] MLP 的 hidden dimension
 - [ ] threshold 如何设定（固定 / 自适应 / 可学习）
-- [ ] Position Scaling 的位置定义（绝对位置 vs 相对距离）
 - [ ] Position Scaling 的锚点数量和位置（当前：1k, 10k, 100k）
+
+### 已确定
+
+- [x] Position Scaling 的位置定义：**绝对位置**
 
 ---
 
@@ -452,3 +457,4 @@ def compute_module1_metrics(drop_probs, labels, threshold=0.5):
 | 2025-12-15 | 修正模型输出语义：从"保留概率"改为"drop 概率"；相应调整判断逻辑（`p < threshold` 保留）和标签定义（label=1 表示应 drop） |
 | 2025-12-15 | 添加 Position Scaling 设计（Module 1 专用）：log 尺度锚点插值，乘在 Sigmoid 之前的 logit 上 |
 | 2025-12-15 | 修正标签定义形式化表达：从 `j > i` 改为 `j >= round_start`；添加"训练时排除末尾 Key"说明 |
+| 2025-12-15 | 明确 Position Scaling 使用绝对位置（而非相对距离） |

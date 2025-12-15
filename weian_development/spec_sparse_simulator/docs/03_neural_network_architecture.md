@@ -338,7 +338,7 @@ class PositionScalingLayer(nn.Module):
         """
         Args:
             logits: (num_keys,) - MLP 输出的 logits
-            positions: (num_keys,) - 每个 Key 的位置（绝对或相对）
+            positions: (num_keys,) - 每个 Key 的绝对位置（0, 1, 2, ...）
 
         Returns:
             scaled_logits: (num_keys,) - 位置缩放后的 logits
@@ -726,3 +726,4 @@ def initialize_round(round_start, mu, round_window=128):
 | 2025-12-15 | 添加 Kappa 正数约束待实验说明（无约束 vs Softplus） |
 | 2025-12-15 | 添加 Position Scaling Layer（Module 1 专用）：log 尺度锚点插值，乘在 logit 上；明确 Module 2 不使用位置编码 |
 | 2025-12-15 | 添加 RoPE 基数假设警告：固定 base=10000，后续需支持 RoPE scaling 和不同 base |
+| 2025-12-15 | 明确 Position Scaling 使用绝对位置（而非相对距离） |
