@@ -383,6 +383,8 @@ def sparse_attention_with_fallback(Q, kv_cache, bin_assignments, neural_net_quer
 | **Computation Reduction (Sparse)** | 1 - (avg bin size / num_history_keys) | 越高越好 | 0% |
 
 > **Argmax Hit Rate 是最关键指标**：如果 Q 和其 argmax K 不在同一个 bin，Query 将无法 attend 到正确的 Key。
+>
+> **关于 argmax 落在当前 round 新 Key 的情况**：不存在此问题。训练和评估时 argmax 只在历史 Key 中计算（`attention[:, :round_start]`），推理时当前 round 新 Key 走 Full Attention，不涉及 binning。
 
 ### 实际计算量估算
 
@@ -556,3 +558,4 @@ def compute_actual_computation_reduction(keys_per_query_sparse, num_history_keys
 | 2025-12-15 | 添加 Round 内新 Key 处理说明（Full Attention）；更新空 bin 策略为 Masking（-inf）而非 Fallback |
 | 2025-12-15 | 修正评估指标：明确只评估 Sparse 部分，添加实际计算量估算公式；添加首个 round/历史 Key 为空的短路处理 |
 | 2025-12-15 | 添加训推不一致说明（允许）：空 bin 在训练时可能较少，推理时由 masking 机制自动处理 |
+| 2025-12-15 | 澄清 argmax 落在当前 round 新 Key 的情况不存在（训练评估只看历史 Key，推理时新 Key 走 Full Attention） |
