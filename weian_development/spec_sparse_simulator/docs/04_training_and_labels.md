@@ -661,11 +661,13 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 
 | 指标 | 定义 | 目标 | Baseline (Full Attention) |
 |------|------|------|---------------------------|
-| **Argmax Hit Rate** | Q 和其 argmax K 在同一 bin 的比例 | >99% | 100% |
+| **Argmax Hit Rate** | Q 仍能 attend 到原 argmax K 的比例 | >99% | 100% |
 | **Keys per Query** | 每个 Q 参与 attention 的平均 K 数量 | 越低越好 | N |
 | **Computation Reduction** | 1 - (Keys per Query / N) | 越高越好 | 0% |
 
 > **Argmax Hit Rate 是最关键指标**：直接衡量 sparse attention 是否能保持生成质量。
+>
+> **命中判定规则**：argmax 在历史 Key → 检查同 bin；argmax 在当前 round 新 Key → 直接命中（Full Attention）。
 
 #### 辅助指标
 - [ ] 最终的 bin 分布（是否均匀）
@@ -793,3 +795,4 @@ def augment_trace_with_offset(Q, K, round_window=128):
 | 2025-12-15 | 添加"未来实验注意事项"：GQA 下 Key 丢弃决策规则（AND 逻辑）；数据增强策略（随机偏移 round 起始位置） |
 | 2025-12-15 | 添加 Module 1 训练时排除末尾 1k Key（避免标签噪声） |
 | 2025-12-15 | 修复 `build_groups` 索引 bug：`:q_idx` 改为 `:`；修正排除末尾 Key 逻辑：基于位置而非 seq_len；所有 Loss 函数使用 `log_softmax` 提高数值稳定性 |
+| 2025-12-15 | 添加 Argmax Hit Rate 命中判定规则：argmax 在当前 round 新 Key 直接算命中 |

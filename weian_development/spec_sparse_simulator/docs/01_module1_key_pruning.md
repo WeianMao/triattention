@@ -368,6 +368,8 @@ retained_kv_cache = kv_cache[retain_mask]
 | **Computation Reduction** | 1 - (Keys per Query / N) | 越高越好 | 0% |
 
 > **Argmax Hit Rate 是最关键指标**：如果 Query 无法 attend 到原来的 argmax Key，可能严重影响生成质量。
+>
+> **命中判定规则**：argmax 在历史 Key → 检查该 Key 是否被 retain；argmax 在当前 round 新 Key → 直接命中（Full Attention）。
 
 ### 辅助指标
 
@@ -379,14 +381,19 @@ retained_kv_cache = kv_cache[retain_mask]
 ### 指标计算示例
 
 ```python
-def compute_module1_metrics(drop_probs, labels, threshold=0.5):
+def compute_module1_metrics(drop_probs, labels, query_argmax_in_history, threshold=0.5):
     """
     计算 Module 1 评估指标
 
     Args:
         drop_probs: (num_keys,) - 模型预测的 drop 概率
         labels: (num_keys,) - 真实标签（0=会被 attend 应保留，1=不会被 attend 应 drop）
+        query_argmax_in_history: (num_queries,) - bool，每个 Query 的 argmax 是否在历史 Key 中
         threshold: drop 阈值
+
+    命中判定规则：
+    - argmax 在历史 Key → 检查该 Key 是否被 retain
+    - argmax 在当前 round 新 Key → 直接命中（Full Attention）
     """
     # 保留 drop 概率低的 Key
     retain_mask = drop_probs < threshold
@@ -395,17 +402,20 @@ def compute_module1_metrics(drop_probs, labels, threshold=0.5):
     retention_rate = retain_mask.sum() / len(drop_probs)
 
     # Argmax Hit Rate（关键指标）
-    # label=0 表示会被 attend（应该保留），检查这些 Key 是否被保留
+    # argmax 在当前 round 新 Key → 直接命中
+    hits_from_recent = (~query_argmax_in_history).sum()
+    # argmax 在历史 Key（label=0）→ 检查是否被保留
     should_retain = labels == 0
-    argmax_hit_rate = (retain_mask & should_retain).sum() / should_retain.sum()
+    hits_from_history = (retain_mask & should_retain).sum()
+    total_queries = len(query_argmax_in_history)
+    argmax_hit_rate = (hits_from_recent + hits_from_history) / total_queries
 
-    # False Negative Rate
-    # 应该保留但被错误 drop 的比例
+    # False Negative Rate（仅针对历史 Key）
     false_negatives = (~retain_mask & should_retain).sum()
-    false_negative_rate = false_negatives / should_retain.sum()
+    false_negative_rate = false_negatives / should_retain.sum() if should_retain.sum() > 0 else 0
 
-    # Keys per Query（需要结合具体 round 计算）
-    keys_per_query = retain_mask.sum()  # 简化：保留的 key 数量
+    # Keys per Query
+    keys_per_query = retain_mask.sum()
 
     return {
         'retention_rate': retention_rate,
@@ -458,3 +468,4 @@ def compute_module1_metrics(drop_probs, labels, threshold=0.5):
 | 2025-12-15 | 添加 Position Scaling 设计（Module 1 专用）：log 尺度锚点插值，乘在 Sigmoid 之前的 logit 上 |
 | 2025-12-15 | 修正标签定义形式化表达：从 `j > i` 改为 `j >= round_start`；添加"训练时排除末尾 Key"说明 |
 | 2025-12-15 | 明确 Position Scaling 使用绝对位置（而非相对距离） |
+| 2025-12-15 | 添加 Argmax Hit Rate 命中判定规则：argmax 在当前 round 新 Key 直接算命中 |

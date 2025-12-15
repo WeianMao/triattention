@@ -378,13 +378,15 @@ def sparse_attention_with_fallback(Q, kv_cache, bin_assignments, neural_net_quer
 
 | 指标 | 定义 | 目标 | Baseline (Full Attention) |
 |------|------|------|---------------------------|
-| **Argmax Hit Rate** | Query 仍能 attend 到原 argmax Key 的比例（即 Q 和其 argmax K 在同一 bin） | 越高越好（>99%） | 100% |
+| **Argmax Hit Rate** | Query 仍能 attend 到原 argmax Key 的比例 | 越高越好（>99%） | 100% |
 | **Keys per Query (Sparse)** | 每个 Query 参与 Sparse Attention 的平均历史 Key 数量（= 平均 bin 大小） | 越低越好 | N_history（所有历史 Key） |
 | **Computation Reduction (Sparse)** | 1 - (avg bin size / num_history_keys) | 越高越好 | 0% |
 
 > **Argmax Hit Rate 是最关键指标**：如果 Q 和其 argmax K 不在同一个 bin，Query 将无法 attend 到正确的 Key。
 >
-> **关于 argmax 落在当前 round 新 Key 的情况**：不存在此问题。训练和评估时 argmax 只在历史 Key 中计算（`attention[:, :round_start]`），推理时当前 round 新 Key 走 Full Attention，不涉及 binning。
+> **命中判定规则**：
+> - argmax 在历史 Key 中 → 检查 Q 和该 K 是否在同一 bin
+> - argmax 在当前 round 新 Key 中 → **直接算命中**（因为当前 round 走 Full Attention）
 
 ### 实际计算量估算
 
@@ -418,19 +420,19 @@ Keys per Query (实际) = avg_bin_size + num_recent_keys
 ### 指标计算示例
 
 ```python
-def compute_module2_metrics_sparse_only(query_bins, history_key_bins, query_to_argmax_history_key):
+def compute_module2_metrics(query_bins, history_key_bins, query_to_argmax_key, argmax_in_history):
     """
-    计算 Module 2 评估指标（仅 Sparse 部分，不含 round 内新 Key 的 Full Attention）
-
-    ⚠️ 注意：此函数只评估历史 Key 的 Sparse Attention 效果。
-    实际计算量需要额外加上 round 内新 Key 的 Full Attention 开销。
+    计算 Module 2 评估指标
 
     Args:
         query_bins: (num_queries,) - 每个 Query 分配的 bin ID
-        history_key_bins: (num_history_keys,) - 每个**历史** Key 分配的 bin ID
-                          （不含 round 内新 Key，因为它们不做 binning）
-        query_to_argmax_history_key: (num_queries,) - 每个 Query 在历史 Key 中的 argmax 索引
-                                      （如果 argmax 落在 round 内新 Key，则不参与此指标计算）
+        history_key_bins: (num_history_keys,) - 每个历史 Key 分配的 bin ID
+        query_to_argmax_key: (num_queries,) - 每个 Query 的全局 argmax Key 索引
+        argmax_in_history: (num_queries,) - bool，argmax 是否在历史 Key 中
+
+    命中判定规则：
+    - argmax 在历史 Key 中 → 检查 Q 和该 K 是否在同一 bin
+    - argmax 在当前 round 新 Key 中 → 直接算命中（Full Attention）
     """
     num_queries = len(query_bins)
     num_history_keys = len(history_key_bins)
@@ -438,7 +440,7 @@ def compute_module2_metrics_sparse_only(query_bins, history_key_bins, query_to_a
     # 边界情况：没有历史 Key（首个 round）
     if num_history_keys == 0:
         return {
-            'argmax_hit_rate': 1.0,  # 无历史 Key 时定义为 100%
+            'argmax_hit_rate': 1.0,  # 全部走 Full Attention，100% 命中
             'keys_per_query_sparse': 0,
             'computation_reduction_sparse': 1.0,
             'bin_balance_var': 0,
@@ -446,10 +448,14 @@ def compute_module2_metrics_sparse_only(query_bins, history_key_bins, query_to_a
         }
 
     # Argmax Hit Rate（关键指标）
-    # 检查每个 Query 和其 argmax 历史 Key 是否在同一个 bin
-    argmax_key_bins = history_key_bins[query_to_argmax_history_key]
-    hits = (query_bins == argmax_key_bins).sum()
-    argmax_hit_rate = hits / num_queries
+    # argmax 在当前 round 新 Key → 直接命中
+    # argmax 在历史 Key → 检查是否同 bin
+    hits_from_recent = (~argmax_in_history).sum()  # 在新 Key 中，直接命中
+    history_argmax_indices = query_to_argmax_key[argmax_in_history]
+    history_query_bins = query_bins[argmax_in_history]
+    argmax_key_bins = history_key_bins[history_argmax_indices]
+    hits_from_history = (history_query_bins == argmax_key_bins).sum()
+    argmax_hit_rate = (hits_from_recent + hits_from_history) / num_queries
 
     # Keys per Query - Sparse 部分（平均 bin 大小）
     bin_sizes = []
@@ -558,4 +564,4 @@ def compute_actual_computation_reduction(keys_per_query_sparse, num_history_keys
 | 2025-12-15 | 添加 Round 内新 Key 处理说明（Full Attention）；更新空 bin 策略为 Masking（-inf）而非 Fallback |
 | 2025-12-15 | 修正评估指标：明确只评估 Sparse 部分，添加实际计算量估算公式；添加首个 round/历史 Key 为空的短路处理 |
 | 2025-12-15 | 添加训推不一致说明（允许）：空 bin 在训练时可能较少，推理时由 masking 机制自动处理 |
-| 2025-12-15 | 澄清 argmax 落在当前 round 新 Key 的情况不存在（训练评估只看历史 Key，推理时新 Key 走 Full Attention） |
+| 2025-12-15 | 更新 Argmax Hit Rate 命中规则：argmax 在历史 Key 检查同 bin，argmax 在当前 round 新 Key 直接算命中 |
