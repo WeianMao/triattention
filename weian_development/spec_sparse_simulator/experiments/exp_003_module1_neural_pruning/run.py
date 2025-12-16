@@ -258,14 +258,12 @@ def run_evaluate_mode(config, checkpoint_path, threshold, logger):
 
             # Update prune mask for queries in this round
             for q_idx in range(round_start, round_end):
-                # Causal mask: can only attend to keys <= q_idx
-                valid_keys = key_positions <= q_idx
+                # Historical keys: apply model's retention mask
+                prune_mask[q_idx, :round_start] = retain_mask.squeeze()
 
-                # Combine retention mask with causal mask
-                prune_mask[q_idx, :round_start] = retain_mask.squeeze() & valid_keys
-
-                # Always retain current token
-                prune_mask[q_idx, q_idx] = True
+                # Current round keys (round_start to q_idx): ALWAYS retain
+                # Module 1 only predicts for historical keys; current round uses full attention
+                prune_mask[q_idx, round_start:q_idx+1] = True
 
             total_keys_evaluated += round_start
             total_keys_retained += retain_mask.sum().item()
