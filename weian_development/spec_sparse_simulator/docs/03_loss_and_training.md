@@ -25,56 +25,44 @@ loss = F.binary_cross_entropy(drop_probs[valid_mask], labels[valid_mask])
 
 ---
 
-## Module 2: Bin-based Sparse Attention
+## Module 2: Multi-Bin Sparse Attention
 
-### Ground Truth：Group 定义
+### Ground Truth
 
-若 Q_i 的 argmax attention 是 K_j，则 Q_i 和 K_j 属于同一 **group**。
+若 Q_i 的 argmax attention 是 K_j，则 Q_i 和 K_j 需要匹配。
 
 ```python
-def build_groups(attention_matrix):
+def build_query_to_key(attention_matrix):
     # attention_matrix: (num_queries, num_history_keys)
-    groups = defaultdict(list)
-    for q_idx in range(attention_matrix.shape[0]):
-        argmax_key = attention_matrix[q_idx].argmax()
-        groups[argmax_key].append(q_idx)
-    return groups
+    return attention_matrix.argmax(dim=1)  # (num_queries,)
 ```
 
-### Loss Function：双向交叉熵 + Linear Repel
+### Loss Function：Attraction Loss
 
-```
-L_total = L_attract + λ × L_repel
-```
+**目标**：Query 选的 bin 恰好选中其 argmax Key
 
-**Attract（拉近同 group）**：双向交叉熵
 ```python
-def attract_loss(p, log_p, r, log_r, query_to_key):
-    r_matched = r[query_to_key]
-    log_r_matched = log_r[query_to_key]
-    return -(p * log_r_matched).sum() - (r_matched * log_p).sum()
+def attraction_loss(p_q, P, query_to_key):
+    """
+    p_q: (num_queries, num_bins) - query bin 分布 (softmax over bins)
+    P: (num_keys, num_bins) - key 分数 (softmax over keys for each bin)
+    query_to_key: (num_queries,) - 每个 query 的 argmax key 索引
+    """
+    P_matched = P[query_to_key]  # (num_queries, num_bins)
+    match_prob = (p_q * P_matched).sum(dim=1)  # (num_queries,)
+    return -torch.log(match_prob + 1e-8).mean()
 ```
 
-**Repel（推远非 group）**：Linear Repel
-```python
-def repel_loss(p, r, group_masks):
-    s = torch.mm(p, r.T)  # collision probability
-    return (s * (~group_masks).float()).sum()
-```
+**直觉**：Query 按 bin 分布采样 bin，bin 按 key 分布采样 key，采样到正确 key 的概率。
 
-### 关键发现（Sanity Check 实验）
+### 实验结论
 
-1. **必须归一化**：大规模数据需 per-query 归一化 attract 和 repel 项
-2. **Linear Repel 可行**：λ=10~20 时达到 100% Hit Rate
-3. **Log Repel 不可用**：`log(r) < 0` 导致优化方向错误
+| 方法 | K=50 | K=500 | K=1000 |
+|------|------|-------|--------|
+| **Attraction Loss** | 100% | 100% | 100% |
+| 双向交叉熵 | 67.78% | 100% | 100% |
 
-### 推荐参数
-
-| 参数 | 值 |
-|------|-----|
-| Loss 函数 | Linear Repel |
-| λ | 10~20 |
-| 归一化 | 必须 |
+**推荐使用 Attraction Loss**，在所有 K 值下均达到 100% TopK Hit Rate。
 
 ---
 
@@ -87,7 +75,7 @@ def repel_loss(p, r, group_masks):
 | 阶段 | 模块 |
 |------|------|
 | Stage 1 | Module 1 (Key Pruning) |
-| Stage 2 | Module 2 (Binning) |
+| Stage 2 | Module 2 (Multi-Bin) |
 
 ### 训练/推理不对齐
 
@@ -131,5 +119,4 @@ Q_aug, K_aug = Q[offset:], K[offset:]
 ## 待定事项
 
 - [ ] 跨 trace 泛化性验证
-- [ ] 负载均衡 Loss（防止 bin 分布不均）
-- [ ] Bin collapse 预防
+- [ ] TopK 的 K 值选择

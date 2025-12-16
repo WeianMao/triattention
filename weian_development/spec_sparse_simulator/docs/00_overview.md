@@ -20,15 +20,15 @@
 ┌──────────────────────────────────────────────────────┐
 │              每 128 次解码的 Round 开头                 │
 ├──────────────────────────────────────────────────────┤
-│   Module 1: Key Pruning  →  Module 2: Key Binning    │
-│   (Drop KV)                 (给剩余 K 分 bin)          │
+│   Module 1: Key Pruning  →  Module 2: Key Scoring    │
+│   (Drop KV)                 (给剩余 K 打分)            │
 └──────────────────────────────────────────────────────┘
                               ↓
 ┌──────────────────────────────────────────────────────┐
 │              每次解码 (128 次内)                        │
 ├──────────────────────────────────────────────────────┤
-│   Query → Query Routing → Sparse Attention           │
-│           (Q 分 bin)       (Q × K_same_bin)           │
+│   Query → Query Routing → TopK Sparse Attention      │
+│           (Q 选 bin)       (Q × TopK Keys in bin)     │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -37,7 +37,7 @@
 | 模块 | 目标 | 执行时机 | 网络 | 输出 |
 |------|------|----------|------|------|
 | Module 1 | 丢弃未来不被 attend 的 Key | Round 开头 | Kernel + MLP + Position Scaling | 二分类 |
-| Module 2 | 将 K/Q 分 bin，Q 只与同 bin K attention | Round 开头(K)/每次解码(Q) | Kernel + Softmax | 128 个 bin |
+| Module 2 | K 多 bin 打分，Q 选 bin 后取 TopK | Round 开头(K)/每次解码(Q) | Kernel + Softmax | 128 个 bin |
 
 ## Multi-head 处理
 
@@ -53,4 +53,3 @@
 | [03_loss_and_training.md](./03_loss_and_training.md) | Loss 设计与训练策略 |
 | [04_evaluation_metrics.md](./04_evaluation_metrics.md) | 评估指标设计 |
 | [05_experiment_conventions.md](./05_experiment_conventions.md) | 实验规范 |
-| [06_multi_bin_design.md](./06_multi_bin_design.md) | Multi-Bin Key Assignment 方案 |

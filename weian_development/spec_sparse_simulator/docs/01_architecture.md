@@ -37,30 +37,44 @@ label(K_i) = 1  否则
 
 ---
 
-## Module 2: Bin-based Sparse Attention
+## Module 2: Multi-Bin Sparse Attention
 
 ### 目标
 
-将 Key 分到 128 个 bin，Query 只与同 bin 的 Key 做 attention。
+将 Key 分到多个 bin，Query 选择一个 bin 后取 TopK 个 Key 做 attention。
+
+### 核心设计：Softmax over Keys
+
+与传统方案（每个 Key 只属于一个 bin）不同，**允许 Key 同时属于多个 bin**：
+
+```python
+# Key 打分：每个 Bin 在 key 维度上 softmax
+logits = neural_net_key(kv_cache)  # (num_keys, num_bins)
+P = softmax(logits, dim=0)         # 每列和为 1
+# P[:, b] 是 bin b 对所有 key 的概率分布
+# P[k, :] 不和为 1，key 可以在多个 bin 中都有高分
+```
 
 ### 算法流程
 
-**Round 开头：Key Binning**
+**Round 开头：Key Scoring**
 ```python
-def key_binning(kv_cache, neural_net_key):
-    logits = neural_net_key(kv_cache)  # (num_keys, 128)
-    bin_assignments = logits.argmax(dim=1)  # (num_keys,)
-    return bin_assignments
+def key_scoring(kv_cache, neural_net_key):
+    logits = neural_net_key(kv_cache)      # (num_keys, num_bins)
+    key_probs = softmax(logits, dim=0)     # softmax over keys
+    return key_probs
 ```
 
-**每次解码：Query Routing + Sparse Attention**
+**每次解码：Query Routing + TopK Attention**
 ```python
-def sparse_attention(Q, history_keys, recent_keys, bin_assignments, neural_net_query):
-    # Query 分 bin
+def topk_attention(Q, history_keys, recent_keys, key_probs, neural_net_query, K):
+    # Query 选 bin
     bin_q = neural_net_query(Q).argmax()
 
-    # 历史 Key: Sparse (同 bin)
-    sparse_keys = history_keys[bin_assignments == bin_q]
+    # 历史 Key: 选该 bin 的 TopK
+    scores = key_probs[:, bin_q]
+    topk_indices = scores.topk(K).indices
+    sparse_keys = history_keys[topk_indices]
 
     # 当前 round 新 Key: Full Attention
     all_keys = concat([sparse_keys, recent_keys])
@@ -70,28 +84,18 @@ def sparse_attention(Q, history_keys, recent_keys, bin_assignments, neural_net_q
 ### 神经网络结构
 
 ```
-K/Q (post-RoPE) → Kernel Encoding (128-dim) → Softmax → bin 概率
+K (post-RoPE) → Kernel Encoding (128-dim) → [无 Softmax，输出 logits]
+Q (post-RoPE) → Kernel Encoding (128-dim) → Softmax → bin 概率
 ```
 
-- **无 MLP，无 Position Scaling**（与 Module 1 不同）
-- Key 网络和 Query 网络参数独立
+- Key 网络输出 logits，softmax 在 key 维度上做
+- Query 网络输出 bin 概率（softmax 在 bin 维度）
+- **无 MLP，无 Position Scaling**
 
 ### Round 内新 Key 处理
 
-- **历史 Key**（< round_start）：Sparse Attention
+- **历史 Key**（< round_start）：TopK Sparse Attention
 - **当前 round 新 Key**（>= round_start）：Full Attention
-
-### 空 Bin 处理
-
-采用 **Masking 策略**：Query routing 时将空 bin 的 logits 设为 `-inf`
-
-```python
-def get_empty_bin_mask(bin_assignments, num_bins=128):
-    if len(bin_assignments) == 0:
-        return torch.ones(num_bins, dtype=torch.bool), True
-    bin_counts = torch.bincount(bin_assignments, minlength=num_bins)
-    return bin_counts == 0, False
-```
 
 ### 首个 Round 处理
 
@@ -107,5 +111,6 @@ def get_empty_bin_mask(bin_assignments, num_bins=128):
 - [ ] Position Scaling 锚点配置
 
 ### Module 2
+- [ ] TopK 的 K 值选择（50/500/1000）
 - [ ] Bin 数量（固定 128 或可调）
-- [ ] Multi-bin Query（暂不实现，待实验结果决定）
+- [ ] 与 Module 1 的配合方式
