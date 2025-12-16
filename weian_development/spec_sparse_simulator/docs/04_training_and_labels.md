@@ -245,7 +245,9 @@ def bidirectional_cross_entropy(p, log_p, r, log_r, query_to_key):
     return loss
 ```
 
-#### Experiment A: Linear Repel（推远非 group）
+#### Experiment A: Linear Repel（推远非 group） ✅ 采用
+
+> **状态**：✅ **已验证可行，推荐使用**。λ=10~20 时效果最佳。
 
 **目标**：最小化 query 与非 group key 发生 collision 的期望数量。
 
@@ -282,7 +284,19 @@ def linear_repel_loss(p, r, group_masks):
 L_A = L_attract + λ * L_repel_linear
 ```
 
-#### Experiment B: Log Repel（推远非 group）
+#### ~~Experiment B: Log Repel（推远非 group）~~ ❌ 不采用
+
+> **状态**：❌ **实验验证不可行，不采用此方案**。
+>
+> **失败原因**：
+> - `log(r) < 0`（概率的对数为负），导致 `p · log(r)` 始终为**负数**
+> - 最小化负数 = 让其更负 = 更激进地推远，**优化方向错误**
+> - 增加 λ 会导致 Hit Rate 急剧下降（λ=20 时 Hit Rate=0%）
+>
+> **结论**：此方案的数学设计存在根本问题，请使用 Experiment A (Linear Repel)。
+
+<details>
+<summary>📚 归档：原设计文档（仅供参考，不再使用）</summary>
 
 **目标**：使用交叉熵形式推远非 group key。
 
@@ -332,19 +346,25 @@ def log_repel_loss(p, log_r, group_masks):
 L_B = L_attract + λ * L_repel_log
 ```
 
+</details>
+
 #### 两种 Loss 对比
 
-| 对比项 | Experiment A (Linear) | Experiment B (Log) |
+| 对比项 | Experiment A (Linear) ✅ | ~~Experiment B (Log)~~ ❌ |
 |--------|----------------------|-------------------|
+| **状态** | **✅ 采用** | **❌ 不采用** |
 | 推远项形式 | `p · r` (内积) | `p · log(r)` (交叉熵) |
 | 梯度特性 | 线性 | 非线性，r 小时梯度大 |
 | 优化目标 | 平均 collision 数量 | 分布差异度 |
-| 适用场景 | 平均性能优先 | 分布差异优先 |
+| 推远项符号 | **正数**（正常工作） | **负数**（优化方向错误） |
+| 实验结果 | 100% Hit Rate, λ=10~20 最优 | λ 增加导致完全失败 |
 
 #### 向量化实现（完整）
 
+> **注意**：仅推荐使用 `compute_loss_exp_a`。`compute_loss_exp_b` 已验证不可行，保留代码仅供参考。
+
 ```python
-def compute_loss_exp_a(p, log_p, r, log_r, query_to_key, group_masks, lambda_repel=1.0):
+def compute_loss_exp_a(p, log_p, r, log_r, query_to_key, group_masks, lambda_repel=1.0):  # ✅ 推荐使用
     """
     Experiment A: 双向交叉熵 + Linear Repel
 
@@ -371,8 +391,10 @@ def compute_loss_exp_a(p, log_p, r, log_r, query_to_key, group_masks, lambda_rep
     return attract + lambda_repel * repel
 
 
-def compute_loss_exp_b(p, log_p, r, log_r, query_to_key, group_masks, lambda_repel=1.0):
+def compute_loss_exp_b(p, log_p, r, log_r, query_to_key, group_masks, lambda_repel=1.0):  # ❌ 已废弃
     """
+    ⚠️ 已废弃：此方案实验验证不可行，请使用 compute_loss_exp_a
+
     Experiment B: 双向交叉熵 + Log Repel
 
     Args:
