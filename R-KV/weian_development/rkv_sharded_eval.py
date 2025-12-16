@@ -282,6 +282,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Normalize per-head sparse scores before aggregation.",
     )
     parser.add_argument(
+        "--use_rank_aggregation",
+        type=str2bool,
+        default=False,
+        help="Use rank-based aggregation (min-pooling) instead of z-score + max-pooling.",
+    )
+    parser.add_argument(
         "--sparse_use_similarity",
         type=str2bool,
         default=False,
@@ -392,6 +398,7 @@ def main(args: argparse.Namespace) -> None:
             "sparse_head_limit": args.sparse_head_limit,
             "sparse_seed": args.sparse_seed,
             "sparse_normalize_scores": args.sparse_normalize_scores,
+            "use_rank_aggregation": args.use_rank_aggregation,
             "sparse_use_similarity": args.sparse_use_similarity,
             "sparse_similarity_mix_lambda": args.sparse_similarity_mix_lambda,
         }
@@ -504,6 +511,7 @@ def main(args: argparse.Namespace) -> None:
             head_limit=args.sparse_head_limit,
             metadata_expectations=metadata_expectations,
             normalize_scores=args.sparse_normalize_scores,
+            use_rank_aggregation=args.use_rank_aggregation,
             sparse_use_similarity=args.sparse_use_similarity,
             sparse_similarity_mix_lambda=args.sparse_similarity_mix_lambda,
         )

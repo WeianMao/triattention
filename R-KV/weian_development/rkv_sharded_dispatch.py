@@ -77,6 +77,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.set_defaults(sparse_normalize_scores=None)
     parser.add_argument(
+        "--use-rank-aggregation",
+        dest="use_rank_aggregation",
+        action="store_true",
+        help="Override runner arg: enable rank-based aggregation (min-pooling) instead of z-score + max-pooling.",
+    )
+    parser.add_argument(
+        "--no-use-rank-aggregation",
+        dest="use_rank_aggregation",
+        action="store_false",
+        help="Override runner arg: disable rank-based aggregation.",
+    )
+    parser.set_defaults(use_rank_aggregation=None)
+    parser.add_argument(
         "--sparse-use-similarity",
         dest="sparse_use_similarity",
         action="store_true",
@@ -455,6 +468,8 @@ def main() -> None:
         runner_args["output_dir"] = args.output_dir
     if args.sparse_normalize_scores is not None:
         runner_args["sparse_normalize_scores"] = args.sparse_normalize_scores
+    if args.use_rank_aggregation is not None:
+        runner_args["use_rank_aggregation"] = args.use_rank_aggregation
     if args.sparse_use_similarity is not None:
         runner_args["sparse_use_similarity"] = args.sparse_use_similarity
     if args.sparse_similarity_mix_lambda is not None:

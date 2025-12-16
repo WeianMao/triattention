@@ -58,6 +58,7 @@ def apply_speckv_generate_patch(
     head_limit: Optional[int],
     metadata_expectations: dict[str, object] | None = None,
     normalize_scores: bool = False,
+    use_rank_aggregation: bool = False,
     sparse_use_similarity: bool = False,
     sparse_similarity_mix_lambda: float = 0.1,
 ) -> None:
@@ -78,6 +79,7 @@ def apply_speckv_generate_patch(
         head_limit=head_limit,
         metadata_expectations=metadata_expectations,
         normalize_scores=normalize_scores,
+        use_rank_aggregation=use_rank_aggregation,
         sparse_use_similarity=sparse_use_similarity,
         sparse_similarity_mix_lambda=sparse_similarity_mix_lambda,
     )

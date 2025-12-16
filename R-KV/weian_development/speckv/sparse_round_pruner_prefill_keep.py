@@ -37,6 +37,7 @@ class SparsePruningConfig:
     head_limit: int | None = None
     metadata_expectations: Dict[str, object] | None = None
     normalize_scores: bool = False
+    use_rank_aggregation: bool = False  # If True, use ranking + min-pooling instead of z-score + max-pooling
     # Similarity Deduplication parameters (SpecKV + R-KV integration)
     sparse_use_similarity: bool = False
     sparse_similarity_mix_lambda: float = 0.1
@@ -132,6 +133,7 @@ class SparseRoundPruner:
         self.max_keys = config.max_keys
         self.score_aggregation = config.score_aggregation
         self.normalize_scores = bool(getattr(config, "normalize_scores", False))
+        self.use_rank_aggregation = bool(getattr(config, "use_rank_aggregation", False))
         # Similarity Deduplication parameters (SpecKV + R-KV integration)
         self.use_similarity = bool(getattr(config, "sparse_use_similarity", False))
         self.similarity_mix_lambda = float(getattr(config, "sparse_similarity_mix_lambda", 0.1))
@@ -312,11 +314,19 @@ class SparseRoundPruner:
             # Per-head combination: mix frequency and similarity scores at head level BEFORE aggregation
             # Higher similarity = more redundant = should be removed = lower final score
             per_head_final = per_head_scores * self.similarity_mix_lambda - similarity_scores_aligned * (1 - self.similarity_mix_lambda)
-            # Aggregate across heads using max (consistent with current score_aggregation strategy)
-            combined = per_head_final.max(dim=0).values
+            # Aggregate across heads: min for ranks (best=lowest), max for scores (best=highest)
+            if self.use_rank_aggregation:
+                combined = per_head_final.min(dim=0).values
+                combined = -combined  # Negate so topk(largest=True) selects lowest ranks
+            else:
+                combined = per_head_final.max(dim=0).values
         else:
             # Original behavior: frequency-only scoring with head aggregation
-            combined = per_head_scores.max(dim=0).values
+            if self.use_rank_aggregation:
+                combined = per_head_scores.min(dim=0).values
+                combined = -combined  # Negate so topk(largest=True) selects lowest ranks
+            else:
+                combined = per_head_scores.max(dim=0).values
 
         candidate_count = combined.shape[0]
         if candidate_count <= keep_count:
@@ -413,7 +423,14 @@ class SparseRoundPruner:
             per_head_scores.append(head_scores)
 
         head_matrix = torch.stack(per_head_scores, dim=0)
-        if self.normalize_scores and head_matrix.numel() > 0:
+        if self.use_rank_aggregation and head_matrix.numel() > 0:
+            # Convert scores to ranks: lower rank = more important (rank 0 = best)
+            # First argsort (descending=True) orders by score (highest first)
+            # Second argsort converts positions to ranks
+            ranks = torch.argsort(torch.argsort(head_matrix, dim=1, descending=True), dim=1)
+            head_matrix = ranks.float()
+        elif self.normalize_scores and head_matrix.numel() > 0:
+            # Existing z-score normalization
             mean = head_matrix.mean(dim=1, keepdim=True)
             std = head_matrix.std(dim=1, unbiased=False, keepdim=True).clamp_min(1e-6)
             head_matrix = (head_matrix - mean) / std
