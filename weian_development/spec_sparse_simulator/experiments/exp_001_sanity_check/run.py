@@ -167,7 +167,7 @@ def sanity_check_loss_exp_a(
     lambda_repel: float = 1.0,
 ):
     """
-    Experiment A: 双向交叉熵 + Linear Repel
+    Experiment A: 双向交叉熵 + Linear Repel (归一化版本)
 
     参考: docs/04_training_and_labels.md Section 5.3
 
@@ -186,11 +186,19 @@ def sanity_check_loss_exp_a(
     # 1. 拉近项：双向交叉熵
     r_matched = r[query_to_key]  # (num_queries, num_bins)
     log_r_matched = log_r[query_to_key]
-    attract = -(p * log_r_matched).sum() - (r_matched * log_p).sum()
+    # 每个 query 的 attract loss
+    attract_per_query = -(p * log_r_matched).sum(dim=1) - (r_matched * log_p).sum(dim=1)
+    # 归一化：除以 num_pos
+    num_pos_per_query = group_masks.float().sum(dim=1).clamp(min=1)
+    attract = (attract_per_query / num_pos_per_query).sum()
 
     # 2. 推远项：Linear (p · r for non-group)
     s = torch.mm(p, r.T)  # (num_queries, num_keys)
-    repel = (s * (~group_masks).float()).sum()
+    repel_matrix = s * (~group_masks).float()
+    # 归一化：除以 num_neg
+    num_neg_per_query = (~group_masks).float().sum(dim=1).clamp(min=1)
+    repel_per_query = repel_matrix.sum(dim=1) / num_neg_per_query
+    repel = repel_per_query.sum()
 
     total = attract + lambda_repel * repel
     return total, attract, repel
@@ -206,7 +214,7 @@ def sanity_check_loss_exp_b(
     lambda_repel: float = 1.0,
 ):
     """
-    Experiment B: 双向交叉熵 + Log Repel
+    Experiment B: 双向交叉熵 + Log Repel (归一化版本)
 
     参考: docs/04_training_and_labels.md Section 5.3
 
@@ -216,11 +224,19 @@ def sanity_check_loss_exp_b(
     # 1. 拉近项：双向交叉熵
     r_matched = r[query_to_key]
     log_r_matched = log_r[query_to_key]
-    attract = -(p * log_r_matched).sum() - (r_matched * log_p).sum()
+    # 每个 query 的 attract loss
+    attract_per_query = -(p * log_r_matched).sum(dim=1) - (r_matched * log_p).sum(dim=1)
+    # 归一化：除以 num_pos
+    num_pos_per_query = group_masks.float().sum(dim=1).clamp(min=1)
+    attract = (attract_per_query / num_pos_per_query).sum()
 
     # 2. 推远项：Log (p · log(r) for non-group)
     ce_matrix = torch.mm(p, log_r.T)  # (num_queries, num_keys)
-    repel = (ce_matrix * (~group_masks).float()).sum()
+    repel_matrix = ce_matrix * (~group_masks).float()
+    # 归一化：除以 num_neg
+    num_neg_per_query = (~group_masks).float().sum(dim=1).clamp(min=1)
+    repel_per_query = repel_matrix.sum(dim=1) / num_neg_per_query
+    repel = repel_per_query.sum()
 
     total = attract + lambda_repel * repel
     return total, attract, repel
@@ -232,16 +248,21 @@ def sanity_check_loss_baseline(
     log_p: torch.Tensor,
     log_r: torch.Tensor,
     query_to_key: torch.Tensor,
+    group_masks: torch.Tensor,
 ):
     """
-    Baseline: 仅双向交叉熵（无 repel 项）
+    Baseline: 仅双向交叉熵（无 repel 项，归一化版本）
 
     Returns:
         total_loss, attract_loss, repel_loss (repel_loss = 0)
     """
     r_matched = r[query_to_key]
     log_r_matched = log_r[query_to_key]
-    attract = -(p * log_r_matched).sum() - (r_matched * log_p).sum()
+    # 每个 query 的 attract loss
+    attract_per_query = -(p * log_r_matched).sum(dim=1) - (r_matched * log_p).sum(dim=1)
+    # 归一化：除以 num_pos
+    num_pos_per_query = group_masks.float().sum(dim=1).clamp(min=1)
+    attract = (attract_per_query / num_pos_per_query).sum()
     return attract, attract, torch.tensor(0.0)
 
 
@@ -411,7 +432,7 @@ def train_experiment(
 
         # 计算 loss
         if exp_name == "baseline":
-            total, attract, repel = loss_fn(p, r, log_p, log_r, query_to_key)
+            total, attract, repel = loss_fn(p, r, log_p, log_r, query_to_key, group_masks)
         else:
             total, attract, repel = loss_fn(
                 p, r, log_p, log_r, query_to_key, group_masks, lambda_repel
