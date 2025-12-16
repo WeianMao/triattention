@@ -176,9 +176,23 @@ log_P_norm = log_P - log_sum.unsqueeze(1)      # 归一化后的 log 概率
 
 ## 4. 待定事项
 
-- [ ] TopK 的 K 值如何选择
-- [ ] Sparsity 如何实现（让每个 bin 里的 key 越少越好）
-- [ ] 与 Module 1 (Key Pruning) 的配合方式
+### 4.1 TopK 的 K 值选择
+
+测试以下三种配置：
+- K = 50
+- K = 500
+- K = 1000
+
+### 4.2 Sparsity 实现
+
+由于 Key 在 key 维度上做 softmax，Sparsity 通过 TopK 选择自然实现：
+- 只对选中的 TopK keys 做 attention
+- 未进入 TopK 的 key 直接忽略
+- 不需要额外的 Sparsity Loss
+
+### 4.3 与 Module 1 (Key Pruning) 的配合方式
+
+待后续讨论。
 
 ---
 
@@ -188,3 +202,4 @@ log_P_norm = log_P - log_sum.unsqueeze(1)      # 归一化后的 log 概率
 |------|----------|
 | 2025-12-16 | 初始化文档；定义问题动机；提出 Softmax over Keys 方案；设计 Attraction Loss |
 | 2025-12-16 | 添加备选方案：双向交叉熵（需对 P[k,:] 归一化） |
+| 2025-12-16 | 完善待定事项：TopK 值选择（50/500/1000）、Sparsity 实现说明 |
