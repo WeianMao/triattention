@@ -73,7 +73,7 @@ def topk_attention(Q, history_keys, recent_keys, key_probs, neural_net_query, K)
 
     # 历史 Key: 选该 bin 的 TopK
     scores = key_probs[:, bin_q]
-    topk_indices = scores.topk(K).indices
+    topk_indices = scores.topk(K).indices #后续部署的时候需要把这个排序挪到round的开头做，提高效率
     sparse_keys = history_keys[topk_indices]
 
     # 当前 round 新 Key: Full Attention

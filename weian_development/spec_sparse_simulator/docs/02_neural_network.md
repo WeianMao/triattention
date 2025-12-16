@@ -45,6 +45,27 @@ kernel_output = von_mises(angle, mu_effective, kappa)
 
 ## 2. Kernel Encoding Layer
 
+### 变量定义
+
+**输入变量**（从 K/Q 向量提取）：
+
+| 变量 | 符号 | 定义 | Shape |
+|------|------|------|-------|
+| 输入向量 | `K` | post-RoPE 的 Key 或 Query 向量 | `(head_dim,)` |
+| 复数表示 | `K_complex` | 将 K 按相邻维度配对，视为复数 | `(num_freqs, 2)` |
+| 模长 | `magnitude_j` | 第 j 个频段的向量长度：`√(K[2j]² + K[2j+1]²)` | `(num_freqs,)` |
+| 角度 | `angle_j` | 第 j 个频段的相位角：`atan2(K[2j+1], K[2j])` | `(num_freqs,)` |
+| 参考角度 | `reference_angles` | 当前 round 的参考角度（见 Section 1） | `(num_freqs,)` |
+
+**可学习参数**：
+
+| 参数 | 符号 | 定义 | Shape | 初始化 |
+|------|------|------|-------|--------|
+| **mu** | `μ_ijm` | 第 i 个 bin、第 j 个频段、第 m 个 kernel 的中心角度 | `(num_bins, num_freqs, num_kernels)` | 3 个 kernel 间隔 2π/3 |
+| **kappa** | `κ_ijm` | 集中度参数（类似 1/σ²，越大越集中） | `(num_bins, num_freqs, num_kernels)` | ~1.0（覆盖范围大） |
+| **weight** | `w_ijm` | 各 kernel 的加权系数 | `(num_bins, num_freqs, num_kernels)` | ~0.1（小值） |
+| **bias** | `b_i` | 每个 bin 的偏置项 | `(num_bins,)` | 0 |
+
 ### 归一化 von Mises Kernel
 
 ```python
@@ -57,37 +78,41 @@ def normalized_von_mises(angle, mu, kappa):
 - 无需计算贝塞尔函数
 - 只需 `cos` 和 `exp`
 
-### 多 Kernel 结构
+### 计算公式
 
-每个频段使用 **3 个 von Mises Kernel**：
+每个频段使用 **3 个 von Mises Kernel**，输出公式：
 
 ```
-bin_i_freq_j = magnitude_j × Σ_m [weight_ijm × vM(angle_j, mu_ijm, kappa_ijm)]
+output_i = Σ_j [ magnitude_j × Σ_m (w_ijm × vM(angle_j, μ_ijm + ref_j, κ_ijm)) ] + b_i
 ```
 
-### 参数初始化
-
-```python
-# mu: 3 个 kernel 间隔 2π/3
-# kappa: 初始化 ~1.0（确保覆盖范围大，避免梯度消失）
-# weight: 小值初始化 ~0.1
-```
+其中 `vM(θ, μ, κ) = exp(κ × (cos(θ - μ) - 1))`
 
 ### 向量化实现
 
 ```python
 def kernel_encoding(K, mu, kappa, weight, bias, reference_angles):
     """
-    K: (head_dim,)
-    mu, kappa, weight: (num_bins, num_freqs, num_kernels)
+    Args:
+        K: (head_dim,) - 输入向量
+        mu: (num_bins, num_freqs, num_kernels) - 【可学习】kernel 中心
+        kappa: (num_bins, num_freqs, num_kernels) - 【可学习】集中度
+        weight: (num_bins, num_freqs, num_kernels) - 【可学习】加权系数
+        bias: (num_bins,) - 【可学习】偏置
+        reference_angles: (num_freqs,) - 参考角度（非学习，每 round 计算一次）
     """
-    K_complex = K.view(-1, 2)  # (num_freqs, 2)
-    magnitude = K_complex.norm(dim=1)
-    angle = atan2(K_complex[:, 1], K_complex[:, 0])
+    # 提取模长和角度
+    K_complex = K.view(-1, 2)                        # (num_freqs, 2)
+    magnitude = K_complex.norm(dim=1)                # (num_freqs,)
+    angle = atan2(K_complex[:, 1], K_complex[:, 0])  # (num_freqs,)
 
-    mu_effective = mu + reference_angles.view(1, -1, 1)
-    kernel = exp(kappa * (cos(angle.view(1, -1, 1) - mu_effective) - 1))
+    # 参考角度加到 mu 上（优化：只算一次）
+    mu_effective = mu + reference_angles.view(1, -1, 1)  # (num_bins, num_freqs, num_kernels)
 
+    # von Mises kernel
+    kernel = exp(kappa * (cos(angle.view(1, -1, 1) - mu_effective) - 1))  # (num_bins, num_freqs, num_kernels)
+
+    # 加权求和
     weighted = (kernel * weight).sum(dim=2) * magnitude  # (num_bins, num_freqs)
     return weighted.sum(dim=1) + bias  # (num_bins,)
 ```
