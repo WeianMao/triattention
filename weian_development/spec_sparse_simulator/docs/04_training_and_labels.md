@@ -401,11 +401,49 @@ def compute_loss_exp_b(p, log_p, r, log_r, query_to_key, group_masks, lambda_rep
 
 ### 2.4 待定
 
-- [ ] Experiment A vs B 的实验对比
-- [ ] λ (lambda_repel) 的取值
+- [x] Experiment A vs B 的实验对比 → **已完成**（见 Section 5.6）
+- [x] λ (lambda_repel) 的取值 → **推荐 λ=10~20**（见 Section 5.6）
 - [ ] Bin collapse 预防机制
-- [ ] 数值稳定性处理（使用 log_softmax）
+- [x] 数值稳定性处理（使用 log_softmax） → **已实现**
 - [ ] **负载均衡 Loss**：类似 MOE（Mixture of Experts）的 load balancing loss，防止 bin 分布过于不均匀（Sanity Check 实验完成后再考虑）
+
+### 2.5 Sanity Check 实验结论
+
+> **详细结果**：见 `experiments/exp_001_sanity_check/README.md`
+
+#### Loss 函数归一化（重要发现）
+
+对于大规模数据（6000×6000），**必须**对 Loss 进行 per-query 归一化：
+
+```python
+# 拉近项：除以正样本数
+attract_per_query = ... / num_pos_per_query
+
+# 推远项：除以负样本数
+repel_per_query = ... / num_neg_per_query
+```
+
+**原因**：Attract pairs (6000) vs Repel pairs (36M)，比例约 1:6000。未归一化时 Repel 项完全主导。
+
+#### Experiment A vs B 对比结论
+
+| 实验 | 可行性 | 问题 |
+|------|--------|------|
+| **Exp A (Linear Repel)** | ✅ 可行 | 无 |
+| **Exp B (Log Repel)** | ❌ 不可用 | Repel 项为负数，优化方向错误 |
+
+**Exp B 失败原因**：
+- `p · log(r)` 中 `log(r) < 0`，导致 repel 值为负数
+- 最小化负数 = 让其更负 = 更激进地推远
+- 增加 λ 会导致 Hit Rate 急剧下降（λ=20 时 Hit Rate=0%）
+
+#### 推荐参数
+
+| 参数 | 推荐值 | 说明 |
+|------|--------|------|
+| **Loss 函数** | Exp A (Linear Repel) | 唯一可行方案 |
+| **λ (lambda_repel)** | 10~20 | Keys/Query 可降至 37.66（理论下限 46.875） |
+| **归一化** | 必须 | Per-query 归一化 attract 和 repel 项 |
 
 ---
 
@@ -644,18 +682,18 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 
 ### 5.4 实验对比
 
-| 实验 | Loss | 预期结果 |
-|------|------|----------|
-| Exp A | 双向 CE + Linear Repel | 收敛，bin 分布较均匀 |
-| Exp B | 双向 CE + Log Repel | 收敛，可能有更强的分离 |
-| Baseline | 仅双向 CE（无 repel） | 可能 collapse 到同一 bin |
+| 实验 | Loss | 预期结果 | **实际结果** |
+|------|------|----------|--------------|
+| Exp A | 双向 CE + Linear Repel | 收敛，bin 分布较均匀 | ✅ 100% Hit Rate，Keys/Query=37.66 |
+| Exp B | 双向 CE + Log Repel | 收敛，可能有更强的分离 | ❌ Repel 为负数，λ 增加导致失败 |
+| Baseline | 仅双向 CE（无 repel） | 可能 collapse 到同一 bin | ✅ 100% Hit Rate，Keys/Query=47.95 |
 
 ### 5.5 观察指标
 
 #### 训练指标
-- [ ] Loss 是否收敛
-- [ ] L_attract 和 L_repel 的收敛曲线
-- [ ] λ (lambda_repel) 对结果的影响
+- [x] Loss 是否收敛 → **Exp A/Baseline 收敛，Exp B 不稳定**
+- [x] L_attract 和 L_repel 的收敛曲线 → **已观察**
+- [x] λ (lambda_repel) 对结果的影响 → **Exp A: λ=10~20 最优；Exp B: λ 增加导致失败**
 
 #### 核心评估指标（最重要）
 
@@ -670,9 +708,9 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 > **命中判定规则**：argmax 在历史 Key → 检查同 bin；argmax 在当前 round 新 Key → 直接命中（Full Attention）。
 
 #### 辅助指标
-- [ ] 最终的 bin 分布（是否均匀）
-- [ ] 空 bin 数量
-- [ ] Bin 利用率
+- [x] 最终的 bin 分布（是否均匀） → **128 bins 全部使用**
+- [x] 空 bin 数量 → **0**
+- [x] Bin 利用率 → **100%**
 
 #### Baseline 对比
 
@@ -682,9 +720,39 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 | Random Binning | ~0.78% | N/128 | ~99% |
 | 目标（Neural） | >99% | N/128 | ~99% |
 
+#### **实际实验结果** (6000×6000, 归一化版本)
+
+| 实验 | Hit Rate | Keys/Query | Comp. Red. | Bin Util. |
+|------|----------|------------|------------|-----------|
+| **Exp A (λ=10)** | **1.0000** | **37.68** | 99.37% | 100% |
+| **Exp A (λ=20)** | **1.0000** | **37.66** | 99.37% | 100% |
+| Exp B (λ=1) | 1.0000 | 48.04 | 99.20% | 100% |
+| Exp B (λ=20) | 0.0000 | 0.01 | - | - |
+| Baseline | 1.0000 | 47.95 | 99.20% | 100% |
+
 ### 5.6 状态
 
-**状态**: 待实验
+**状态**: ✅ 已完成（2025-12-15）
+
+#### 主要结论
+
+1. **Linear Repel (Exp A) 是可行的 Loss 设计**
+   - 100% Hit Rate
+   - λ=10~20 时 Keys/Query 可降至 37.66（低于理论下限 46.875）
+   - 推荐用于后续实验
+
+2. **Log Repel (Exp B) 不可用**
+   - `log(r) < 0` 导致 repel 项为负数
+   - 最小化负数 = 更激进推远 = 优化方向错误
+   - 若需使用，应改为 `-Σ p·log(r)`（取负号）
+
+3. **归一化是必要的**
+   - 未归一化时 Exp A/B 完全失败（Hit Rate=0%）
+   - 归一化后 Exp A 达到 100% Hit Rate
+
+4. **Keys/Query 理论分析**
+   - 理论下限 = num_keys / num_bins = 6000/128 ≈ 46.875
+   - Exp A (λ=20) 实现 37.66，**优于理论下限**（因为不是所有 key 都被使用）
 
 ---
 
@@ -695,9 +763,9 @@ def sanity_check_loss_exp_b(p, r, log_p, log_r, query_to_key, group_masks, lambd
 （暂无待定项）
 
 ### Module 2
-- [ ] Experiment A vs B 对比结果
+- [x] Experiment A vs B 对比结果 → **Exp A 可行，Exp B 不可用**（见 Section 2.5）
 - [ ] Bin collapse 预防机制
-- [ ] 数值稳定性处理
+- [x] 数值稳定性处理 → **使用 log_softmax**
 
 ### 通用（POC 后）
 - [ ] 跨 trace 泛化性验证
@@ -796,3 +864,4 @@ def augment_trace_with_offset(Q, K, round_window=128):
 | 2025-12-15 | 添加 Module 1 训练时排除末尾 1k Key（避免标签噪声） |
 | 2025-12-15 | 修复 `build_groups` 索引 bug：`:q_idx` 改为 `:`；修正排除末尾 Key 逻辑：基于位置而非 seq_len；所有 Loss 函数使用 `log_softmax` 提高数值稳定性 |
 | 2025-12-15 | 添加 Argmax Hit Rate 命中判定规则：argmax 在当前 round 新 Key 直接算命中 |
+| 2025-12-15 | **Sanity Check 实验完成**：添加 Section 2.5 实验结论；更新 Section 5.4~5.6 实验结果；Linear Repel (Exp A) 可行，推荐 λ=10~20；Log Repel (Exp B) 不可用；归一化是必要的 |
