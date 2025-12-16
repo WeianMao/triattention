@@ -106,7 +106,9 @@ def topk_attention(Q, all_keys, key_probs, query_net, K):
 - `P ∈ R^{K×B}`: Key 的 bin membership（softmax over keys for each bin）
 - `k(q)`: Query q 的 argmax Key 索引
 
-### 3.2 Attraction Loss（拉近同组 Q-K）
+### 3.2 Attraction Loss（拉近同组 Q-K）✅ 推荐方案
+
+> **实验结论 (exp_002)**：Attraction Loss 在所有 K 值（50/500/1000）下均达到 100% TopK Hit Rate，是目前的首选方案。
 
 目标：让 Query 预测的 bin 对其 argmax Key 有高概率
 
@@ -144,7 +146,9 @@ def attraction_loss_vectorized(p_q, P, query_to_key):
 
 上述公式在概率空间计算会有精度问题（小概率相乘后求和再取 log）。实现时应在 log 空间计算，使用 `log_softmax` + `torch.logsumexp`。
 
-### 3.4 备选方案：双向交叉熵
+### 3.4 备选方案：双向交叉熵 ⚠️ 不推荐
+
+> **实验结论 (exp_002)**：双向交叉熵在 K=50 时仅达到 67.78% TopK Hit Rate，虽然在 K≥500 时可达 100%，但明显不如 Attraction Loss 稳定，**不推荐使用**。
 
 参考 04_training_and_labels.md 中的双向交叉熵设计，可以用另一种 loss：
 
@@ -203,3 +207,4 @@ log_P_norm = log_P - log_sum.unsqueeze(1)      # 归一化后的 log 概率
 | 2025-12-16 | 初始化文档；定义问题动机；提出 Softmax over Keys 方案；设计 Attraction Loss |
 | 2025-12-16 | 添加备选方案：双向交叉熵（需对 P[k,:] 归一化） |
 | 2025-12-16 | 完善待定事项：TopK 值选择（50/500/1000）、Sparsity 实现说明 |
+| 2025-12-16 | **exp_002 实验结论**：Attraction Loss 全 K 值 100% 命中率，双向交叉熵 K=50 时仅 67.78%，确定 Attraction Loss 为推荐方案 |
