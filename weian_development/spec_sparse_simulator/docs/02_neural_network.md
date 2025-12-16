@@ -33,11 +33,12 @@ def get_reference_angles(round_start, num_freqs=64, round_window=128):
 
 ### 关键优化
 
-**参考角度不在输入端处理，而在 Kernel 参数端处理**：
+**参考角度不在输入端处理，而在 Kernel 参数端处理**。Round 开头预计算 `mu_effective`，该 round 内所有 K/Q 共用：
 
 ```python
-# 优化方法：round 开头将 reference_angle 加到 mu
-mu_effective = mu + reference_angles  # 只计算一次
+# Round 开头：预计算 mu_effective（只算一次）
+mu_effective = mu + reference_angles
+# 该 round 内每个 K/Q：
 kernel_output = von_mises(angle, mu_effective, kappa)
 ```
 
@@ -62,7 +63,7 @@ kernel_output = von_mises(angle, mu_effective, kappa)
 | 参数 | 符号 | 定义 | Shape | 初始化 |
 |------|------|------|-------|--------|
 | **mu** | `μ_ijm` | 第 i 个 bin、第 j 个频段、第 m 个 kernel 的中心角度 | `(num_bins, num_freqs, num_kernels)` | 3 个 kernel 间隔 2π/3 |
-| **kappa** | `κ_ijm` | 集中度参数（类似 1/σ²，越大越集中） | `(num_bins, num_freqs, num_kernels)` | ~1.0（覆盖范围大） |
+| **kappa** | `κ_ijm` | 集中度参数（类似 1/σ²，越大越集中） | `(num_bins, num_freqs, num_kernels)` | ~1.0（需足够小，使 kernel 覆盖接近 2π，避免梯度消失） |
 | **weight** | `w_ijm` | 各 kernel 的加权系数 | `(num_bins, num_freqs, num_kernels)` | ~0.1（小值） |
 | **bias** | `b_i` | 每个 bin 的偏置项 | `(num_bins,)` | 0 |
 
@@ -127,7 +128,7 @@ def kernel_encoding(K, mu, kappa, weight, bias, reference_angles):
 
 ### 实现
 
-在 **log 尺度**上设置锚点（1k, 10k, 100k），线性插值：
+在 **log 尺度**上设置锚点（1k, 10k, 100k），线性插值。**使用绝对位置**（Key 在序列中的位置 0, 1, 2, ...）
 
 ```python
 class PositionScalingLayer(nn.Module):
@@ -144,7 +145,7 @@ class PositionScalingLayer(nn.Module):
     def _interpolate(self, positions):
         anchor_weights = F.softplus(self.anchor_weights_raw)  # 保证非负
         log_pos = torch.log10(positions.clamp(min=1).float())
-        # 在 log 尺度上线性插值...
+        # 在 log 尺度上线性插值，边界外取端点值（<1k 取 w₀，>100k 取 w₂）
         return interpolated_weights
 ```
 
@@ -183,6 +184,8 @@ class Module2QueryNetwork(nn.Module):
         return softmax(logits, dim=-1)        # softmax over bins（选择哪个 bin）
 ```
 
+**注**：Key 网络和 Query 网络架构相同，但参数独立不共享
+
 ---
 
 ## 5. 参数量分析
@@ -204,5 +207,9 @@ class Module2QueryNetwork(nn.Module):
 ## 6. 待实验
 
 - [ ] Kappa 正数约束：无约束 vs Softplus
-- [ ] K/Q 网络参数共享（共享 mu/kappa，独立 weight/bias）
-- [ ] RoPE 基数适配（当前假设 base=10000）
+
+---
+
+## 7. 注意事项
+
+**RoPE 基数假设**：当前固定 `base=10000`（标准 RoPE）。若目标模型使用不同配置（如 RoPE Scaling、不同 base），需相应调整

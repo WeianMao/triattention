@@ -12,6 +12,16 @@
 
 ## Module 1: Key Pruning
 
+### 标签定义
+
+```
+label(K_i) = 0  若存在 Q_j (j >= round_start) 使得 argmax Attention(Q_j, K) == i
+label(K_i) = 1  否则
+```
+
+- 使用 **argmax** 判定：只要有一个未来 Q attend 到该 K，标签为 0（保留）
+- 标签为 1 表示该 Key 可以被 drop
+
 ### Loss Function
 
 ```python
@@ -29,31 +39,24 @@ loss = F.binary_cross_entropy(drop_probs[valid_mask], labels[valid_mask])
 
 ### Ground Truth
 
-若 Q_i 的 argmax attention 是 K_j，则 Q_i 和 K_j 需要匹配。
+**Group 定义**：argmax 相同的 Query 与对应的 Key 构成一个 Group（一个 K 可对应多个 Q）
 
 ```python
-def build_query_to_key(attention_matrix):
-    # attention_matrix: (num_queries, num_history_keys)
-    return attention_matrix.argmax(dim=1)  # (num_queries,)
+query_to_key = attention_matrix.argmax(dim=1)  # (num_queries,)
 ```
 
 ### Loss Function：Attraction Loss
 
-**目标**：Query 选的 bin 恰好选中其 argmax Key
+**目标**：Query 选的 bin 能选中其 argmax Key
 
 ```python
 def attraction_loss(p_q, P, query_to_key):
-    """
-    p_q: (num_queries, num_bins) - query bin 分布 (softmax over bins)
-    P: (num_keys, num_bins) - key 分数 (softmax over keys for each bin)
-    query_to_key: (num_queries,) - 每个 query 的 argmax key 索引
-    """
     P_matched = P[query_to_key]  # (num_queries, num_bins)
     match_prob = (p_q * P_matched).sum(dim=1)  # (num_queries,)
     return -torch.log(match_prob + 1e-8).mean()
 ```
 
-**直觉**：Query 按 bin 分布采样 bin，bin 按 key 分布采样 key，采样到正确 key 的概率。
+**数值稳定性**：实现时应在 log 空间计算，使用 `log_softmax` + `logsumexp`
 
 ### 实验结论
 
@@ -104,6 +107,12 @@ scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs)
 # 只有所有 Q head 都认为 drop，才最终 drop
 final_drop = drop_decisions.all(dim=0)
 ```
+
+### GQA 下分 Bin 策略
+
+一个 KV head 对应多个 Q head 时：
+- **Key 分 bin 网络**：每个 KV head 一个，被对应的多个 Q head 共享
+- **Query 分 bin 网络**：每个 Q head 独立
 
 ### 数据增强
 

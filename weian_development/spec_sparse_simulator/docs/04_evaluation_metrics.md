@@ -16,17 +16,19 @@
 
 ### Keys per Query
 
-**定义**：每个 Query 参与 attention 的平均 Key 数量
+**定义**：每个 Query 参与 attention 的平均 Key 数量（**含 Full Attention 部分**）
 
 | Module 1 | Module 2 |
 |----------|----------|
-| 保留的 Key 数量 | TopK (固定值) |
+| 保留的 Key 数量 | TopK + num_recent_keys |
 
 ### Computation Reduction
 
 ```
 Computation Reduction = 1 - (Keys per Query / Total Keys)
 ```
+
+**注**：计算量需包含 Full Attention 部分（当前 round 新 Key）
 
 ---
 

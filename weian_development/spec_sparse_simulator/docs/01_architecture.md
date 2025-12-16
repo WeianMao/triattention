@@ -8,6 +8,8 @@
 
 ### 算法流程
 
+**Hard Pruning**：被 drop 的 Key 直接从 KV Cache 中物理删除
+
 ```python
 # 每个 round 开头执行
 def key_pruning(kv_cache, neural_net, threshold):
@@ -27,13 +29,7 @@ K (post-RoPE) → Kernel Encoding (128-dim) → MLP (128→h→1) → Position S
 
 ### 标签定义
 
-```
-label(K_i) = 0  若存在 Q_j (j >= round_start) 使得 argmax Attention(Q_j, K) == i
-label(K_i) = 1  否则
-```
-
-- 使用 **argmax** 判定，只要有一个未来 Q attend 到该 K，标签为 0
-- **训练时排除末尾 1k Key**：避免标签噪声
+详见 [03_loss_and_training.md](./03_loss_and_training.md#标签定义)
 
 ---
 
@@ -77,7 +73,7 @@ def topk_attention(Q, history_keys, recent_keys, key_probs, neural_net_query, K)
     sparse_keys = history_keys[topk_indices]
 
     # 当前 round 新 Key: Full Attention
-    all_keys = concat([sparse_keys, recent_keys])
+    all_keys = concat([sparse_keys, recent_keys])  # recent_keys 是本轮解码的 Key，做 Full Attention
     return attention(Q, all_keys)
 ```
 
@@ -95,11 +91,17 @@ Q (post-RoPE) → Kernel Encoding (128-dim) → Softmax → bin 概率
 ### Round 内新 Key 处理
 
 - **历史 Key**（< round_start）：TopK Sparse Attention
-- **当前 round 新 Key**（>= round_start）：Full Attention
+- **当前 round 新 Key**（>= round_start）：Full Attention（不做 binning）
+
+**设计理由**：避免 round 内频繁更新 bin_index；近期 Key 通常更重要；每 round 最多 128 个新 Key，开销可控
+
+### 空 Bin 处理
+
+Query routing 时将空 bin 的 logits 设为 `-inf`，确保 Query 不会被分配到空 bin
 
 ### 首个 Round 处理
 
-当 `round_start == 0` 时，没有历史 Key，直接走 Full Attention。
+当 `round_start == 0` 时，没有历史 Key，**短路**直接走 Full Attention，跳过 Sparse 逻辑
 
 ---
 
