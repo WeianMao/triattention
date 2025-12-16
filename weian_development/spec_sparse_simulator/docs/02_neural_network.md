@@ -123,7 +123,7 @@ def kernel_encoding(K, mu, kappa, weight, bias, reference_angles):
 
 ### 设计动机
 
-不同位置的 Key 有不同的 drop 倾向基线：早期 Key 更易被 drop。
+解码到后期时，KV Cache 中积累了大量 Key，**冗余的可能性更大**，因此需要更激进地 drop。Position Scaling 让模型学习到：随着序列变长，drop 概率应适当提高。
 
 ### 实现
 
