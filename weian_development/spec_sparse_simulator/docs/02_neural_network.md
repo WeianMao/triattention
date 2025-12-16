@@ -165,13 +165,22 @@ class Module1Network(nn.Module):
         return sigmoid(scaled)                    # drop 概率
 ```
 
-### Module 2: Binning
+### Module 2: Key Scoring（Key 网络）
 
 ```python
-class Module2Network(nn.Module):
-    def forward(self, x, reference_angles):
-        logits = kernel_encoding(x, ...)  # (num_tokens, 128)
-        return softmax(logits, dim=-1)    # bin 概率
+class Module2KeyNetwork(nn.Module):
+    def forward(self, K, reference_angles):
+        logits = kernel_encoding(K, ...)      # (num_keys, num_bins)
+        return softmax(logits, dim=0)         # softmax over keys（每列和为1）
+```
+
+### Module 2: Query Routing（Query 网络）
+
+```python
+class Module2QueryNetwork(nn.Module):
+    def forward(self, Q, reference_angles):
+        logits = kernel_encoding(Q, ...)      # (1, num_bins) or (num_bins,)
+        return softmax(logits, dim=-1)        # softmax over bins（选择哪个 bin）
 ```
 
 ---
