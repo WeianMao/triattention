@@ -1,0 +1,85 @@
+# Experiment 003: Module 1 Neural Network Key Pruning Configuration
+
+experiment:
+  name: "exp_003_module1_neural_pruning"
+  description: "Train neural network to predict Key importance scores for sparse attention"
+  seed: 42
+  mode: "train_and_evaluate"  # Options: train, evaluate, train_and_evaluate
+
+# Model architecture
+model:
+  # Kernel Encoding Layer
+  num_bins: 64                # Number of frequency bins
+  num_kernels: 3              # Number of von Mises kernels per bin
+  kernel_encoding_dim: 128    # Output dimension: num_bins * num_kernels / 2 (due to complex pairs)
+
+  # MLP Layer
+  mlp_hidden_dim: 64          # Hidden layer dimension (TBD - may need tuning)
+  mlp_output_dim: 1           # Single scalar output (drop probability)
+
+  # Position Scaling Layer
+  position_anchors: [1000, 10000, 100000]  # Log-scale anchor points (1k, 10k, 100k)
+
+  # Output activation
+  output_activation: "sigmoid"  # Sigmoid to get drop probability [0, 1]
+
+# Training configuration
+training:
+  epochs: 100                 # Train until overfit (adjust as needed)
+  batch_size: 32              # Batch size for training (TBD)
+  learning_rate: 0.001        # Adam learning rate
+  optimizer: "adam"           # Optimizer type
+  scheduler: null             # Options: cosine, step, null
+
+  # Loss function
+  loss: "bce"                 # Binary Cross Entropy
+
+  # Label generation
+  exclude_tail_keys: 1000     # Exclude last 1k keys from training labels
+  label_type: "argmax"        # Use argmax-based drop labels
+
+  # Checkpointing
+  save_every: 10              # Save checkpoint every N epochs
+  validate_every: 1           # Validate every N epochs
+
+# Data configuration
+data:
+  trace_file: "data/qk.pt"    # Path to trace file (symlink or actual file)
+  head_sample_file: "../../hybrid_sample_heads_lowret_top10.json"  # Default head indices
+  round_window: 128           # Round window size (from reference implementation)
+
+# Evaluation configuration
+evaluation:
+  metrics:
+    - "argmax_hit_rate"       # Primary metric: >99% target
+    - "keys_per_query"        # Lower is better
+    - "computation_reduction" # Higher is better
+    - "retention_rate"        # Secondary metric
+    - "false_negative_rate"   # Secondary metric
+
+  # Thresholding strategy
+  threshold_mode: "fixed"     # Options: fixed, adaptive, learned (TBD)
+  threshold_value: 0.5        # For fixed mode
+
+# Output configuration
+output:
+  base_dir: "output"
+  logs_dir: "output/logs"
+  checkpoints_dir: "output/checkpoints"
+  results_dir: "output/results"
+  figures_dir: "output/figures"
+
+  # Logging
+  log_level: "INFO"
+  log_to_file: true
+  log_to_console: true
+
+  # Visualization
+  plot_loss_curve: true
+  plot_metrics: true
+  save_figures: true
+
+# Reference implementation
+reference:
+  script: "../../attention_pruning_case_study_hybrid_rounds_xtrace.py"
+  inference_method: "compute_pooled_attention"  # Reuse reference implementation's inference
