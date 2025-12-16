@@ -282,6 +282,61 @@ touch experiments/${exp_name}/config.yaml
 
 ---
 
+## Git 版本控制规范
+
+### 1. 只 commit 代码文件
+
+**必须 commit**:
+- `*.py` - Python 脚本
+- `*.yaml`, `*.json` - 配置文件（小型）
+- `README.md` - 文档
+- 其他小型文本文件
+
+**禁止 commit**:
+- `output/` 目录下的所有文件（实验结果、日志、图表、checkpoints）
+- 大型数据文件（`.pt`, `.pth`, `.pkl` 超过 1MB）
+- 临时文件、缓存文件（`__pycache__/`, `*.pyc`）
+
+### 2. 推荐的 .gitignore 配置
+
+在实验目录或项目根目录添加：
+
+```gitignore
+# 实验输出（禁止 commit）
+experiments/*/output/
+**/output/
+
+# 大型数据文件
+*.pt
+*.pth
+*.pkl
+*.npy
+*.npz
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 临时文件
+*.tmp
+*.log
+```
+
+### 3. Commit 原则
+
+| 文件类型 | 是否 commit | 原因 |
+|----------|-------------|------|
+| 实验脚本 (`run.py`) | ✓ | 代码需要版本控制 |
+| 配置文件 (`config.yaml`) | ✓ | 记录实验配置 |
+| README.md | ✓ | 实验文档 |
+| 结果 JSON (`output/results/*.json`) | ✗ | 实验结果可重复生成 |
+| 图表 (`output/figures/*.png`) | ✗ | 可视化可重复生成 |
+| 模型文件 (`*.pt`) | ✗ | 文件过大 |
+| 日志文件 (`*.log`) | ✗ | 运行日志不需要版本控制 |
+
+---
+
 ## Checklist
 
 开始新实验前，确认以下事项：
@@ -292,6 +347,7 @@ touch experiments/${exp_name}/config.yaml
 - [ ] 创建了 `README.md`
 - [ ] 所有脚本都在实验文件夹内
 - [ ] 输出路径都指向 `output/` 目录
+- [ ] **确认 `output/` 目录不会被 commit**
 
 ---
 
@@ -301,3 +357,4 @@ touch experiments/${exp_name}/config.yaml
 |------|----------|
 | 2025-12-15 | 初始化文档，定义实验目录结构和文件组织规范 |
 | 2025-12-15 | 添加默认配置：指定默认 head 索引文件、参考实现脚本、修改原则、不确定情况处理规范 |
+| 2025-12-15 | 添加 Git 版本控制规范：禁止 commit 大文件和实验结果文件 |
