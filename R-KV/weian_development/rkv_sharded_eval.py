@@ -300,6 +300,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Mix lambda for similarity scoring: final = freq * lambda - sim * (1-lambda). Needs search: 0.1, 0.3, 0.5, 0.7, 0.9.",
     )
     parser.add_argument(
+        "--use_rank_similarity_combination",
+        type=str2bool,
+        default=False,
+        help="Enable rank+similarity combination with normalized inverted rank direction.",
+    )
+    parser.add_argument(
         "--sparse_seed",
         type=int,
         default=0,
@@ -401,6 +407,7 @@ def main(args: argparse.Namespace) -> None:
             "use_rank_aggregation": args.use_rank_aggregation,
             "sparse_use_similarity": args.sparse_use_similarity,
             "sparse_similarity_mix_lambda": args.sparse_similarity_mix_lambda,
+            "use_rank_similarity_combination": args.use_rank_similarity_combination,
         }
 
     method_config = {"budget": args.kv_budget, "window_size": args.window_size}
@@ -514,6 +521,7 @@ def main(args: argparse.Namespace) -> None:
             use_rank_aggregation=args.use_rank_aggregation,
             sparse_use_similarity=args.sparse_use_similarity,
             sparse_similarity_mix_lambda=args.sparse_similarity_mix_lambda,
+            use_rank_similarity_combination=args.use_rank_similarity_combination,
         )
 
     for run_id in run_ids:

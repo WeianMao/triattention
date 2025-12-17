@@ -41,6 +41,8 @@ class SparsePruningConfig:
     # Similarity Deduplication parameters (SpecKV + R-KV integration)
     sparse_use_similarity: bool = False
     sparse_similarity_mix_lambda: float = 0.1
+    # Rank + Similarity combination: normalize and invert rank direction for proper combination
+    use_rank_similarity_combination: bool = False
 
 
 class SparseRoundPruner:
@@ -137,6 +139,8 @@ class SparseRoundPruner:
         # Similarity Deduplication parameters (SpecKV + R-KV integration)
         self.use_similarity = bool(getattr(config, "sparse_use_similarity", False))
         self.similarity_mix_lambda = float(getattr(config, "sparse_similarity_mix_lambda", 0.1))
+        # Rank + Similarity combination mode
+        self.use_rank_similarity_combination = bool(getattr(config, "use_rank_similarity_combination", False))
         self.generator: torch.Generator | None = None
         self.prefix_length: int = 0
         if config.seed is not None:
@@ -313,13 +317,26 @@ class SparseRoundPruner:
 
             # Per-head combination: mix frequency and similarity scores at head level BEFORE aggregation
             # Higher similarity = more redundant = should be removed = lower final score
-            per_head_final = per_head_scores * self.similarity_mix_lambda - similarity_scores_aligned * (1 - self.similarity_mix_lambda)
-            # Aggregate across heads: min for ranks (best=lowest), max for scores (best=highest)
-            if self.use_rank_aggregation:
-                combined = per_head_final.min(dim=0).values
-                combined = -combined  # Negate so topk(largest=True) selects lowest ranks
-            else:
+            if self.use_rank_similarity_combination and self.use_rank_aggregation:
+                # Rank + Similarity combination: normalize and invert rank direction
+                # Rank values are [0, N-1] where 0 = best. Convert to [0, 1] with 1 = best.
+                max_rank = float(per_head_scores.shape[1] - 1)
+                if max_rank > 0:
+                    normalized_inverted_rank = (max_rank - per_head_scores) / max_rank
+                else:
+                    normalized_inverted_rank = torch.ones_like(per_head_scores)
+                # Now normalized_inverted_rank: 1 = best (was rank 0), 0 = worst (was rank N-1)
+                per_head_final = normalized_inverted_rank * self.similarity_mix_lambda - similarity_scores_aligned * (1 - self.similarity_mix_lambda)
+                # Use max-pooling since higher is now better after inversion
                 combined = per_head_final.max(dim=0).values
+            else:
+                per_head_final = per_head_scores * self.similarity_mix_lambda - similarity_scores_aligned * (1 - self.similarity_mix_lambda)
+                # Aggregate across heads: min for ranks (best=lowest), max for scores (best=highest)
+                if self.use_rank_aggregation:
+                    combined = per_head_final.min(dim=0).values
+                    combined = -combined  # Negate so topk(largest=True) selects lowest ranks
+                else:
+                    combined = per_head_final.max(dim=0).values
         else:
             # Original behavior: frequency-only scoring with head aggregation
             if self.use_rank_aggregation:

@@ -108,6 +108,19 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override runner arg: frequency score weight for similarity scoring (e.g., 0.1, 0.3, 0.5, 0.7, 0.9).",
     )
+    parser.add_argument(
+        "--use-rank-similarity-combination",
+        dest="use_rank_similarity_combination",
+        action="store_true",
+        help="Override runner arg: enable rank+similarity combination with normalized inverted rank.",
+    )
+    parser.add_argument(
+        "--no-use-rank-similarity-combination",
+        dest="use_rank_similarity_combination",
+        action="store_false",
+        help="Override runner arg: disable rank+similarity combination.",
+    )
+    parser.set_defaults(use_rank_similarity_combination=None)
     return parser.parse_args()
 
 
@@ -474,6 +487,8 @@ def main() -> None:
         runner_args["sparse_use_similarity"] = args.sparse_use_similarity
     if args.sparse_similarity_mix_lambda is not None:
         runner_args["sparse_similarity_mix_lambda"] = args.sparse_similarity_mix_lambda
+    if args.use_rank_similarity_combination is not None:
+        runner_args["use_rank_similarity_combination"] = args.use_rank_similarity_combination
     base_env = prepare_environment(experiment.get("env", {}))
     base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 
