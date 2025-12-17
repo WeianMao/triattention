@@ -155,6 +155,100 @@ def evaluate_model_at_threshold(model, trace_data, config, threshold, device):
     }
 
 
+def evaluate_model_with_fixed_k(model, trace_data, config, fixed_k, device, logger=None):
+    """
+    Evaluate model with fixed number of retained keys per query.
+
+    Instead of using threshold-based pruning, this function:
+    - For each round, computes drop probabilities for all historical keys
+    - Retains the top-K keys with LOWEST drop probability (most important)
+    - Always retains current round keys (same as threshold mode)
+
+    Args:
+        model: Module1KeyPruningNetwork instance
+        trace_data: Dict with Q, K, attention, seq_len
+        config: Configuration dict
+        fixed_k: Fixed number of keys to retain per query (excluding current round)
+        device: torch.device
+        logger: Logger instance
+
+    Returns:
+        dict with hit_rate, keys_per_query, fixed_k
+    """
+    if logger:
+        logger.info(f"Evaluating with fixed K={fixed_k} keys per query...")
+
+    model.eval()
+
+    K = trace_data['K'].to(device)
+    attention = trace_data['attention'].to(device)
+    seq_len = trace_data['seq_len']
+    round_window = config['data']['round_window']
+
+    # Create prune mask
+    prune_mask = torch.zeros((seq_len, seq_len), dtype=torch.bool, device=device)
+
+    with torch.no_grad():
+        for round_start in range(0, seq_len, round_window):
+            round_end = min(round_start + round_window, seq_len)
+
+            if round_start == 0:
+                # No historical keys yet - retain all within causal mask
+                for q_idx in range(round_end):
+                    prune_mask[q_idx, :q_idx+1] = True
+                continue
+
+            # Get historical keys
+            keys = K[:round_start]
+            key_positions = torch.arange(round_start, device=device)
+
+            # Compute reference angles
+            reference_angles = model.kernel_layer._compute_reference_angles(
+                round_start,
+                round_window=round_window
+            )
+
+            # Predict drop probabilities
+            drop_probs = model(keys, key_positions, reference_angles).squeeze()
+
+            # Fixed-K selection: keep top-K keys with LOWEST drop probability
+            num_historical = round_start
+            k_to_keep = min(fixed_k, num_historical)
+
+            if k_to_keep < num_historical:
+                # Get indices of top-K keys with lowest drop probability
+                _, topk_indices = torch.topk(drop_probs, k_to_keep, largest=False)
+                retain_mask = torch.zeros(num_historical, dtype=torch.bool, device=device)
+                retain_mask[topk_indices] = True
+            else:
+                # Keep all historical keys if fixed_k >= num_historical
+                retain_mask = torch.ones(num_historical, dtype=torch.bool, device=device)
+
+            # Update prune mask for queries in this round
+            for q_idx in range(round_start, round_end):
+                # Historical keys: apply fixed-K retention mask
+                prune_mask[q_idx, :round_start] = retain_mask
+
+                # Current round keys (round_start to q_idx): ALWAYS retain
+                prune_mask[q_idx, round_start:q_idx+1] = True
+
+    # Compute metrics
+    hit_rate = compute_argmax_hit_rate_from_prune_mask(prune_mask, attention)
+    keys_per_query = prune_mask.sum(dim=1).float().mean().item()
+
+    if logger:
+        logger.info(f"Fixed-K evaluation results:")
+        logger.info(f"  Fixed K: {fixed_k}")
+        logger.info(f"  Hit rate: {hit_rate*100:.2f}%")
+        logger.info(f"  Actual keys per query: {keys_per_query:.2f}")
+
+    return {
+        'hit_rate': hit_rate,
+        'keys_per_query': keys_per_query,
+        'fixed_k': fixed_k
+    }
+
+
 def auto_threshold_search(model, trace_data, config, target_hit_rate=0.995,
                           precision=0.001, logger=None):
     """
@@ -247,6 +341,7 @@ def run_pruning_experiment(
     experiment_name=None,
     checkpoint_path=None,
     kappa_init=None,
+    fixed_keys=None,
     logger=None
 ):
     """
@@ -260,6 +355,7 @@ def run_pruning_experiment(
         experiment_name: Name for experiment output (default: auto-generated)
         checkpoint_path: Path to existing checkpoint (skip training if provided)
         kappa_init: Initial value for kappa (for num_kernels=1 experiments)
+        fixed_keys: If set, use fixed-K evaluation instead of threshold search (default: None)
         logger: Logger instance
 
     Returns:
@@ -285,7 +381,10 @@ def run_pruning_experiment(
     # Generate experiment name if not provided
     if experiment_name is None:
         mlp_type = 'mlp' if use_mlp else 'avgpool'
-        experiment_name = f'k{num_kernels}_h{mlp_hidden_dim}_{mlp_type}'
+        if fixed_keys is not None:
+            experiment_name = f'k{num_kernels}_h{mlp_hidden_dim}_{mlp_type}_fixedK{fixed_keys}'
+        else:
+            experiment_name = f'k{num_kernels}_h{mlp_hidden_dim}_{mlp_type}'
 
     logger.info("=" * 70)
     logger.info(f"EXPERIMENT: {experiment_name}")
@@ -294,6 +393,10 @@ def run_pruning_experiment(
     logger.info(f"  num_kernels: {num_kernels}")
     logger.info(f"  mlp_hidden_dim: {mlp_hidden_dim}")
     logger.info(f"  use_mlp: {use_mlp}")
+    if fixed_keys is not None:
+        logger.info(f"  fixed_keys: {fixed_keys} (fixed-K mode)")
+    else:
+        logger.info(f"  mode: auto-threshold search")
     logger.info("=" * 70)
 
     # Setup device
@@ -359,52 +462,103 @@ def run_pruning_experiment(
         # Train model
         final_loss = train_model(config, trace_data, model, device, logger)
 
-    # Run auto threshold search
-    threshold_results = auto_threshold_search(
-        model,
-        trace_data,
-        config,
-        target_hit_rate=0.995,
-        precision=0.001,
-        logger=logger
-    )
+    # Run evaluation based on mode
+    if fixed_keys is not None:
+        # Fixed-K evaluation mode
+        eval_results = evaluate_model_with_fixed_k(
+            model,
+            trace_data,
+            config,
+            fixed_k=fixed_keys,
+            device=device,
+            logger=logger
+        )
 
-    # Compile results
-    results = {
-        'experiment_name': experiment_name,
-        'config': {
-            'num_kernels': num_kernels,
-            'mlp_hidden_dim': mlp_hidden_dim if use_mlp else 1,
-            'use_mlp': use_mlp,
-        },
-        'metrics': {
-            'param_count': total_params,
-            'final_loss': final_loss,
-            'optimal_threshold': threshold_results['optimal_threshold'],
-            'hit_rate': threshold_results['achieved_hit_rate'],
-            'keys_per_query': threshold_results['keys_per_query'],
+        # Compile results for fixed-K mode
+        results = {
+            'experiment_name': experiment_name,
+            'config': {
+                'num_kernels': num_kernels,
+                'mlp_hidden_dim': mlp_hidden_dim if use_mlp else 1,
+                'use_mlp': use_mlp,
+                'fixed_keys': fixed_keys,
+            },
+            'metrics': {
+                'param_count': total_params,
+                'final_loss': final_loss,
+                'fixed_k': fixed_keys,
+                'hit_rate': eval_results['hit_rate'],
+                'keys_per_query': eval_results['keys_per_query'],
+            }
         }
-    }
 
-    # Save results to JSON
-    output_dir = EXP_DIR / 'output' / 'pruning_experiments'
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f'{experiment_name}.json'
+        # Save results
+        output_dir = EXP_DIR / 'output' / 'pruning_experiments'
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f'{experiment_name}.json'
 
-    with open(output_path, 'w') as f:
-        json.dump(results, f, indent=2)
+        with open(output_path, 'w') as f:
+            json.dump(results, f, indent=2)
 
-    logger.info("=" * 70)
-    logger.info("EXPERIMENT RESULTS")
-    logger.info("=" * 70)
-    logger.info(f"Experiment: {experiment_name}")
-    logger.info(f"Parameter count: {total_params:,}")
-    logger.info(f"Final loss: {final_loss:.6f}")
-    logger.info(f"Optimal threshold: {threshold_results['optimal_threshold']:.4f}")
-    logger.info(f"Hit rate: {threshold_results['achieved_hit_rate']*100:.2f}%")
-    logger.info(f"Keys per query: {threshold_results['keys_per_query']:.2f}")
-    logger.info(f"Results saved to: {output_path}")
-    logger.info("=" * 70)
+        logger.info("=" * 70)
+        logger.info("EXPERIMENT RESULTS (Fixed-K Mode)")
+        logger.info("=" * 70)
+        logger.info(f"Experiment: {experiment_name}")
+        logger.info(f"Parameter count: {total_params:,}")
+        logger.info(f"Final loss: {final_loss:.6f}")
+        logger.info(f"Fixed K: {fixed_keys}")
+        logger.info(f"Hit rate: {eval_results['hit_rate']*100:.2f}%")
+        logger.info(f"Keys per query: {eval_results['keys_per_query']:.2f}")
+        logger.info(f"Results saved to: {output_path}")
+        logger.info("=" * 70)
+
+    else:
+        # Auto threshold search mode (default)
+        threshold_results = auto_threshold_search(
+            model,
+            trace_data,
+            config,
+            target_hit_rate=0.995,
+            precision=0.001,
+            logger=logger
+        )
+
+        # Compile results
+        results = {
+            'experiment_name': experiment_name,
+            'config': {
+                'num_kernels': num_kernels,
+                'mlp_hidden_dim': mlp_hidden_dim if use_mlp else 1,
+                'use_mlp': use_mlp,
+            },
+            'metrics': {
+                'param_count': total_params,
+                'final_loss': final_loss,
+                'optimal_threshold': threshold_results['optimal_threshold'],
+                'hit_rate': threshold_results['achieved_hit_rate'],
+                'keys_per_query': threshold_results['keys_per_query'],
+            }
+        }
+
+        # Save results to JSON
+        output_dir = EXP_DIR / 'output' / 'pruning_experiments'
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f'{experiment_name}.json'
+
+        with open(output_path, 'w') as f:
+            json.dump(results, f, indent=2)
+
+        logger.info("=" * 70)
+        logger.info("EXPERIMENT RESULTS")
+        logger.info("=" * 70)
+        logger.info(f"Experiment: {experiment_name}")
+        logger.info(f"Parameter count: {total_params:,}")
+        logger.info(f"Final loss: {final_loss:.6f}")
+        logger.info(f"Optimal threshold: {threshold_results['optimal_threshold']:.4f}")
+        logger.info(f"Hit rate: {threshold_results['achieved_hit_rate']*100:.2f}%")
+        logger.info(f"Keys per query: {threshold_results['keys_per_query']:.2f}")
+        logger.info(f"Results saved to: {output_path}")
+        logger.info("=" * 70)
 
     return results
 
@@ -455,6 +609,12 @@ def main():
         default=2.5,
         help='Initial value for kappa (default: 2.5, important for num_kernels=1)'
     )
+    parser.add_argument(
+        '--fixed-keys',
+        type=int,
+        default=None,
+        help='Fixed number of keys to retain per query (default: None = use auto threshold search)'
+    )
 
     args = parser.parse_args()
 
@@ -473,6 +633,7 @@ def main():
             experiment_name=args.experiment_name,
             checkpoint_path=args.checkpoint,
             kappa_init=args.kappa_init,
+            fixed_keys=args.fixed_keys,
             logger=logger
         )
 
