@@ -10,7 +10,8 @@ experiment:
 model:
   # Kernel Encoding Layer
   num_bins: 64                # Number of frequency bins
-  num_kernels: 3              # Number of von Mises kernels per bin
+  num_kernels: 1              # Number of von Mises kernels per bin (optimized from 3->1, 60% param reduction)
+  kappa_init: 2.5             # Initial kappa value for von Mises kernel (important for single kernel)
   kernel_encoding_dim: 128    # Output dimension: num_bins * num_kernels / 2 (due to complex pairs)
 
   # MLP Layer

@@ -1,92 +1,131 @@
-# Experiment 003: Module 1 Neural Network Key Pruning
+# Experiment 003: Module 1 神经网络 Key 剪枝
 
 ## 目标
-训练神经网络预测Key重要性分数(drop概率)，验证稀疏推理性能。使用Kernel Encoding + MLP + Position Scaling实现Module 1算法，在单trace上overfit验证模型架构的有效性。
+训练神经网络预测 Key 重要性分数（drop 概率），实现稀疏注意力推理。使用 Kernel Encoding + MLP + Position Scaling 实现 Module 1 算法。
 
-## 方法
-- **神经网络架构**:
-  - Kernel Encoding Layer: 64频段 x 3个von Mises kernels = 128维输出
-  - MLP Layer: 128 -> hidden -> 1
-  - Position Scaling Layer: log尺度锚点插值 (1k, 10k, 100k)
-  - Output: Sigmoid得到drop概率
-- **训练**:
-  - Loss: Binary Cross Entropy
-  - 标签: 基于argmax的drop标签 (排除末尾1k Key)
-  - 模式: POC单trace overfit验证
-- **评估**:
-  - 指标: Argmax Hit Rate (>99%), Keys per Query, Computation Reduction
-  - 方法: 复用参考实现的compute_pooled_attention推理方式
+## 最优配置（实验验证）
+
+经过系统性实验验证，最优配置为：
+- **num_kernels**: 1（从 3 减少到 1，参数量减少 60%）
+- **mlp_hidden_dim**: 64（保持不变）
+- **kappa_init**: 2.5（单核初始化的关键参数）
+
+```python
+Module1KeyPruningNetwork(
+    num_kernels=1,
+    mlp_hidden=64,
+    kappa_init=2.5
+)
+```
+
+**性能指标**:
+- 参数量: 16,580（vs 原始 41,156，减少 60%）
+- 命中率: 99.50%（满足 >= 99.5% 目标）
+- Keys/Query: 71.84（略优于基线 72.48）
+
+## 神经网络架构
+
+```
+Input: Key embeddings (head_dim=128)
+    ↓
+Kernel Encoding Layer: 64 频段 x 1 个 von Mises kernel
+    ↓
+MLP Layer: 64 -> 64 -> 1
+    ↓
+Position Scaling Layer: log 尺度锚点插值 (1k, 10k, 100k)
+    ↓
+Output: Sigmoid → drop 概率 [0, 1]
+```
 
 ## 运行方式
 
-### 方式1: 使用train.py直接训练 (IMPL-005已完成)
+### 1. 基础训练（使用默认最优配置）
 ```bash
-# 训练模型 (保存checkpoint到output/checkpoints/)
+cd weian_development/spec_sparse_simulator/experiments/exp_003_module1_neural_pruning
+
+# 训练模型
 python train.py
 
 # 查看训练日志
 tail -f output/logs/train.log
 ```
 
-### 方式2: 使用run.py完整流程 (IMPL-007待实现)
+### 2. 剪枝实验（测试不同配置）
 ```bash
-# 训练
-python run.py --mode train --config config.yaml
+# 使用 run_pruning_experiment.py 进行参数扫描
 
-# 评估
-python run.py --mode evaluate --config config.yaml --checkpoint output/checkpoints/best_model.pt
+# 基线实验（使用已训练的 checkpoint）
+python run_pruning_experiment.py \
+    --checkpoint output/checkpoints/final_model.pt \
+    --experiment-name baseline
 
-# 完整流程 (训练 + 评估)
-python run.py --config config.yaml
+# 测试 num_kernels=1（推荐配置）
+python run_pruning_experiment.py \
+    --num-kernels 1 \
+    --kappa-init 2.5 \
+    --experiment-name exp_kernels_1
+
+# 测试 MLP 维度缩减
+python run_pruning_experiment.py \
+    --mlp-hidden-dim 32 \
+    --experiment-name exp_mlp_h32
+
+# 组合实验
+python run_pruning_experiment.py \
+    --num-kernels 1 \
+    --mlp-hidden-dim 32 \
+    --kappa-init 2.5 \
+    --experiment-name exp_k1_h32
 ```
 
-## 结果摘要
+### 3. 评估模式
+```bash
+python run.py --mode evaluate \
+    --config config.yaml \
+    --checkpoint output/checkpoints/final_model.pt
+```
 
-### 训练结果
-- Final Loss: 0.000216 (100 epochs)
-- Model Parameters: 41,156
+## 实验结果汇总
 
-### 评估结果 (threshold=0.5)
-| 指标 | 值 |
-|------|-----|
-| Argmax Hit Rate | 98.86% |
-| Keys per Query | 70.65 |
-| Retention Rate (historical) | 0.07% |
-| Computation Reduction | 99.20% |
+| 配置 | 参数量 | 变化 | 命中率 | Keys/Query | 状态 |
+|------|--------|------|--------|------------|------|
+| **num_kernels=1, h=64** | **16,580** | **-60%** | **99.50%** | **71.84** | **推荐** |
+| num_kernels=1, h=32 | 14,468 | -65% | 99.50% | 81.08 | 可选 |
+| num_kernels=3, h=64 | 41,156 | 基线 | 99.51% | 72.48 | 原始 |
+| num_kernels=3, h=32 | 39,044 | -5% | 99.51% | 72.57 | 收益小 |
+| avg_pooling | 36,998 | -10% | 100% | 8785 | 失败 |
 
-### Threshold Sweep 分析
+详细分析见 `output/PRUNING_EXPERIMENT_REPORT.md`
 
-通过调整 threshold 可以达到更高的 hit rate：
+## 关键发现
 
-| Threshold | Hit Rate | Keys/Query | Retention | Comp Reduction |
-|-----------|----------|------------|-----------|----------------|
-| 0.50 | 98.86% | 70.6 | 0.071% | 99.20% |
-| 0.90 | 99.13% | 71.4 | 0.079% | 99.19% |
-| **0.993** | **99.52%** | **72.5** | **0.092%** | **99.17%** |
-| 0.999 | 99.69% | 74.2 | 0.111% | 99.15% |
+1. **核数量缩减非常有效**: 单个 von Mises 核（配合 kappa=2.5 初始化）足以捕获必要的频率模式
+2. **MLP 层不可或缺**: 平均池化完全失败；MLP 隐藏层维度影响剪枝质量
+3. **最佳配置**: `num_kernels=1, mlp_hidden=64` 实现参数/性能的最优权衡
+4. **剪枝效果**: 平均每个 query 只需保留约 72 个 keys 即可达到 99.5% 命中率
 
-### 关键发现
+## 文件结构
 
-1. **评估方法修正**: 原评估未正确保留当前 round 内的 keys，导致 hit rate 被低估
-   - 约 3.26% 的 queries 的 argmax 落在当前 round（非 self token）
-   - 修正后 Module 1 只预测历史 keys，当前 round 使用 full attention
+```
+exp_003_module1_neural_pruning/
+├── config.yaml                 # 配置文件（已更新为最优设置）
+├── model.py                    # 神经网络模型定义
+├── train.py                    # 训练脚本
+├── run.py                      # 完整流程脚本
+├── evaluate.py                 # 评估函数
+├── run_pruning_experiment.py   # 剪枝实验脚本（参数扫描）
+├── data/
+│   └── qk.pt -> (symlink)      # 训练数据
+├── output/
+│   ├── checkpoints/            # 模型 checkpoint（gitignore）
+│   ├── logs/                   # 训练日志（gitignore）
+│   ├── pruning_experiments/    # 实验结果 JSON（gitignore）
+│   └── PRUNING_EXPERIMENT_REPORT.md  # 实验报告
+└── README.md                   # 本文档
+```
 
-2. **达到 99.5% Hit Rate 的代价**:
-   - Threshold: 0.5 → 0.993
-   - Keys/Query: 70.6 → 72.5 (增加 ~3%)
-   - Computation Reduction: 99.20% → 99.17% (基本不变)
-
-3. **模型有效性**: 在 threshold=0.5 已达到 98.86% hit rate，验证了神经网络架构的有效性
-
-## 结论
-Module 1 神经网络架构验证成功。通过调整 threshold 至 0.993，可达到 99.52% Argmax Hit Rate，同时保持 99.17% 的计算量减少。模型成功学习了 Key 重要性预测，在 POC 单 trace overfit 场景下表现良好。
 ## 相关文档
-- [01_module1_key_pruning.md](../../docs/01_module1_key_pruning.md)
-- [03_neural_network_architecture.md](../../docs/03_neural_network_architecture.md)
-- [04_training_and_labels.md](../../docs/04_training_and_labels.md)
-- [05_experiment_conventions.md](../../docs/05_experiment_conventions.md)
 
-## 默认配置
-- Head索引: `hybrid_sample_heads_lowret_top10.json` (10个heads)
-- Round window: 128
-- 参考实现: `attention_pruning_case_study_hybrid_rounds_xtrace.py`
+- [Module 1 Key Pruning 设计文档](../../docs/01_module1_key_pruning.md)
+- [神经网络架构设计](../../docs/03_neural_network_architecture.md)
+- [训练与标签生成](../../docs/04_training_and_labels.md)
