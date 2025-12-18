@@ -1,5 +1,5 @@
 """
-Module 2 Experiment Runner with Top-K Attention Pairs Ablation
+Module 2 Experiment Runner with Top-K Attention Pairs and Masked Ranking Loss Ablation
 
 Modes:
 - train: Train the model on single trace
@@ -7,6 +7,7 @@ Modes:
 - all: Run train then evaluate
 - ablation: Run ablation study sweeping lambda_activation values
 - ablation_topk: Run ablation study sweeping topk_gt values (1, 3, 5, 10)
+- ablation_mrl: Run ablation study for Masked Ranking Loss with topk_gt values (1, 2, 4, 8, 16, 32, 64)
 
 Usage:
     python run.py --mode train
@@ -15,6 +16,8 @@ Usage:
     python run.py --mode ablation
     python run.py --mode ablation_topk
     python run.py --mode ablation_topk --topk_values 1,3,5,10
+    python run.py --mode ablation_mrl
+    python run.py --mode ablation_mrl --topk_values 1,2,4,8,16,32,64
 """
 
 import argparse
@@ -309,15 +312,131 @@ def run_topk_ablation(config, logger, topk_values=None):
     return all_results
 
 
+def run_mrl_ablation(config, logger, topk_values=None):
+    """
+    Run ablation study for Masked Ranking Loss (MRL) sweeping topk_gt values.
+
+    Uses loss_type='mrl' and tests different K values on logarithmic scale.
+
+    Args:
+        config: Base configuration dict
+        logger: Logger instance
+        topk_values: List of topk_gt values to test (default: [1, 2, 4, 8, 16, 32, 64])
+
+    Returns:
+        dict: Results for each topk_gt value
+    """
+    from train import train
+    from evaluate import evaluate
+
+    logger.info("=" * 50)
+    logger.info("Starting MRL ABLATION mode (Masked Ranking Loss)")
+    logger.info("=" * 50)
+
+    if topk_values is None:
+        # Logarithmic scale: 1, 2, 4, 8, 16, 32, 64
+        topk_values = [1, 2, 4, 8, 16, 32, 64]
+
+    exp_dir = Path(__file__).parent
+    results_dir = exp_dir / config['output']['results_dir'] / 'ablation_mrl'
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    all_results = {}
+
+    for i, topk_val in enumerate(topk_values):
+        exp_name = f"mrl_topk_{topk_val}"
+        logger.info("=" * 50)
+        logger.info(f"MRL Ablation experiment {i+1}/{len(topk_values)}: topk_gt={topk_val}")
+        logger.info("=" * 50)
+
+        # Create modified config for this run
+        run_config = copy.deepcopy(config)
+        run_config['training']['topk_gt'] = topk_val
+        run_config['training']['loss_type'] = 'mrl'  # Use Masked Ranking Loss
+
+        # Use separate output directories for each run
+        run_config['output']['checkpoints_dir'] = f"output/ablation_mrl/{exp_name}/checkpoints"
+        run_config['output']['logs_dir'] = f"output/ablation_mrl/{exp_name}/logs"
+
+        # Create directories
+        (exp_dir / run_config['output']['checkpoints_dir']).mkdir(parents=True, exist_ok=True)
+        (exp_dir / run_config['output']['logs_dir']).mkdir(parents=True, exist_ok=True)
+
+        try:
+            # Train
+            logger.info(f"Training with loss_type='mrl', topk_gt={topk_val}...")
+            checkpoint_path = train(run_config, logger)
+
+            # Evaluate
+            logger.info(f"Evaluating with loss_type='mrl', topk_gt={topk_val}...")
+            eval_results = evaluate(run_config, checkpoint_path, logger)
+
+            # Store results
+            all_results[exp_name] = {
+                'topk_gt': topk_val,
+                'loss_type': 'mrl',
+                'checkpoint_path': str(checkpoint_path),
+                'evaluation': eval_results
+            }
+
+            # Save individual results
+            individual_results_path = exp_dir / f"output/ablation_mrl/{exp_name}/results.json"
+            with open(individual_results_path, 'w') as f:
+                json.dump(all_results[exp_name], f, indent=2, default=str)
+
+            logger.info(f"Completed experiment: loss_type='mrl', topk_gt={topk_val}")
+            if eval_results:
+                for k, metrics in eval_results.items():
+                    logger.info(f"  K={k}: Hit Rate = {metrics.get('hit_rate', 'N/A')}")
+
+        except Exception as e:
+            logger.error(f"Experiment failed for topk_gt={topk_val}: {e}", exc_info=True)
+            all_results[exp_name] = {
+                'topk_gt': topk_val,
+                'loss_type': 'mrl',
+                'error': str(e)
+            }
+
+    # Save aggregated results
+    results_path = results_dir / 'ablation_mrl_results.json'
+    with open(results_path, 'w') as f:
+        json.dump(all_results, f, indent=2, default=str)
+    logger.info(f"MRL Ablation results saved to: {results_path}")
+
+    # Print summary table
+    logger.info("=" * 50)
+    logger.info("MRL ABLATION SUMMARY (Masked Ranking Loss)")
+    logger.info("=" * 50)
+    logger.info(f"{'TopK_GT':<10} {'K=50 Hit%':<12} {'K=500 Hit%':<12} {'K=1000 Hit%':<12}")
+    logger.info("-" * 50)
+
+    for exp_name, result in all_results.items():
+        if 'error' in result:
+            logger.info(f"{result['topk_gt']:<10} ERROR: {result['error']}")
+        elif result.get('evaluation'):
+            eval_data = result['evaluation']
+            k50 = eval_data.get(50, {}).get('hit_rate', 'N/A')
+            k500 = eval_data.get(500, {}).get('hit_rate', 'N/A')
+            k1000 = eval_data.get(1000, {}).get('hit_rate', 'N/A')
+
+            k50_str = f"{k50*100:.2f}%" if isinstance(k50, (int, float)) else str(k50)
+            k500_str = f"{k500*100:.2f}%" if isinstance(k500, (int, float)) else str(k500)
+            k1000_str = f"{k1000*100:.2f}%" if isinstance(k1000, (int, float)) else str(k1000)
+
+            logger.info(f"{result['topk_gt']:<10} {k50_str:<12} {k500_str:<12} {k1000_str:<12}")
+
+    return all_results
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Module 2 Experiment Runner with Top-K Attention Pairs Ablation')
     parser.add_argument(
         '--mode',
         type=str,
-        choices=['train', 'evaluate', 'all', 'ablation', 'ablation_topk'],
+        choices=['train', 'evaluate', 'all', 'ablation', 'ablation_topk', 'ablation_mrl'],
         default='all',
-        help='Execution mode: train, evaluate, all, ablation, or ablation_topk (default: all)'
+        help='Execution mode: train, evaluate, all, ablation, ablation_topk, or ablation_mrl (default: all)'
     )
     parser.add_argument(
         '--checkpoint',
@@ -384,6 +503,14 @@ def main():
                 topk_values = [int(x.strip()) for x in args.topk_values.split(',')]
 
             run_topk_ablation(config, logger, topk_values)
+
+        elif args.mode == 'ablation_mrl':
+            # Parse topk values for MRL ablation (default: logarithmic scale)
+            topk_values = None
+            if args.topk_values:
+                topk_values = [int(x.strip()) for x in args.topk_values.split(',')]
+
+            run_mrl_ablation(config, logger, topk_values)
 
         logger.info("=" * 50)
         logger.info("Experiment completed successfully")

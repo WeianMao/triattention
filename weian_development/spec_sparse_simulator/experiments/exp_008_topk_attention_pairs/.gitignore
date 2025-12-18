@@ -1,12 +1,8 @@
-# Checkpoints and model files
-output/*/checkpoints/*.pt
-output/*/*/checkpoints/*.pt
+# Checkpoints and model files (large)
 *.pt
 
 # Logs
-output/logs/
-output/*/logs/
-output/*/*/logs/
+*.log
 
 # Python cache
 __pycache__/
@@ -14,3 +10,6 @@ __pycache__/
 
 # Data files (symlinks)
 data/
+
+# Output directory (checkpoints, results, logs)
+output/

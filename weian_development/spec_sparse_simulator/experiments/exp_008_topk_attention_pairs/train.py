@@ -222,6 +222,98 @@ def compute_attraction_loss(key_probs, query_bin_probs, topk_keys, topk_in_recen
     return loss
 
 
+def compute_masked_ranking_loss(key_probs, query_bin_probs, topk_keys, topk_in_recent, eps=1e-6):
+    """
+    Compute Masked Ranking Loss for Module 2.
+
+    This loss constructs K independent training scenarios where each scenario's
+    target is "hit top-1 among remaining keys". For the m-th key, we mask out
+    the top-(m-1) keys and train to hit the "new top-1" (which is the original top-m).
+
+    Formula:
+        For each query i and its Top-K keys [k_1, k_2, ..., k_K]:
+        - For k_m (m-th key): mask out {k_1, ..., k_{m-1}}
+        - Normalized prob: P_tilde[k_m, b] = P[k_m, b] / R_m(b)
+          where R_m(b) = TotalProb(b) - sum_{j<m} P[k_j, b]
+        - Match prob: p_match = sum_b p_q[b] * P_tilde[k_m, b]
+        - Loss = -log(p_match)
+
+    Vectorized implementation using cumsum for efficiency.
+
+    Args:
+        key_probs: (num_keys, num_bins) Key bin probabilities (softmax over keys, dim=0)
+        query_bin_probs: (num_queries, num_bins) Query bin probabilities (softmax over bins, dim=-1)
+        topk_keys: (num_queries, topk_gt) Top-K key indices for each query
+        topk_in_recent: (num_queries, topk_gt) bool, True if key is in current round (exclude from loss)
+        eps: Small value for numerical stability
+
+    Returns:
+        Scalar loss tensor
+    """
+    num_queries, topk_gt = topk_keys.shape
+    num_bins = key_probs.shape[1]
+    num_historical_keys = key_probs.shape[0]
+    device = key_probs.device
+
+    # Step 1: Precompute total key probability per bin
+    # total_key_prob[b] = sum_k P[k, b]
+    total_key_prob = key_probs.sum(dim=0)  # (num_bins,)
+
+    # Step 2: Gather Top-K keys' probabilities
+    # Clamp indices to valid range to avoid index errors
+    topk_keys_clamped = topk_keys.clamp(0, num_historical_keys - 1)
+    # topk_key_probs[i, m, b] = key_probs[topk_keys[i, m], b]
+    topk_key_probs = key_probs[topk_keys_clamped]  # (num_queries, topk_gt, num_bins)
+
+    # Step 3: Compute cumulative sum for masked probabilities
+    # cumsum[i, m, b] = sum_{j=0}^{m} topk_key_probs[i, j, b]
+    cumsum = torch.cumsum(topk_key_probs, dim=1)  # (num_queries, topk_gt, num_bins)
+
+    # Step 4: Construct masked_sum (probability sum of keys to be masked)
+    # For k_m, we mask {k_1, ..., k_{m-1}}, so masked_sum[m] = cumsum[m-1]
+    # Use shift: masked_sum[:, m, :] = cumsum[:, m-1, :] for m > 0, else 0
+    masked_sum = torch.zeros_like(cumsum)
+    masked_sum[:, 1:, :] = cumsum[:, :-1, :]  # (num_queries, topk_gt, num_bins)
+
+    # Step 5: Compute remaining probability per bin after masking
+    # R_m(b) = TotalProb(b) - masked_sum[m](b)
+    remaining_prob = total_key_prob.unsqueeze(0).unsqueeze(0) - masked_sum
+    # remaining_prob: (num_queries, topk_gt, num_bins)
+
+    # Numerical stability: clamp remaining_prob to avoid division by very small numbers
+    # This is critical when top-K keys dominate the probability mass
+    remaining_prob = remaining_prob.clamp(min=eps)
+
+    # Step 6: Normalize key probabilities
+    # P_tilde[k_m, b] = P[k_m, b] / R_m(b)
+    normalized_key_prob = topk_key_probs / remaining_prob
+    # Clamp to prevent extremely large values
+    normalized_key_prob = normalized_key_prob.clamp(max=1.0)
+    # normalized_key_prob: (num_queries, topk_gt, num_bins)
+
+    # Step 7: Compute match probability
+    # match_prob[i, m] = sum_b query_bin_probs[i, b] * normalized_key_prob[i, m, b]
+    # query_bin_probs: (num_queries, num_bins) -> (num_queries, 1, num_bins)
+    match_prob = (query_bin_probs.unsqueeze(1) * normalized_key_prob).sum(dim=2)
+    # match_prob: (num_queries, topk_gt)
+
+    # Step 8: Apply mask for recent keys and out-of-bound keys
+    # Create valid mask: not in recent AND within historical key range
+    valid_mask = ~topk_in_recent & (topk_keys < num_historical_keys)
+    # valid_mask: (num_queries, topk_gt)
+
+    # Compute loss only for valid pairs
+    if valid_mask.sum() == 0:
+        return torch.tensor(0.0, device=device, requires_grad=True)
+
+    # Apply mask and compute average loss
+    log_match_prob = torch.log(match_prob + eps)
+    masked_log_prob = log_match_prob * valid_mask.float()
+    loss = -masked_log_prob.sum() / valid_mask.sum().float()
+
+    return loss
+
+
 def compute_probe_activation_loss(key_logits, key_probs, query_bin_probs, batch_argmax_keys, num_bins, alpha_dead_threshold=0.05, use_weighted=True):
     """
     Compute Weighted Probe Activation Loss to prevent dead probes.
@@ -397,6 +489,9 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
     # Top-K Ground Truth selection
     topk_gt = config['training'].get('topk_gt', 1)
 
+    # Loss type selection: 'attraction' (exp_008) or 'mrl' (Masked Ranking Loss, exp_010)
+    loss_type = config['training'].get('loss_type', 'attraction')
+
     # Anti-collapse loss hyperparameters
     num_bins = config['model']['num_bins']
     alpha_dead_threshold = config['training'].get('alpha_dead_threshold', 0.05)
@@ -464,8 +559,13 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
             # Forward pass: Query network
             query_bin_probs = model.forward_queries(batch_queries, reference_angles, empty_bin_mask)
 
-            # Compute Attraction Loss (primary loss) with Top-K support
-            attraction_loss = compute_attraction_loss(key_probs, query_bin_probs, batch_topk_keys, batch_topk_in_recent)
+            # Compute primary loss based on loss_type
+            if loss_type == 'mrl':
+                # Masked Ranking Loss (exp_010)
+                attraction_loss = compute_masked_ranking_loss(key_probs, query_bin_probs, batch_topk_keys, batch_topk_in_recent)
+            else:
+                # Attraction Loss (exp_008 original, default)
+                attraction_loss = compute_attraction_loss(key_probs, query_bin_probs, batch_topk_keys, batch_topk_in_recent)
 
             # Compute Probe Activation Loss (if enabled)
             # Note: Still uses Top-1 (argmax) for probe activation loss
@@ -588,10 +688,13 @@ def train(config, logger):
     log_every = config['training'].get('log_every', 10)
     save_every = config['training'].get('save_every', 10)
 
-    # Log anti-collapse loss settings
+    # Log loss type and anti-collapse settings
+    loss_type = config['training'].get('loss_type', 'attraction')
+    topk_gt = config['training'].get('topk_gt', 1)
     lambda_activation = config['training'].get('lambda_activation', 0.0)
     lambda_balance = config['training'].get('lambda_balance', 0.0)
     alpha_dead_threshold = config['training'].get('alpha_dead_threshold', 0.05)
+    logger.info(f"Loss type: {loss_type}, topk_gt: {topk_gt}")
     logger.info(f"Anti-collapse settings: lambda_activation={lambda_activation}, lambda_balance={lambda_balance}, alpha={alpha_dead_threshold}")
 
     logger.info(f"Starting training for {num_epochs} epochs...")
