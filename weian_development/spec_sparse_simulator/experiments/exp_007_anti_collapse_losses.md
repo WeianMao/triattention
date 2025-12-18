@@ -69,21 +69,21 @@ $$\mathcal{L}_{\text{activation}} = -\frac{1}{|\mathcal{D}|} \sum_{d \in \mathca
 
 ### 公式
 
-参考 Switch Transformer 的 auxiliary load balancing loss：
+采用 Batch-Level Entropy 正则化，最大化 batch 平均概率分布的熵（等价于最小化负熵）：
 
 设一个 batch 中有 $B$ 个 query，Query Network 输出概率矩阵 $\mathbf{P} \in \mathbb{R}^{B \times N}$。
 
-定义：
-- **分配比例** $f_i$: 探针 $i$ 被分配到的 query 比例（硬分配，argmax）
-$$f_i = \frac{1}{B} \sum_{j=1}^{B} \mathbb{1}[\text{argmax}(\mathbf{P}_{j,:}) = i]$$
+1. 沿 query 维度取平均：
+$$\bar{\mathbf{p}} = \frac{1}{B} \sum_{j=1}^{B} \mathbf{P}_{j,:} \in \mathbb{R}^{N}$$
 
-- **概率质量** $P_i$: 所有 query 对探针 $i$ 的平均概率（软分配）
-$$P_i = \frac{1}{B} \sum_{j=1}^{B} \mathbf{P}_{j,i}$$
+2. 计算负熵作为损失：
+$$\mathcal{L}_{\text{balance}} = -H(\bar{\mathbf{p}}) = \sum_{i=1}^{N} \bar{p}_i \log \bar{p}_i$$
 
-**负载均衡损失**:
-$$\mathcal{L}_{\text{balance}} = N \cdot \sum_{i=1}^{N} f_i \cdot P_i$$
+**性质**: 当 $\bar{\mathbf{p}}$ 为均匀分布时，$H(\bar{\mathbf{p}}) = \log N$ 达到最大值，此时 $\mathcal{L}_{\text{balance}} = -\log N$ 达到最小值。
 
-**直观理解**: 当某个探针同时具有高分配比例 $f_i$ 和高概率质量 $P_i$ 时，loss 会增大，从而抑制 rich-get-richer 的 collapse 动态。
+**直观理解**: 最小化负熵等价于最大化熵，鼓励 Query Network 均匀使用所有探针，抑制 collapse 到单一探针的倾向。
+
+**实现注意**: 计算 $\bar{p}_i \log \bar{p}_i$ 时，应使用 `torch.xlogy` 或通过 `torch.logsumexp` 构造数值稳定的实现，避免 $\log(0)$ 的精度问题。
 
 ### 超参数
 
