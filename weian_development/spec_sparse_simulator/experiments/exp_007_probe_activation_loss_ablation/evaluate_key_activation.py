@@ -46,15 +46,18 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 
-def load_trace_data(config, logger, exp_dir):
+def load_trace_data(config, logger, exp_dir, use_train_data=False):
     """Load trace data from qk.pt file."""
     # Use test_trace_path for evaluation if available, otherwise fall back to trace_path
-    if 'test_trace_path' in config['data']:
+    if use_train_data:
+        trace_path = exp_dir / config['data']['trace_path']
+        logger.info("Using TRAINING trace for evaluation (--use-train-data enabled)")
+    elif 'test_trace_path' in config['data']:
         trace_path = exp_dir / config['data']['test_trace_path']
         logger.info("Using TEST trace for evaluation (cross-trace validation mode)")
     else:
         trace_path = exp_dir / config['data']['trace_path']
-        logger.info("Using TRAINING trace for evaluation (overfit validation mode)")
+        logger.info("Using TRAINING trace for evaluation (no test_trace_path in config)")
 
     if not trace_path.exists():
         raise FileNotFoundError(f"Trace file not found: {trace_path}")
@@ -363,9 +366,9 @@ def analyze_gt_distribution(results, topk, num_bins, logger):
     }
 
 
-def evaluate_single_checkpoint(checkpoint_path, config, exp_dir, topk_values, device, logger):
+def evaluate_single_checkpoint(checkpoint_path, config, exp_dir, topk_values, device, logger, use_train_data=False):
     """Evaluate a single checkpoint."""
-    trace_data = load_trace_data(config, logger, exp_dir)
+    trace_data = load_trace_data(config, logger, exp_dir, use_train_data)
     model = load_checkpoint(checkpoint_path, config, device, logger)
 
     summary, detailed = compute_key_activation_metrics(
@@ -383,7 +386,7 @@ def evaluate_single_checkpoint(checkpoint_path, config, exp_dir, topk_values, de
     }
 
 
-def evaluate_ablation_dir(ablation_dir, config, exp_dir, topk_values, device, logger):
+def evaluate_ablation_dir(ablation_dir, config, exp_dir, topk_values, device, logger, use_train_data=False):
     """Evaluate all checkpoints in ablation directory."""
     ablation_path = exp_dir / ablation_dir
 
@@ -401,7 +404,7 @@ def evaluate_ablation_dir(ablation_dir, config, exp_dir, topk_values, device, lo
     logger.info(f"Found {len(lambda_dirs)} ablation experiments")
 
     # Load trace data once
-    trace_data = load_trace_data(config, logger, exp_dir)
+    trace_data = load_trace_data(config, logger, exp_dir, use_train_data)
 
     all_results = {}
 
@@ -504,6 +507,12 @@ def main():
         default=None,
         help='Output JSON file path'
     )
+    parser.add_argument(
+        '--use-train-data',
+        action='store_true',
+        default=False,
+        help='Use training data instead of test data for evaluation (default: False)'
+    )
     args = parser.parse_args()
 
     logger = setup_logging()
@@ -521,18 +530,23 @@ def main():
     topk_values = args.topk
     logger.info(f"Evaluating Top-K values: {topk_values}")
 
+    use_train = args.use_train_data
+    if use_train:
+        logger.info("*** USING TRAINING DATA FOR EVALUATION ***")
+
     try:
         if args.ablation_dir:
             # Evaluate all experiments in ablation directory
             all_results = evaluate_ablation_dir(
-                args.ablation_dir, config, exp_dir, topk_values, device, logger
+                args.ablation_dir, config, exp_dir, topk_values, device, logger, use_train
             )
 
             if all_results:
                 print_comparison_table(all_results, topk_values[0], logger)
 
                 # Save results
-                output_path = args.output or (exp_dir / args.ablation_dir / 'key_activation_metrics.json')
+                suffix = '_train' if use_train else ''
+                output_path = args.output or (exp_dir / args.ablation_dir / f'key_activation_metrics{suffix}.json')
                 with open(output_path, 'w') as f:
                     # Convert non-serializable items
                     json.dump(all_results, f, indent=2, default=str)
@@ -546,14 +560,15 @@ def main():
                 return
 
             result = evaluate_single_checkpoint(
-                checkpoint_path, config, exp_dir, topk_values, device, logger
+                checkpoint_path, config, exp_dir, topk_values, device, logger, use_train
             )
 
             # Save results
             if args.output:
                 output_path = Path(args.output)
             else:
-                output_path = checkpoint_path.parent.parent / 'key_activation_metrics.json'
+                suffix = '_train' if use_train else ''
+                output_path = checkpoint_path.parent.parent / f'key_activation_metrics{suffix}.json'
 
             with open(output_path, 'w') as f:
                 json.dump(result, f, indent=2, default=str)
@@ -569,13 +584,14 @@ def main():
                     logger.info(f"{'#'*80}")
 
                     all_results = evaluate_ablation_dir(
-                        ablation_dir, config, exp_dir, topk_values, device, logger
+                        ablation_dir, config, exp_dir, topk_values, device, logger, use_train
                     )
 
                     if all_results:
                         print_comparison_table(all_results, topk_values[0], logger)
 
-                        output_path = ablation_path / 'key_activation_metrics.json'
+                        suffix = '_train' if use_train else ''
+                        output_path = ablation_path / f'key_activation_metrics{suffix}.json'
                         with open(output_path, 'w') as f:
                             json.dump(all_results, f, indent=2, default=str)
                         logger.info(f"Results saved to: {output_path}")

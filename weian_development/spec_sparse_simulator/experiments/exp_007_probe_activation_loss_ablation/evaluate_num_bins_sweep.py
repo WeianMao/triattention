@@ -39,15 +39,18 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 
-def load_trace_data(config, logger, exp_dir):
+def load_trace_data(config, logger, exp_dir, use_train_data=False):
     """Load trace data from qk.pt file."""
     # Use test_trace_path for evaluation if available, otherwise fall back to trace_path
-    if 'test_trace_path' in config['data']:
+    if use_train_data:
+        trace_path = exp_dir / config['data']['trace_path']
+        logger.info("Using TRAINING trace for evaluation (--use-train-data enabled)")
+    elif 'test_trace_path' in config['data']:
         trace_path = exp_dir / config['data']['test_trace_path']
         logger.info("Using TEST trace for evaluation (cross-trace validation mode)")
     else:
         trace_path = exp_dir / config['data']['trace_path']
-        logger.info("Using TRAINING trace for evaluation (overfit validation mode)")
+        logger.info("Using TRAINING trace for evaluation (no test_trace_path in config)")
 
     if not trace_path.exists():
         raise FileNotFoundError(f"Trace file not found: {trace_path}")
@@ -242,6 +245,12 @@ def main():
         default=None,
         help='Output JSON file path'
     )
+    parser.add_argument(
+        '--use-train-data',
+        action='store_true',
+        default=False,
+        help='Use training data instead of test data for evaluation (default: False)'
+    )
     args = parser.parse_args()
 
     logger = setup_logging()
@@ -255,12 +264,16 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using device: {device}")
 
+    use_train = args.use_train_data
+    if use_train:
+        logger.info("*** USING TRAINING DATA FOR EVALUATION ***")
+
     checkpoint_path = exp_dir / args.checkpoint
     if not checkpoint_path.exists():
         logger.error(f"Checkpoint not found: {checkpoint_path}")
         return
 
-    trace_data = load_trace_data(config, logger, exp_dir)
+    trace_data = load_trace_data(config, logger, exp_dir, use_train)
     model = load_checkpoint(checkpoint_path, config, device, logger)
 
     results = []
@@ -295,11 +308,13 @@ def main():
     if args.output:
         output_path = Path(args.output)
     else:
-        output_path = checkpoint_path.parent.parent / 'num_bins_sweep_results.json'
+        suffix = '_train' if use_train else ''
+        output_path = checkpoint_path.parent.parent / f'num_bins_sweep_results{suffix}.json'
 
     output_data = {
         'checkpoint': str(checkpoint_path),
         'topk_per_bin': args.topk,
+        'use_train_data': use_train,
         'results': results
     }
 
