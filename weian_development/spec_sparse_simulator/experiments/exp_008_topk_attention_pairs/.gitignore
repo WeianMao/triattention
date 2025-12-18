@@ -1,0 +1,16 @@
+# Checkpoints and model files
+output/*/checkpoints/*.pt
+output/*/*/checkpoints/*.pt
+*.pt
+
+# Logs
+output/logs/
+output/*/logs/
+output/*/*/logs/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Data files (symlinks)
+data/
