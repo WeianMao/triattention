@@ -311,29 +311,35 @@ def compute_probe_activation_loss(key_logits, key_probs, query_bin_probs, batch_
 
 def compute_load_balancing_loss(query_bin_probs, num_bins):
     """
-    Compute Load Balancing Loss (Phase 2 placeholder - NOT IMPLEMENTED).
+    Compute Load Balancing Loss using Batch-Level Entropy Regularization.
 
-    This loss penalizes uneven probe utilization, similar to Switch Transformer
-    auxiliary load balancing loss.
+    This loss encourages uniform probe utilization by maximizing the entropy
+    of the batch-average probability distribution (equivalent to minimizing
+    negative entropy).
 
-    Formula: L_balance = N * sum_i (f_i * P_i)
-    where f_i = fraction of queries assigned to probe i (hard assignment)
-          P_i = average probability mass on probe i (soft assignment)
+    Formula: L_balance = -H(p_bar) = sum_i (p_bar_i * log(p_bar_i))
+    where p_bar = (1/B) * sum_j(P[j,:]) is the batch-average probability
+
+    Properties:
+        - When p_bar is uniform: H(p_bar) = log(N), L_balance = -log(N) (minimum)
+        - Minimizing L_balance encourages uniform probe usage
 
     Args:
         query_bin_probs: (batch_size, num_bins) Query bin probabilities
         num_bins: Number of bins/probes
 
     Returns:
-        Scalar loss tensor (currently returns 0.0)
-
-    Note:
-        This is a Phase 2 placeholder. Implementation will be added in
-        exp_007 Phase 2 after validating Probe Activation Loss in Phase 1.
+        Scalar loss tensor representing negative entropy
     """
-    # Phase 2 placeholder - return zero loss
-    device = query_bin_probs.device
-    return torch.tensor(0.0, device=device, requires_grad=True)
+    # Compute batch-average probability distribution
+    # p_bar: (num_bins,) - average probability mass on each probe
+    p_bar = query_bin_probs.mean(dim=0)
+
+    # Compute negative entropy: sum_i (p_bar_i * log(p_bar_i))
+    # Use torch.xlogy for numerical stability (handles p=0 correctly, returns 0)
+    negative_entropy = torch.xlogy(p_bar, p_bar).sum()
+
+    return negative_entropy
 
 
 def train_epoch(model, trace_data, optimizer, config, device, logger):
@@ -352,7 +358,7 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
         logger: Logger instance
 
     Returns:
-        dict: {avg_loss, avg_attraction_loss, avg_activation_loss}
+        dict: {avg_loss, avg_attraction_loss, avg_activation_loss, avg_balance_loss}
     """
     model.train()
 
@@ -375,6 +381,7 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
     epoch_loss = 0.0
     epoch_attraction_loss = 0.0
     epoch_activation_loss = 0.0
+    epoch_balance_loss = 0.0
     num_batches = 0
 
     # Iterate over rounds
@@ -416,6 +423,7 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
         num_queries = len(query_indices)
         round_attraction_loss = 0.0
         round_activation_loss = 0.0
+        round_balance_loss = 0.0
         valid_batches = 0
 
         for batch_start in range(0, num_queries, query_batch_size):
@@ -443,6 +451,12 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
             else:
                 activation_loss = torch.tensor(0.0, device=device, requires_grad=True)
 
+            # Compute Load Balancing Loss (if enabled)
+            if lambda_balance > 0:
+                balance_loss = compute_load_balancing_loss(query_bin_probs, num_bins)
+            else:
+                balance_loss = torch.tensor(0.0, device=device, requires_grad=True)
+
             # Skip if attraction loss is zero (no valid queries)
             if attraction_loss.item() == 0.0:
                 del batch_queries, query_bin_probs
@@ -451,6 +465,7 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
             # Accumulate losses
             round_attraction_loss = round_attraction_loss + attraction_loss
             round_activation_loss = round_activation_loss + activation_loss
+            round_balance_loss = round_balance_loss + balance_loss
             valid_batches += 1
 
             # Clear batch tensors
@@ -461,8 +476,9 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
             # Compute total loss with lambda weighting
             avg_attraction = round_attraction_loss / valid_batches
             avg_activation = round_activation_loss / valid_batches
+            avg_balance = round_balance_loss / valid_batches
 
-            total_loss = avg_attraction + lambda_activation * avg_activation
+            total_loss = avg_attraction + lambda_activation * avg_activation + lambda_balance * avg_balance
 
             optimizer.zero_grad()
             total_loss.backward()
@@ -471,6 +487,7 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
             epoch_loss += total_loss.item()
             epoch_attraction_loss += avg_attraction.item()
             epoch_activation_loss += avg_activation.item()
+            epoch_balance_loss += avg_balance.item()
             num_batches += 1
 
         # Clear key logits and probs after processing all query batches
@@ -483,13 +500,15 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
         return {
             'avg_loss': epoch_loss / num_batches,
             'avg_attraction_loss': epoch_attraction_loss / num_batches,
-            'avg_activation_loss': epoch_activation_loss / num_batches
+            'avg_activation_loss': epoch_activation_loss / num_batches,
+            'avg_balance_loss': epoch_balance_loss / num_batches
         }
     else:
         return {
             'avg_loss': 0.0,
             'avg_attraction_loss': 0.0,
-            'avg_activation_loss': 0.0
+            'avg_activation_loss': 0.0,
+            'avg_balance_loss': 0.0
         }
 
 
@@ -557,11 +576,12 @@ def train(config, logger):
         avg_loss = loss_dict['avg_loss']
         avg_attraction_loss = loss_dict['avg_attraction_loss']
         avg_activation_loss = loss_dict['avg_activation_loss']
+        avg_balance_loss = loss_dict['avg_balance_loss']
 
         # Log progress
         if epoch % log_every == 0 or epoch == 1:
-            if lambda_activation > 0:
-                logger.info(f"Epoch {epoch}/{num_epochs} - Total: {avg_loss:.6f}, Attraction: {avg_attraction_loss:.6f}, Activation: {avg_activation_loss:.6f}")
+            if lambda_activation > 0 or lambda_balance > 0:
+                logger.info(f"Epoch {epoch}/{num_epochs} - Total: {avg_loss:.6f}, Attraction: {avg_attraction_loss:.6f}, Activation: {avg_activation_loss:.6f}, Balance: {avg_balance_loss:.6f}")
             else:
                 logger.info(f"Epoch {epoch}/{num_epochs} - Loss: {avg_loss:.6f}")
 
@@ -576,6 +596,7 @@ def train(config, logger):
                 'loss': avg_loss,
                 'attraction_loss': avg_attraction_loss,
                 'activation_loss': avg_activation_loss,
+                'balance_loss': avg_balance_loss,
                 'config': config,
             }, best_checkpoint_path)
 
@@ -589,6 +610,7 @@ def train(config, logger):
                 'loss': avg_loss,
                 'attraction_loss': avg_attraction_loss,
                 'activation_loss': avg_activation_loss,
+                'balance_loss': avg_balance_loss,
                 'config': config,
             }, checkpoint_path)
             logger.info(f"Checkpoint saved: {checkpoint_path}")
@@ -602,6 +624,7 @@ def train(config, logger):
         'loss': avg_loss,
         'attraction_loss': avg_attraction_loss,
         'activation_loss': avg_activation_loss,
+        'balance_loss': avg_balance_loss,
         'config': config,
     }, final_checkpoint_path)
     logger.info(f"Final checkpoint saved: {final_checkpoint_path}")
