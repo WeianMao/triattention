@@ -1,0 +1,49 @@
+# Exp 012: Expanded Training Set Experiment
+# Based on Exp 006 Module 2 Reverse Cross-Trace Validation
+# Train on all available traces (except test trace), test on qid0008_trace46
+
+experiment:
+  name: "exp_012_expanded_training_set"
+  description: "Training with expanded dataset - 7 traces (70 samples) vs original 1 trace (10 samples)"
+
+model:
+  num_bins: 128
+  num_kernels: 3
+  num_freqs: 64  # head_dim / 2
+  head_dim: 128
+  # NO MLP, NO PositionScaling
+
+training:
+  epochs: 25
+  learning_rate: 0.001
+  optimizer: "adam"
+  round_window: 128
+  exclude_tail: 1000
+  save_every: 10
+  log_every: 1
+
+data:
+  # Test trace - kept separate, not used for training
+  test_trace_path: "data/qk_test.pt"
+
+  # Training traces - all available traces EXCEPT the test trace (qid0008_trace46)
+  training_traces:
+    - "/data/rbg/users/weian/project/rl/dc/outputs/deepseek_r1_qwen3_8b/qk_bf16_traces/qid0003_trace34/qk.pt"
+    - "/data/rbg/users/weian/project/rl/dc/outputs/deepseek_r1_qwen3_8b/qk_bf16_traces/qid0010_trace23/qk.pt"
+    - "/data/rbg/users/weian/project/rl/dc/outputs/deepseek_r1_qwen3_8b/qk_bf16_traces/qid0012_trace61/qk.pt"
+    - "/data/rbg/users/weian/project/rl/dc/outputs/deepseek_r1_qwen3_8b/qk_bf16_traces/qid0013_trace55/qk.pt"
+    - "/data/rbg/users/weian/project/rl/dc/outputs/deepseek_r1_qwen3_8b/qk_bf16_traces/qid0018_trace51/qk.pt"
+    - "/data/rbg/users/weian/project/rl/dc/outputs/deepseek_r1_qwen3_8b/qk_bf16_traces/qid0022_trace16/qk.pt"
+    - "/data/rbg/users/weian/project/rl/dc/outputs/deepseek_r1_qwen3_8b/qk_bf16_traces/qid0024_trace61/qk.pt"
+
+  head_sample_file: "../../hybrid_sample_heads_lowret_top10.json"
+
+evaluation:
+  topk_K: [50, 500, 1000]
+  round_window: 128
+
+output:
+  base_dir: "output"
+  logs_dir: "output/logs"
+  checkpoints_dir: "output/checkpoints"
+  results_dir: "output/results"
