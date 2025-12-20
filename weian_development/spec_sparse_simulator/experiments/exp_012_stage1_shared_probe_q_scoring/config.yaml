@@ -1,8 +1,8 @@
-# Exp 012 Stage 1: Shared Probe + Distance-Based Q Scoring + K-means Init
+# Exp 012 Stage 2: Shared Probe + Magnitude-Aware Scoring + K-means Init
 
 experiment:
-  name: "exp_012_stage1_kmeans_init"
-  description: "Shared probe vectors with distance-based Q-side scoring, K-means initialization"
+  name: "exp_012_stage2_magnitude_aware"
+  description: "Stage 2: Shared probes with magnitude-aware scoring (K-side + Q-side magnitude terms + biases)"
 
 model:
   num_bins: 128
@@ -10,10 +10,11 @@ model:
   num_freqs: 64  # head_dim / 2
   head_dim: 128
   use_kmeans_init: true  # Use K-means cluster centers to initialize probes
-  # NO MLP, NO PositionScaling
+  # Stage 2: K-side = dot product + u^T * m^K + k_bias
+  # Stage 2: Q-side = tilde_w^T * d + v^T * m^Q + c
 
 training:
-  epochs: 25
+  epochs: 100
   learning_rate: 0.001
   optimizer: "adam"
   round_window: 128

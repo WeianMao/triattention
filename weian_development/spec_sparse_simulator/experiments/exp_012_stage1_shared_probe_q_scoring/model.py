@@ -1,23 +1,55 @@
 """
-Module 2 Multi-Bin Sparse Attention Model - Asymmetric Probe Network (exp_012 stage 1)
+Module 2 Multi-Bin Sparse Attention Model - Asymmetric Probe Network (exp_012 stage 2)
 
 Network Architecture:
-- SharedProbeLayer: Shared learnable probe vectors with RoPE rotation (no bias)
-- Module2KeyNetwork: SharedProbe -> dot product (no bias) -> logits (external softmax dim=0)
-- Module2QueryNetwork: SharedProbe -> distance-based scoring -> logits (external softmax dim=-1)
+- SharedProbeLayer: Shared learnable probe vectors with RoPE rotation
+- Module2KeyNetwork: SharedProbe -> dot product + magnitude term + bias -> logits (external softmax dim=0)
+- Module2QueryNetwork: SharedProbe -> distance-based + magnitude term -> logits (external softmax dim=-1)
 
-Key features (exp_012 stage 1):
+Stage 2 features (magnitude-aware scoring):
 - Shared probe vectors between K and Q networks (parameter sharing)
-- K-side: dot product scoring without bias
-- Q-side: distance-based scoring with -softplus weight mapping
-- Total parameters: 24,704 (16,384 shared probes + 8,192 Q weights + 128 Q bias)
-- Initialization: randn / sqrt(head_dim) for probes, ln(e-1) for Q weights_raw
+- K-side: s_K^(b) = P_rot_b^T * K + u_b^T * m^K + k_bias_b
+- Q-side: s_Q^(b) = tilde_w_b^T * d_b + v_b^T * m^Q + c_b
+- Magnitude: m_f = sqrt(x_{2f}^2 + x_{2f+1}^2)
+
+Total parameters: 41,216
+- Shared probes: 128 * 128 = 16,384
+- Q weights_raw: 128 * 64 = 8,192
+- Q bias: 128
+- K magnitude weights u: 128 * 64 = 8,192
+- Q magnitude weights v: 128 * 64 = 8,192
+- K bias: 128
 """
 
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+def compute_magnitude_features(x, num_freqs, eps=1e-8):
+    """
+    Compute per-frequency magnitude features.
+
+    m_f = sqrt(x_{2f}^2 + x_{2f+1}^2 + eps)
+
+    Args:
+        x: Tensor of shape (..., head_dim) where head_dim = num_freqs * 2
+        num_freqs: Number of frequency components (F = head_dim // 2)
+        eps: Small value for numerical stability
+
+    Returns:
+        magnitude: Tensor of shape (..., num_freqs)
+    """
+    # Reshape to frequency pairs
+    original_shape = x.shape[:-1]
+    head_dim = x.shape[-1]
+    x_freq = x.view(*original_shape, num_freqs, 2)  # (..., num_freqs, 2)
+
+    # Compute magnitude: sqrt(x_0^2 + x_1^2 + eps)
+    magnitude = torch.sqrt(torch.sum(x_freq ** 2, dim=-1) + eps)  # (..., num_freqs)
+
+    return magnitude
 
 
 def apply_rope_rotation(vectors, position, base=10000):
@@ -156,15 +188,16 @@ class SharedProbeLayer(nn.Module):
 
 class DistanceBasedQueryScorer(nn.Module):
     """
-    Distance-based Query Scorer for exp_012 stage 1.
+    Distance-based Query Scorer for exp_012 stage 2.
 
-    Computes Q-side scores using frequency-wise distance features:
+    Computes Q-side scores using frequency-wise distance features + magnitude:
     1. Compute per-frequency error: e_{b,f} = P_rot_{b,f} - Q_f
     2. Compute distance: d_{b,f} = sqrt(||e_{b,f}||^2 + eps)
-    3. Linear transform: s_Q^(b) = tilde_w_b^T * d_b + c_b
+    3. Compute Q magnitude: m^Q_f = sqrt(Q_{2f}^2 + Q_{2f+1}^2 + eps)
+    4. Linear transform: s_Q^(b) = tilde_w_b^T * d_b + v_b^T * m^Q + c_b
        where tilde_w_b = -softplus(w_raw_b) to ensure negative weights
 
-    Parameters: 128 * 64 (weights_raw) + 128 (bias) = 8,320
+    Parameters: 128 * 64 (weights_raw) + 128 * 64 (v_weights) + 128 (bias) = 16,512
     """
 
     def __init__(self, num_bins=128, num_freqs=64):
@@ -178,12 +211,19 @@ class DistanceBasedQueryScorer(nn.Module):
         self.num_freqs = num_freqs
         self.eps = 1e-8
 
-        # Raw weights for linear transformation (will be mapped via -softplus)
+        # Raw weights for distance transformation (will be mapped via -softplus)
         # Shape: (num_bins, num_freqs)
         # Initialize to ln(e-1) ≈ 0.541 so that -softplus maps to -1
         init_value = math.log(math.e - 1)
         self.q_weights_raw = nn.Parameter(
             torch.full((num_bins, num_freqs), init_value)
+        )
+
+        # Q magnitude weights (Stage 2)
+        # Shape: (num_bins, num_freqs)
+        # Initialize to 0 so Stage 2 starts equivalent to Stage 1
+        self.q_magnitude_weights = nn.Parameter(
+            torch.zeros(num_bins, num_freqs)
         )
 
         # Bias for each bin
@@ -192,7 +232,7 @@ class DistanceBasedQueryScorer(nn.Module):
 
     def forward(self, Q, rotated_probes):
         """
-        Compute distance-based Q scores.
+        Compute distance-based Q scores with magnitude term.
 
         Args:
             Q: Query vector(s) of shape (head_dim,) or (num_queries, head_dim)
@@ -222,19 +262,29 @@ class DistanceBasedQueryScorer(nn.Module):
         # d_{b,f} = sqrt(||e_{b,f}||^2 + eps)
         distance = torch.sqrt(torch.sum(error ** 2, dim=-1) + self.eps)  # (num_queries, num_bins, num_freqs)
 
-        # Apply -softplus mapping to weights
+        # Compute Q magnitude features (Stage 2)
+        # m^Q_f = sqrt(Q_{2f}^2 + Q_{2f+1}^2 + eps)
+        Q_magnitude = compute_magnitude_features(Q, self.num_freqs, self.eps)  # (num_queries, num_freqs)
+
+        # Apply -softplus mapping to distance weights
         # tilde_w = -softplus(w_raw) = -ln(1 + exp(w_raw))
         effective_weights = -F.softplus(self.q_weights_raw)  # (num_bins, num_freqs)
 
         # Ensure dtype compatibility
         effective_weights = effective_weights.to(dtype=Q.dtype)
+        v_weights = self.q_magnitude_weights.to(dtype=Q.dtype)
         bias = self.q_bias.to(dtype=Q.dtype)
 
-        # Linear transformation: s_Q^(b) = tilde_w_b^T * d_b + c_b
-        # distance: (num_queries, num_bins, num_freqs)
-        # effective_weights: (num_bins, num_freqs)
-        # scores: (num_queries, num_bins)
-        scores = torch.sum(distance * effective_weights.unsqueeze(0), dim=-1) + bias
+        # Linear transformation:
+        # s_Q^(b) = tilde_w_b^T * d_b + v_b^T * m^Q + c_b
+
+        # Distance term: (num_queries, num_bins, num_freqs) * (num_bins, num_freqs) -> (num_queries, num_bins)
+        distance_term = torch.sum(distance * effective_weights.unsqueeze(0), dim=-1)
+
+        # Magnitude term: (num_queries, num_freqs) @ (num_bins, num_freqs).T -> (num_queries, num_bins)
+        magnitude_term = torch.matmul(Q_magnitude, v_weights.t())
+
+        scores = distance_term + magnitude_term + bias
 
         if is_single:
             scores = scores.squeeze(0)  # (num_bins,)
@@ -244,10 +294,10 @@ class DistanceBasedQueryScorer(nn.Module):
 
 class Module2KeyNetwork(nn.Module):
     """
-    Module 2 Key Network for bin assignment (exp_012 stage 1).
+    Module 2 Key Network for bin assignment (exp_012 stage 2).
 
-    Uses shared probe layer (no bias). Computes K-side scores via dot product:
-        s_K^(b) = P_rot_b^T * K
+    Uses shared probe layer with magnitude term and bias. Computes K-side scores:
+        s_K^(b) = P_rot_b^T * K + u_b^T * m^K + k_bias_b
 
     Input: K (post-RoPE key vectors) of shape (num_keys, head_dim)
     Output: logits of shape (num_keys, num_bins)
@@ -256,19 +306,38 @@ class Module2KeyNetwork(nn.Module):
         key_probs = F.softmax(logits, dim=0)  # Each column sums to 1
 
     Execution timing: Once per round (round_start)
+
+    Parameters: 128 * 64 (u_weights) + 128 (k_bias) = 8,320
     """
 
-    def __init__(self, shared_probe_layer):
+    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64):
         """
         Args:
             shared_probe_layer: SharedProbeLayer instance (shared with QueryNetwork)
+            num_bins: Number of bins (default: 128)
+            num_freqs: Number of frequency components (default: 64)
         """
         super().__init__()
         self.probe_layer = shared_probe_layer
+        self.num_bins = num_bins
+        self.num_freqs = num_freqs
+        self.eps = 1e-8
+
+        # K magnitude weights (Stage 2)
+        # Shape: (num_bins, num_freqs)
+        # Initialize to 0 so Stage 2 starts equivalent to Stage 1
+        self.k_magnitude_weights = nn.Parameter(
+            torch.zeros(num_bins, num_freqs)
+        )
+
+        # K bias (Stage 2)
+        # Shape: (num_bins,)
+        # Initialize to 0
+        self.k_bias = nn.Parameter(torch.zeros(num_bins))
 
     def forward(self, K, reference_angles):
         """
-        Forward pass: K -> dot product with rotated probes -> logits
+        Forward pass: K -> dot product + magnitude term + bias -> logits
 
         Args:
             K: Key vectors of shape (num_keys, head_dim)
@@ -287,11 +356,26 @@ class Module2KeyNetwork(nn.Module):
 
         # Ensure dtype compatibility
         rotated_probes = rotated_probes.to(dtype=K.dtype)
+        u_weights = self.k_magnitude_weights.to(dtype=K.dtype)
+        bias = self.k_bias.to(dtype=K.dtype)
 
-        # Dot product (no bias)
+        # Dot product term: s_K^(b) = P_rot_b^T * K
         # K: (num_keys, head_dim)
         # rotated_probes.T: (head_dim, num_bins)
-        logits = torch.matmul(K, rotated_probes.t())
+        dot_product_term = torch.matmul(K, rotated_probes.t())  # (num_keys, num_bins)
+
+        # Compute K magnitude features (Stage 2)
+        # m^K_f = sqrt(K_{2f}^2 + K_{2f+1}^2 + eps)
+        K_magnitude = compute_magnitude_features(K, self.num_freqs, self.eps)  # (num_keys, num_freqs)
+
+        # Magnitude term: u_b^T * m^K
+        # K_magnitude: (num_keys, num_freqs)
+        # u_weights: (num_bins, num_freqs)
+        # result: (num_keys, num_bins)
+        magnitude_term = torch.matmul(K_magnitude, u_weights.t())
+
+        # Final score: s_K^(b) = P_rot_b^T * K + u_b^T * m^K + k_bias_b
+        logits = dot_product_term + magnitude_term + bias
 
         if is_single:
             logits = logits.squeeze(0)
@@ -359,16 +443,19 @@ class Module2QueryNetwork(nn.Module):
 
 class Module2Network(nn.Module):
     """
-    Complete Module 2 Network combining Key and Query networks (exp_012 stage 1).
+    Complete Module 2 Network combining Key and Query networks (exp_012 stage 2).
 
     Uses shared probe layer between K and Q networks.
-    - K network: dot product scoring (no bias)
-    - Q network: distance-based scoring with -softplus weights
+    - K network: dot product + magnitude term + bias
+    - Q network: distance-based + magnitude term + bias
 
-    Total parameters: 24,704
+    Total parameters: 41,216
     - Shared probes: 128 * 128 = 16,384
     - Q weights_raw: 128 * 64 = 8,192
+    - Q magnitude weights v: 128 * 64 = 8,192
     - Q bias: 128
+    - K magnitude weights u: 128 * 64 = 8,192
+    - K bias: 128
     """
 
     def __init__(self, num_bins=128, head_dim=128, init_probes=None):
@@ -386,7 +473,7 @@ class Module2Network(nn.Module):
         self.shared_probe_layer = SharedProbeLayer(num_bins, head_dim, init_probes=init_probes)
 
         # Key and Query networks sharing the same probe layer
-        self.key_network = Module2KeyNetwork(self.shared_probe_layer)
+        self.key_network = Module2KeyNetwork(self.shared_probe_layer, num_bins, num_freqs)
         self.query_network = Module2QueryNetwork(self.shared_probe_layer, num_bins, num_freqs)
 
     def forward_keys(self, K, reference_angles):
@@ -440,12 +527,20 @@ class Module2Network(nn.Module):
     def get_param_count(self):
         """Get parameter count breakdown."""
         shared_probe_params = sum(p.numel() for p in self.shared_probe_layer.parameters())
-        distance_scorer_params = sum(p.numel() for p in self.query_network.distance_scorer.parameters())
+        k_magnitude_params = self.key_network.k_magnitude_weights.numel()
+        k_bias_params = self.key_network.k_bias.numel()
+        q_distance_weights_params = self.query_network.distance_scorer.q_weights_raw.numel()
+        q_magnitude_params = self.query_network.distance_scorer.q_magnitude_weights.numel()
+        q_bias_params = self.query_network.distance_scorer.q_bias.numel()
 
         return {
             'shared_probes': shared_probe_params,
-            'q_distance_scorer': distance_scorer_params,
-            'total': shared_probe_params + distance_scorer_params
+            'k_magnitude_weights': k_magnitude_params,
+            'k_bias': k_bias_params,
+            'q_distance_weights': q_distance_weights_params,
+            'q_magnitude_weights': q_magnitude_params,
+            'q_bias': q_bias_params,
+            'total': shared_probe_params + k_magnitude_params + k_bias_params + q_distance_weights_params + q_magnitude_params + q_bias_params
         }
 
 
