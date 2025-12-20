@@ -177,7 +177,8 @@ def compute_magnitude_init(Q_relatives_unnorm, cluster_labels, n_clusters, num_f
     return magnitude_init
 
 
-def compute_kmeans_init(config, logger, n_clusters=128, random_state=42, return_extras=False):
+def compute_kmeans_init(config, logger, n_clusters=128, random_state=42, return_extras=False,
+                        use_l2_norm=True):
     """
     Compute K-means initialization for probe vectors.
 
@@ -185,9 +186,9 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42, return_
     1. Load training data
     2. For each round, compute reference position: ref_pos = round_start + round_window / 2
     3. For each Q in the round, compute Q_relative = RoPE(Q_post, -ref_pos)
-    4. L2 normalize Q_relative to unit norm (Stage 3 alignment)
-    5. Collect all normalized Q_relative vectors
-    6. Run K-means to get cluster centers (already unit norm)
+    4. Optionally L2 normalize Q_relative to unit norm (Stage 3 alignment)
+    5. Collect all Q_relative vectors
+    6. Run K-means to get cluster centers
 
     Args:
         config: Configuration dict
@@ -196,6 +197,7 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42, return_
         random_state: Random seed for K-means
         return_extras: If True, also return cluster labels and unnormalized Q_relatives
                        for magnitude initialization
+        use_l2_norm: If True (default), L2 normalize vectors before K-means
 
     Returns:
         If return_extras=False:
@@ -262,8 +264,13 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42, return_
     # Stack all unnormalized Q_relative vectors
     Q_relatives_unnorm = torch.cat(Q_relatives_unnorm_list, dim=0)  # (total_queries, head_dim)
 
-    # L2 normalize for K-means clustering (Stage 3 alignment)
-    Q_relatives = l2_normalize(Q_relatives_unnorm)
+    # Optionally L2 normalize for K-means clustering
+    if use_l2_norm:
+        Q_relatives = l2_normalize(Q_relatives_unnorm)
+        logger.info("Using L2 normalized vectors for K-means")
+    else:
+        Q_relatives = Q_relatives_unnorm.clone()
+        logger.info("Using unnormalized vectors for K-means (no L2 norm)")
 
     logger.info(f"Total Q_relative vectors: {Q_relatives.shape[0]}")
 

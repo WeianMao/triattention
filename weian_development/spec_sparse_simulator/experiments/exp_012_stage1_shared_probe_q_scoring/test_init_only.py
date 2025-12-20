@@ -47,16 +47,31 @@ def main():
     # INITIALIZATION SECTION - Modify this section to test different init methods
     # =========================================================================
 
+    # Override num_bins for this experiment
+    # Set to 1 to test single-bin case (no bin partitioning, pure key scoring)
+    num_bins = 1  # <-- MODIFY THIS TO TEST DIFFERENT BIN COUNTS
+    logger.info(f"Using num_bins = {num_bins} (override from config's {config['model']['num_bins']})")
+
+    # L2 normalization toggle
+    # Set to False to test without L2 normalization (preserve amplitude info like Hybrid Frequency)
+    use_l2_norm = False  # <-- MODIFY THIS TO TEST WITH/WITHOUT L2 NORM
+    logger.info(f"Using L2 normalization: {use_l2_norm}")
+
+    # Create a modified config for model creation
+    test_config = config.copy()
+    test_config['model'] = config['model'].copy()
+    test_config['model']['num_bins'] = num_bins
+
     # Compute K-means + magnitude initialization
     logger.info("Computing K-means initialization with magnitude init...")
     init_probes, cluster_labels, Q_relatives_unnorm = compute_kmeans_init(
-        config, logger, n_clusters=config['model']['num_bins'], return_extras=True
+        config, logger, n_clusters=num_bins, return_extras=True, use_l2_norm=use_l2_norm
     )
     logger.info(f"K-means initialization completed. Probe shape: {init_probes.shape}")
 
     num_freqs = config['model'].get('num_freqs', 64)
     magnitude_init = compute_magnitude_init(
-        Q_relatives_unnorm, cluster_labels, config['model']['num_bins'], num_freqs
+        Q_relatives_unnorm, cluster_labels, num_bins, num_freqs
     )
     logger.info(f"Magnitude initialization computed. Shape: {magnitude_init.shape}")
     logger.info(f"Magnitude init stats: mean={magnitude_init.mean():.6f}, "
@@ -64,7 +79,7 @@ def main():
                f"max={magnitude_init.max():.6f}")
 
     # Create model with initialization (NO TRAINING)
-    model = create_model(config, init_probes=init_probes)
+    model = create_model(test_config, init_probes=init_probes, use_l2_norm=use_l2_norm)
 
     # Apply magnitude initialization
     with torch.no_grad():

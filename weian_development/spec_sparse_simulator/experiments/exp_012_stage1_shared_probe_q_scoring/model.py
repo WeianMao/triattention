@@ -230,16 +230,18 @@ class DistanceBasedQueryScorer(nn.Module):
     Parameters: 128 * 64 (weights_raw) + 128 * 64 (v_weights) + 128 (bias) = 16,512
     """
 
-    def __init__(self, num_bins=128, num_freqs=64):
+    def __init__(self, num_bins=128, num_freqs=64, use_l2_norm=True):
         """
         Args:
             num_bins: Number of bins (default: 128)
             num_freqs: Number of frequency components (default: 64)
+            use_l2_norm: If True (default), L2 normalize Q before distance computation
         """
         super().__init__()
         self.num_bins = num_bins
         self.num_freqs = num_freqs
         self.eps = 1e-8
+        self.use_l2_norm = use_l2_norm
 
         # Raw weights for distance transformation (will be mapped via -softplus)
         # Shape: (num_bins, num_freqs)
@@ -284,11 +286,14 @@ class DistanceBasedQueryScorer(nn.Module):
         num_queries = Q.shape[0]
         head_dim = Q.shape[1]
 
-        # Stage 3: L2 normalize Q to unit norm
-        Q_normalized = l2_normalize(Q, self.eps)
+        # Optionally L2 normalize Q to unit norm
+        if self.use_l2_norm:
+            Q_processed = l2_normalize(Q, self.eps)
+        else:
+            Q_processed = Q
 
         # Reshape to frequency pairs: (*, num_freqs, 2)
-        Q_freq = Q_normalized.view(num_queries, self.num_freqs, 2)  # (num_queries, num_freqs, 2)
+        Q_freq = Q_processed.view(num_queries, self.num_freqs, 2)  # (num_queries, num_freqs, 2)
         P_freq = rotated_probes.view(self.num_bins, self.num_freqs, 2)  # (num_bins, num_freqs, 2)
 
         # Compute per-frequency error vectors
@@ -301,9 +306,9 @@ class DistanceBasedQueryScorer(nn.Module):
         # d_{b,f} = sqrt(||e_{b,f}||^2 + eps)
         distance = torch.sqrt(torch.sum(error ** 2, dim=-1) + self.eps)  # (num_queries, num_bins, num_freqs)
 
-        # Compute Q magnitude features on NORMALIZED Q (Stage 3 modification)
-        # m^Q_f = sqrt(Q_normalized_{2f}^2 + Q_normalized_{2f+1}^2 + eps)
-        Q_magnitude = compute_magnitude_features(Q_normalized, self.num_freqs, self.eps)  # (num_queries, num_freqs)
+        # Compute Q magnitude features (on processed Q, normalized or not)
+        # m^Q_f = sqrt(Q_{2f}^2 + Q_{2f+1}^2 + eps)
+        Q_magnitude = compute_magnitude_features(Q_processed, self.num_freqs, self.eps)  # (num_queries, num_freqs)
 
         # Apply -softplus mapping to distance weights
         # tilde_w = -softplus(w_raw) = -ln(1 + exp(w_raw))
@@ -353,18 +358,20 @@ class Module2KeyNetwork(nn.Module):
     Parameters: 128 * 64 (u_weights) + 128 (k_bias) = 8,320
     """
 
-    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64):
+    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True):
         """
         Args:
             shared_probe_layer: SharedProbeLayer instance (shared with QueryNetwork)
             num_bins: Number of bins (default: 128)
             num_freqs: Number of frequency components (default: 64)
+            use_l2_norm: If True (default), L2 normalize probes before rotation
         """
         super().__init__()
         self.probe_layer = shared_probe_layer
         self.num_bins = num_bins
         self.num_freqs = num_freqs
         self.eps = 1e-8
+        self.use_l2_norm = use_l2_norm
 
         # K magnitude weights (Stage 2)
         # Shape: (num_bins, num_freqs)
@@ -397,15 +404,15 @@ class Module2KeyNetwork(nn.Module):
         if is_single:
             K = K.unsqueeze(0)
 
-        # Get rotated probes with L2 normalization (Stage 3)
-        rotated_probes = self.probe_layer.get_rotated_probes(reference_angles, normalize=True)
+        # Get rotated probes (optionally with L2 normalization)
+        rotated_probes = self.probe_layer.get_rotated_probes(reference_angles, normalize=self.use_l2_norm)
 
         # Ensure dtype compatibility
         rotated_probes = rotated_probes.to(dtype=K.dtype)
         u_weights = self.k_magnitude_weights.to(dtype=K.dtype)
         bias = self.k_bias.to(dtype=K.dtype)
 
-        # Dot product term: s_K^(b) = P_normalized_rot_b^T * K
+        # Dot product term: s_K^(b) = P_normalized_rot_b^T * K (or unnormalized if use_l2_norm=False)
         # K: (num_keys, head_dim)
         # rotated_probes.T: (head_dim, num_bins)
         dot_product_term = torch.matmul(K, rotated_probes.t())  # (num_keys, num_bins)
@@ -453,22 +460,22 @@ class Module2QueryNetwork(nn.Module):
     Execution timing: Every decoding step
     """
 
-    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64):
+    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True):
         """
         Args:
             shared_probe_layer: SharedProbeLayer instance (shared with KeyNetwork)
             num_bins: Number of bins (default: 128)
             num_freqs: Number of frequency components (default: 64)
+            use_l2_norm: If True (default), L2 normalize Q and probes
         """
         super().__init__()
         self.probe_layer = shared_probe_layer
-        self.distance_scorer = DistanceBasedQueryScorer(num_bins, num_freqs)
+        self.use_l2_norm = use_l2_norm
+        self.distance_scorer = DistanceBasedQueryScorer(num_bins, num_freqs, use_l2_norm=use_l2_norm)
 
     def forward(self, Q, reference_angles):
         """
         Forward pass: Q -> distance computation -> linear transform -> logits
-
-        Stage 3: Uses normalized probes and normalized Q internally
 
         Args:
             Q: Query vector(s) of shape (head_dim,) or (num_queries, head_dim)
@@ -478,8 +485,8 @@ class Module2QueryNetwork(nn.Module):
             logits: Raw logits of shape (num_bins,) or (num_queries, num_bins)
                 Apply softmax(dim=-1) externally to get bin_probs
         """
-        # Get rotated probes with L2 normalization (Stage 3)
-        rotated_probes = self.probe_layer.get_rotated_probes(reference_angles, normalize=True)
+        # Get rotated probes (optionally with L2 normalization)
+        rotated_probes = self.probe_layer.get_rotated_probes(reference_angles, normalize=self.use_l2_norm)
 
         # Compute distance-based scores (Q is normalized inside distance_scorer)
         logits = self.distance_scorer(Q, rotated_probes)
@@ -508,23 +515,25 @@ class Module2Network(nn.Module):
     - K bias: 128
     """
 
-    def __init__(self, num_bins=128, head_dim=128, init_probes=None):
+    def __init__(self, num_bins=128, head_dim=128, init_probes=None, use_l2_norm=True):
         """
         Args:
             num_bins: Number of bins (default: 128)
             head_dim: Dimension of key/query vectors (default: 128)
             init_probes: Optional tensor of shape (num_bins, head_dim) for probe initialization
+            use_l2_norm: If True (default), L2 normalize probes and Q vectors
         """
         super().__init__()
         self.num_bins = num_bins
+        self.use_l2_norm = use_l2_norm
         num_freqs = head_dim // 2
 
         # Shared probe layer (used by both K and Q networks)
         self.shared_probe_layer = SharedProbeLayer(num_bins, head_dim, init_probes=init_probes)
 
         # Key and Query networks sharing the same probe layer
-        self.key_network = Module2KeyNetwork(self.shared_probe_layer, num_bins, num_freqs)
-        self.query_network = Module2QueryNetwork(self.shared_probe_layer, num_bins, num_freqs)
+        self.key_network = Module2KeyNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm)
+        self.query_network = Module2QueryNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm)
 
     def forward_keys(self, K, reference_angles):
         """
@@ -594,7 +603,7 @@ class Module2Network(nn.Module):
         }
 
 
-def create_model(config, init_probes=None):
+def create_model(config, init_probes=None, use_l2_norm=True):
     """
     Factory function to create Module 2 network.
 
@@ -605,6 +614,7 @@ def create_model(config, init_probes=None):
             - num_kernels: Ignored (kept for backward compatibility)
         init_probes: Optional tensor of shape (num_bins, head_dim) for probe initialization
                      If provided, use this to initialize probes (e.g., K-means centers)
+        use_l2_norm: If True (default), L2 normalize probes and Q vectors
 
     Returns:
         Module2Network instance
@@ -622,6 +632,7 @@ def create_model(config, init_probes=None):
     model = Module2Network(
         num_bins=num_bins,
         head_dim=head_dim,
-        init_probes=init_probes
+        init_probes=init_probes,
+        use_l2_norm=use_l2_norm
     )
     return model
