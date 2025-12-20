@@ -1,0 +1,12 @@
+# Output directories
+output/
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Checkpoints and logs
+*.pt
+*.log

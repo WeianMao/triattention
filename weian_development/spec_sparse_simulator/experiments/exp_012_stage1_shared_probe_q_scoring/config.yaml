@@ -1,0 +1,37 @@
+# Exp 012 Stage 1: Shared Probe + Distance-Based Q Scoring + K-means Init
+
+experiment:
+  name: "exp_012_stage1_kmeans_init"
+  description: "Shared probe vectors with distance-based Q-side scoring, K-means initialization"
+
+model:
+  num_bins: 128
+  num_kernels: 3
+  num_freqs: 64  # head_dim / 2
+  head_dim: 128
+  use_kmeans_init: true  # Use K-means cluster centers to initialize probes
+  # NO MLP, NO PositionScaling
+
+training:
+  epochs: 25
+  learning_rate: 0.001
+  optimizer: "adam"
+  round_window: 128
+  exclude_tail: 1000
+  save_every: 10
+  log_every: 10
+
+data:
+  trace_path: "data/qk.pt"
+  test_trace_path: "data/qk_test.pt"
+  head_sample_file: "../../hybrid_sample_heads_lowret_top10.json"
+
+evaluation:
+  topk_K: [50, 500, 1000]
+  round_window: 128
+
+output:
+  base_dir: "output"
+  logs_dir: "output/logs"
+  checkpoints_dir: "output/checkpoints"
+  results_dir: "output/results"
