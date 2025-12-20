@@ -11,6 +11,12 @@ Core algorithm:
 4. Run K-means clustering on all normalized Q_relative vectors
 5. Return cluster centers as probe initialization
 
+Optional magnitude weight initialization (--use-magnitude-init):
+For each cluster b, compute:
+- mean_of_magnitude[b, f] = mean(sqrt(x_{2f}^2 + x_{2f+1}^2))
+- magnitude_of_mean[b, f] = sqrt(mean_x_{2f}^2 + mean_x_{2f+1}^2)
+- init[b, f] = mean_of_magnitude[b, f] - magnitude_of_mean[b, f]
+
 Reference: exp_012_asymmetric_probe_network.md
 """
 
@@ -89,7 +95,89 @@ def l2_normalize(x, eps=1e-8):
     return x / (norm + eps)
 
 
-def compute_kmeans_init(config, logger, n_clusters=128, random_state=42):
+def compute_magnitude_features(x, num_freqs, eps=1e-8):
+    """
+    Compute per-frequency magnitude features.
+
+    m_f = sqrt(x_{2f}^2 + x_{2f+1}^2 + eps)
+
+    Args:
+        x: Tensor of shape (..., head_dim) where head_dim = num_freqs * 2
+        num_freqs: Number of frequency components (F = head_dim // 2)
+        eps: Small value for numerical stability
+
+    Returns:
+        magnitude: Tensor of shape (..., num_freqs)
+    """
+    original_shape = x.shape[:-1]
+    head_dim = x.shape[-1]
+    x_freq = x.view(*original_shape, num_freqs, 2)
+    magnitude = torch.sqrt(torch.sum(x_freq ** 2, dim=-1) + eps)
+    return magnitude
+
+
+def compute_magnitude_init(Q_relatives_unnorm, cluster_labels, n_clusters, num_freqs, eps=1e-8):
+    """
+    Compute magnitude weight initialization for each cluster.
+
+    For each cluster b:
+    - mean_of_magnitude[b, f] = mean(sqrt(x_{2f}^2 + x_{2f+1}^2))  over cluster points
+    - magnitude_of_mean[b, f] = sqrt(mean_x_{2f}^2 + mean_x_{2f+1}^2)  of cluster mean
+    - init[b, f] = mean_of_magnitude[b, f] - magnitude_of_mean[b, f]
+
+    This follows the pattern from hybrid frequency baseline where:
+    extra = (q_abs_mean - q_mean_abs) * k_abs
+
+    Args:
+        Q_relatives_unnorm: Tensor of shape (n_points, head_dim) - NOT L2 normalized
+        cluster_labels: Array of shape (n_points,) with cluster assignments
+        n_clusters: Number of clusters
+        num_freqs: Number of frequency components (head_dim // 2)
+        eps: Small value for numerical stability
+
+    Returns:
+        magnitude_init: Tensor of shape (n_clusters, num_freqs)
+    """
+    head_dim = Q_relatives_unnorm.shape[1]
+    magnitude_init = torch.zeros(n_clusters, num_freqs, dtype=Q_relatives_unnorm.dtype)
+
+    # Convert cluster_labels to tensor if needed
+    if not isinstance(cluster_labels, torch.Tensor):
+        cluster_labels = torch.from_numpy(cluster_labels)
+
+    for b in range(n_clusters):
+        # Find points belonging to cluster b
+        mask = cluster_labels == b
+        cluster_vectors = Q_relatives_unnorm[mask]  # (n_points_in_cluster, head_dim)
+
+        if cluster_vectors.shape[0] == 0:
+            continue
+
+        # Reshape to frequency pairs: (n_points, num_freqs, 2)
+        vectors_freq = cluster_vectors.view(-1, num_freqs, 2)
+
+        # Compute magnitude for each point: (n_points, num_freqs)
+        magnitudes = torch.sqrt(vectors_freq[..., 0]**2 + vectors_freq[..., 1]**2 + eps)
+
+        # mean_of_magnitude: average magnitude across points (num_freqs,)
+        mean_of_mag = magnitudes.mean(dim=0)
+
+        # Compute mean vector of the cluster: (head_dim,)
+        mean_vector = cluster_vectors.mean(dim=0)
+
+        # Reshape mean vector to frequency pairs: (num_freqs, 2)
+        mean_vector_freq = mean_vector.view(num_freqs, 2)
+
+        # magnitude_of_mean: magnitude of the mean vector (num_freqs,)
+        mag_of_mean = torch.sqrt(mean_vector_freq[..., 0]**2 + mean_vector_freq[..., 1]**2 + eps)
+
+        # init = mean_of_magnitude - magnitude_of_mean
+        magnitude_init[b] = mean_of_mag - mag_of_mean
+
+    return magnitude_init
+
+
+def compute_kmeans_init(config, logger, n_clusters=128, random_state=42, return_extras=False):
     """
     Compute K-means initialization for probe vectors.
 
@@ -106,9 +194,14 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42):
         logger: Logger instance
         n_clusters: Number of clusters (default: 128)
         random_state: Random seed for K-means
+        return_extras: If True, also return cluster labels and unnormalized Q_relatives
+                       for magnitude initialization
 
     Returns:
-        cluster_centers: Tensor of shape (n_clusters, head_dim)
+        If return_extras=False:
+            cluster_centers: Tensor of shape (n_clusters, head_dim)
+        If return_extras=True:
+            tuple of (cluster_centers, cluster_labels, Q_relatives_unnorm)
     """
     exp_dir = Path(__file__).parent
     trace_path = exp_dir / config['data']['trace_path']
@@ -139,8 +232,8 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42):
     round_window = config['training']['round_window']
     exclude_tail = config['training']['exclude_tail']
 
-    # Collect Q_relative vectors
-    Q_relatives = []
+    # Collect Q_relative vectors (both normalized and unnormalized)
+    Q_relatives_unnorm_list = []
 
     for round_start in range(0, seq_len, round_window):
         round_end = min(round_start + round_window, seq_len)
@@ -163,17 +256,20 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42):
         # Compute Q_relative = RoPE(Q_post, -ref_pos)
         Q_relative = apply_rope_rotation(round_Q, -ref_pos)
 
-        # L2 normalize to unit norm (Stage 3 alignment)
-        Q_relative = l2_normalize(Q_relative)
+        # Store unnormalized version for magnitude init
+        Q_relatives_unnorm_list.append(Q_relative.clone())
 
-        Q_relatives.append(Q_relative)
+    # Stack all unnormalized Q_relative vectors
+    Q_relatives_unnorm = torch.cat(Q_relatives_unnorm_list, dim=0)  # (total_queries, head_dim)
 
-    # Stack all Q_relative vectors
-    Q_relatives = torch.cat(Q_relatives, dim=0)  # (total_queries, head_dim)
+    # L2 normalize for K-means clustering (Stage 3 alignment)
+    Q_relatives = l2_normalize(Q_relatives_unnorm)
+
     logger.info(f"Total Q_relative vectors: {Q_relatives.shape[0]}")
 
     # Convert to float32 for sklearn (may be bfloat16)
     Q_relatives = Q_relatives.float()
+    Q_relatives_unnorm = Q_relatives_unnorm.float()
 
     # Run K-means clustering
     logger.info(f"Running K-means with {n_clusters} clusters...")
@@ -185,6 +281,11 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42):
 
     # Compute inertia (sum of squared distances)
     logger.info(f"K-means inertia: {kmeans.inertia_:.4f}")
+
+    if return_extras:
+        # Return extras for magnitude initialization
+        cluster_labels = kmeans.labels_  # numpy array of shape (n_points,)
+        return cluster_centers, cluster_labels, Q_relatives_unnorm
 
     return cluster_centers
 

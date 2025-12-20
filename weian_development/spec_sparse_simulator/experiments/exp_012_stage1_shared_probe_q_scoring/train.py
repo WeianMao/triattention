@@ -20,7 +20,7 @@ import torch.optim as optim
 import yaml
 
 from model import Module2Network, create_model
-from compute_kmeans_init import compute_kmeans_init
+from compute_kmeans_init import compute_kmeans_init, compute_magnitude_init
 
 
 def setup_logging(config):
@@ -321,13 +321,15 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
     return avg_loss
 
 
-def train(config, logger):
+def train(config, logger, use_magnitude_init=False):
     """
     Main training loop.
 
     Args:
         config: Configuration dict
         logger: Logger instance
+        use_magnitude_init: If True, initialize magnitude weights using per-cluster statistics
+                           (mean_of_magnitude - magnitude_of_mean) instead of zeros
 
     Returns:
         Path to final checkpoint
@@ -349,13 +351,42 @@ def train(config, logger):
     # Compute K-means initialization for probes
     use_kmeans_init = config.get('model', {}).get('use_kmeans_init', True)
     init_probes = None
+    magnitude_init = None
+
     if use_kmeans_init:
-        logger.info("Computing K-means initialization for probe vectors...")
-        init_probes = compute_kmeans_init(config, logger, n_clusters=config['model']['num_bins'])
-        logger.info(f"K-means initialization completed. Probe shape: {init_probes.shape}")
+        if use_magnitude_init:
+            # Get extras for magnitude initialization
+            logger.info("Computing K-means initialization with magnitude init...")
+            init_probes, cluster_labels, Q_relatives_unnorm = compute_kmeans_init(
+                config, logger, n_clusters=config['model']['num_bins'], return_extras=True
+            )
+            logger.info(f"K-means initialization completed. Probe shape: {init_probes.shape}")
+
+            # Compute magnitude initialization
+            num_freqs = config['model'].get('num_freqs', 64)
+            magnitude_init = compute_magnitude_init(
+                Q_relatives_unnorm, cluster_labels, config['model']['num_bins'], num_freqs
+            )
+            logger.info(f"Magnitude initialization computed. Shape: {magnitude_init.shape}")
+            logger.info(f"Magnitude init stats: mean={magnitude_init.mean():.6f}, "
+                       f"std={magnitude_init.std():.6f}, min={magnitude_init.min():.6f}, "
+                       f"max={magnitude_init.max():.6f}")
+        else:
+            logger.info("Computing K-means initialization for probe vectors...")
+            init_probes = compute_kmeans_init(config, logger, n_clusters=config['model']['num_bins'])
+            logger.info(f"K-means initialization completed. Probe shape: {init_probes.shape}")
 
     # Create model
     model = create_model(config, init_probes=init_probes)
+
+    # Apply magnitude initialization if enabled
+    if magnitude_init is not None:
+        with torch.no_grad():
+            # Apply to both K-side and Q-side magnitude weights (using Q statistics for both)
+            model.key_network.k_magnitude_weights.copy_(magnitude_init)
+            model.query_network.distance_scorer.q_magnitude_weights.copy_(magnitude_init)
+            logger.info("Applied magnitude initialization to k_magnitude_weights and q_magnitude_weights")
+
     model = model.to(device)
 
     param_counts = model.get_param_count()
@@ -430,6 +461,19 @@ def train(config, logger):
 
 def main():
     """Main entry point."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Module 2 Training')
+    parser.add_argument(
+        '--use-magnitude-init',
+        action='store_true',
+        default=False,
+        help='Initialize magnitude weights using per-cluster statistics '
+             '(mean_of_magnitude - magnitude_of_mean) instead of zeros. '
+             'This follows the pattern from hybrid frequency baseline.'
+    )
+    args = parser.parse_args()
+
     # Load configuration
     exp_dir = Path(__file__).parent
     config_path = exp_dir / 'config.yaml'
@@ -440,9 +484,14 @@ def main():
     # Setup logging
     logger = setup_logging(config)
 
+    if args.use_magnitude_init:
+        logger.info("Magnitude initialization ENABLED")
+    else:
+        logger.info("Magnitude initialization DISABLED (default zeros)")
+
     try:
         # Run training
-        final_checkpoint = train(config, logger)
+        final_checkpoint = train(config, logger, use_magnitude_init=args.use_magnitude_init)
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:
         logger.error(f"Training failed: {e}", exc_info=True)
