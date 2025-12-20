@@ -336,6 +336,7 @@ def auto_threshold_search(model, trace_data, config, target_hit_rate=0.995,
 def run_pruning_experiment(
     num_kernels=3,
     mlp_hidden_dim=64,
+    num_bins=None,
     use_mlp=True,
     config_path=None,
     experiment_name=None,
@@ -350,6 +351,7 @@ def run_pruning_experiment(
     Args:
         num_kernels: Number of von Mises kernels per frequency band (default: 3)
         mlp_hidden_dim: MLP hidden dimension (default: 64)
+        num_bins: Number of kernel encoding output bins / MLP input dim (default: None, use config)
         use_mlp: If False, use average pooling instead of MLP (default: True)
         config_path: Path to config YAML file (default: config.yaml)
         experiment_name: Name for experiment output (default: auto-generated)
@@ -377,19 +379,25 @@ def run_pruning_experiment(
     # Override model config with experiment parameters
     config['model']['num_kernels'] = num_kernels
     config['model']['mlp_hidden_dim'] = mlp_hidden_dim
+    if num_bins is not None:
+        config['model']['num_bins'] = num_bins
+
+    # Get effective num_bins for experiment name
+    effective_num_bins = config['model']['num_bins']
 
     # Generate experiment name if not provided
     if experiment_name is None:
         mlp_type = 'mlp' if use_mlp else 'avgpool'
         if fixed_keys is not None:
-            experiment_name = f'k{num_kernels}_h{mlp_hidden_dim}_{mlp_type}_fixedK{fixed_keys}'
+            experiment_name = f'b{effective_num_bins}_k{num_kernels}_h{mlp_hidden_dim}_{mlp_type}_fixedK{fixed_keys}'
         else:
-            experiment_name = f'k{num_kernels}_h{mlp_hidden_dim}_{mlp_type}'
+            experiment_name = f'b{effective_num_bins}_k{num_kernels}_h{mlp_hidden_dim}_{mlp_type}'
 
     logger.info("=" * 70)
     logger.info(f"EXPERIMENT: {experiment_name}")
     logger.info("=" * 70)
     logger.info(f"Configuration:")
+    logger.info(f"  num_bins: {effective_num_bins}")
     logger.info(f"  num_kernels: {num_kernels}")
     logger.info(f"  mlp_hidden_dim: {mlp_hidden_dim}")
     logger.info(f"  use_mlp: {use_mlp}")
@@ -478,6 +486,7 @@ def run_pruning_experiment(
         results = {
             'experiment_name': experiment_name,
             'config': {
+                'num_bins': effective_num_bins,
                 'num_kernels': num_kernels,
                 'mlp_hidden_dim': mlp_hidden_dim if use_mlp else 1,
                 'use_mlp': use_mlp,
@@ -527,6 +536,7 @@ def run_pruning_experiment(
         results = {
             'experiment_name': experiment_name,
             'config': {
+                'num_bins': effective_num_bins,
                 'num_kernels': num_kernels,
                 'mlp_hidden_dim': mlp_hidden_dim if use_mlp else 1,
                 'use_mlp': use_mlp,
@@ -581,6 +591,12 @@ def main():
         help='MLP hidden dimension (default: 64)'
     )
     parser.add_argument(
+        '--num-bins',
+        type=int,
+        default=None,
+        help='Number of kernel encoding output bins / MLP input dim (default: use config value)'
+    )
+    parser.add_argument(
         '--use-avg-pool',
         action='store_true',
         help='Use average pooling instead of MLP (default: False)'
@@ -628,6 +644,7 @@ def main():
         results = run_pruning_experiment(
             num_kernels=args.num_kernels,
             mlp_hidden_dim=args.mlp_hidden_dim,
+            num_bins=args.num_bins,
             use_mlp=not args.use_avg_pool,
             config_path=args.config,
             experiment_name=args.experiment_name,
