@@ -26,7 +26,7 @@ training:
 data:
   trace_path: "data/qk.pt"
   test_trace_path: "data/qk_test.pt"
-  head_sample_file: "../../hybrid_sample_heads_lowret_top10.json"
+  head_sample_file: "hardest_head.json"  # Layer 17, Head 25 - hardest among top 10
 
 evaluation:
   topk_K: [50, 500, 1000]
