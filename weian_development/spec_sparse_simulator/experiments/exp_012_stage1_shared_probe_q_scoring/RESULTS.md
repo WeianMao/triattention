@@ -196,9 +196,30 @@ Q_relative = l2_normalize(Q_relative)  # NEW: normalize before K-means
 
 ---
 
+## Ablation: Number of Probes
+
+Testing whether fewer probes can achieve similar performance with reduced parameters.
+
+| Probes | Parameters | K-means Inertia | Loss | K=50 | K=500 | K=1000 |
+|--------|------------|-----------------|------|------|-------|--------|
+| **128** | 41,216 | 3,228 | 0.037 | 98.49% | 98.61% | 98.70% |
+| **64** | 20,608 | 3,825 | 0.046 | 98.50% | 98.66% | 98.77% |
+| **32** | 10,304 | 5,110 | 0.057 | 98.49% | 98.59% | 98.76% |
+
+**Findings**:
+1. Hit rate is nearly identical across all probe counts (~98.5% at K=50)
+2. 64 probes slightly outperforms 128 probes
+3. Parameter reduction is significant: 32 probes uses 75% fewer parameters
+4. Loss increases with fewer probes but doesn't translate to lower hit rate
+
+**Recommendation**: Use **64 probes** as default - same performance with 50% fewer parameters.
+
+---
+
 ## Conclusions
 
 1. **L2 normalization is beneficial** - significantly reduces routing errors
 2. **Initialization alignment matters less than expected** - normalized K-means reduces loss but doesn't improve hit rate
 3. **Key Network generalization is the bottleneck** - perfect on training set, but errors on test set
-4. **Next steps**: Improve Key Network generalization (regularization, data augmentation, or architecture changes)
+4. **Probe count has minimal impact** - 32/64/128 probes all achieve ~98.5% hit rate
+5. **Recommended config**: 64 probes with L2 normalization and normalized K-means init
