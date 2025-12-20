@@ -467,10 +467,16 @@ def main():
     parser.add_argument(
         '--use-magnitude-init',
         action='store_true',
-        default=False,
+        default=True,
         help='Initialize magnitude weights using per-cluster statistics '
              '(mean_of_magnitude - magnitude_of_mean) instead of zeros. '
-             'This follows the pattern from hybrid frequency baseline.'
+             'This follows the pattern from hybrid frequency baseline. (default: enabled)'
+    )
+    parser.add_argument(
+        '--no-magnitude-init',
+        action='store_false',
+        dest='use_magnitude_init',
+        help='Disable magnitude weight initialization (use zeros instead).'
     )
     args = parser.parse_args()
 
