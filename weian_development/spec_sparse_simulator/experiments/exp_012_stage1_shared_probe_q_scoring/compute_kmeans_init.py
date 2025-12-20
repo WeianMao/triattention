@@ -7,8 +7,9 @@ to initialize shared probe vectors.
 Core algorithm:
 1. Load training data (Q, round positions)
 2. For each Q, compute Q_relative = RoPE(Q_post, -ref_pos)
-3. Run K-means clustering on all Q_relative vectors
-4. Return cluster centers as probe initialization
+3. L2 normalize Q_relative to unit norm (Stage 3 alignment)
+4. Run K-means clustering on all normalized Q_relative vectors
+5. Return cluster centers as probe initialization
 
 Reference: exp_012_asymmetric_probe_network.md
 """
@@ -82,6 +83,12 @@ def apply_rope_rotation(vectors, position, base=10000):
     return rotated
 
 
+def l2_normalize(x, eps=1e-8):
+    """L2 normalize vectors to unit norm."""
+    norm = torch.norm(x, p=2, dim=-1, keepdim=True)
+    return x / (norm + eps)
+
+
 def compute_kmeans_init(config, logger, n_clusters=128, random_state=42):
     """
     Compute K-means initialization for probe vectors.
@@ -90,8 +97,9 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42):
     1. Load training data
     2. For each round, compute reference position: ref_pos = round_start + round_window / 2
     3. For each Q in the round, compute Q_relative = RoPE(Q_post, -ref_pos)
-    4. Collect all Q_relative vectors
-    5. Run K-means to get cluster centers
+    4. L2 normalize Q_relative to unit norm (Stage 3 alignment)
+    5. Collect all normalized Q_relative vectors
+    6. Run K-means to get cluster centers (already unit norm)
 
     Args:
         config: Configuration dict
@@ -154,6 +162,10 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42):
 
         # Compute Q_relative = RoPE(Q_post, -ref_pos)
         Q_relative = apply_rope_rotation(round_Q, -ref_pos)
+
+        # L2 normalize to unit norm (Stage 3 alignment)
+        Q_relative = l2_normalize(Q_relative)
+
         Q_relatives.append(Q_relative)
 
     # Stack all Q_relative vectors
