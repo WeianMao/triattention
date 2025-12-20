@@ -321,7 +321,7 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
     return avg_loss
 
 
-def train(config, logger, use_magnitude_init=False):
+def train(config, logger, use_magnitude_init=False, use_l2_norm=False, invert_to_origin=False):
     """
     Main training loop.
 
@@ -330,11 +330,14 @@ def train(config, logger, use_magnitude_init=False):
         logger: Logger instance
         use_magnitude_init: If True, initialize magnitude weights using per-cluster statistics
                            (mean_of_magnitude - magnitude_of_mean) instead of zeros
+        use_l2_norm: If True, L2 normalize vectors before K-means (default: False)
+        invert_to_origin: If True, invert each Q to position 0 (default: False)
 
     Returns:
         Path to final checkpoint
     """
     logger.info("Initializing Module 2 training...")
+    logger.info(f"Settings: use_l2_norm={use_l2_norm}, invert_to_origin={invert_to_origin}")
 
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -358,7 +361,8 @@ def train(config, logger, use_magnitude_init=False):
             # Get extras for magnitude initialization
             logger.info("Computing K-means initialization with magnitude init...")
             init_probes, cluster_labels, Q_relatives_unnorm = compute_kmeans_init(
-                config, logger, n_clusters=config['model']['num_bins'], return_extras=True
+                config, logger, n_clusters=config['model']['num_bins'], return_extras=True,
+                use_l2_norm=use_l2_norm, invert_to_origin=invert_to_origin
             )
             logger.info(f"K-means initialization completed. Probe shape: {init_probes.shape}")
 
@@ -373,11 +377,14 @@ def train(config, logger, use_magnitude_init=False):
                        f"max={magnitude_init.max():.6f}")
         else:
             logger.info("Computing K-means initialization for probe vectors...")
-            init_probes = compute_kmeans_init(config, logger, n_clusters=config['model']['num_bins'])
+            init_probes = compute_kmeans_init(
+                config, logger, n_clusters=config['model']['num_bins'],
+                use_l2_norm=use_l2_norm, invert_to_origin=invert_to_origin
+            )
             logger.info(f"K-means initialization completed. Probe shape: {init_probes.shape}")
 
     # Create model
-    model = create_model(config, init_probes=init_probes)
+    model = create_model(config, init_probes=init_probes, use_l2_norm=use_l2_norm)
 
     # Apply magnitude initialization if enabled
     if magnitude_init is not None:
@@ -495,9 +502,19 @@ def main():
     else:
         logger.info("Magnitude initialization DISABLED (default zeros)")
 
+    # Fixed settings based on RoPE layout fix experiments
+    use_l2_norm = False  # L2 norm hurts performance after layout fix
+    invert_to_origin = False  # Use round-based reference position
+    logger.info(f"Using fixed settings: use_l2_norm={use_l2_norm}, invert_to_origin={invert_to_origin}")
+
     try:
         # Run training
-        final_checkpoint = train(config, logger, use_magnitude_init=args.use_magnitude_init)
+        final_checkpoint = train(
+            config, logger,
+            use_magnitude_init=args.use_magnitude_init,
+            use_l2_norm=use_l2_norm,
+            invert_to_origin=invert_to_origin
+        )
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:
         logger.error(f"Training failed: {e}", exc_info=True)

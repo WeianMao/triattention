@@ -345,7 +345,7 @@ def load_trace_data(config, logger, trace_type='test'):
     }
 
 
-def load_checkpoint(checkpoint_path, config, device, logger):
+def load_checkpoint(checkpoint_path, config, device, logger, use_l2_norm=False):
     """
     Load model from checkpoint.
 
@@ -354,6 +354,7 @@ def load_checkpoint(checkpoint_path, config, device, logger):
         config: Configuration dict
         device: torch.device
         logger: Logger instance
+        use_l2_norm: Whether to use L2 normalization (default: False after RoPE layout fix)
 
     Returns:
         Loaded model
@@ -361,7 +362,7 @@ def load_checkpoint(checkpoint_path, config, device, logger):
     logger.info(f"Loading checkpoint: {checkpoint_path}")
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    model = create_model(config)
+    model = create_model(config, use_l2_norm=use_l2_norm)
     model.load_state_dict(checkpoint['model_state_dict'])
     model = model.to(device)
     model.eval()
