@@ -302,7 +302,7 @@ def evaluate(config, checkpoint_path, logger):
     # Get evaluation parameters
     K_values = config['evaluation']['topk_K']
     round_window = config['evaluation'].get('round_window', config['training']['round_window'])
-    exclude_tail = config['training']['exclude_tail']
+    exclude_tail = 0  # Align with baseline: evaluate ALL queries (no tail exclusion)
 
     logger.info(f"Evaluating TopK Hit Rate for K={K_values}")
 
