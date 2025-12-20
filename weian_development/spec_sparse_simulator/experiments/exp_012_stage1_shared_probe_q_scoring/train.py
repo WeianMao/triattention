@@ -201,7 +201,31 @@ def compute_attraction_loss(key_probs, query_bin_probs, argmax_keys, argmax_in_r
     return loss
 
 
-def train_epoch(model, trace_data, optimizer, config, device, logger):
+def compute_init_regularization_loss(model, init_params):
+    """
+    Compute regularization loss that pulls weights toward initialization.
+
+    Unlike standard weight decay (which pulls toward 0), this pulls toward
+    the initial parameter values. This is useful when initialization is
+    already good and we want to prevent training from deviating too far.
+
+    L_reg = Σ (w - w_init)²
+
+    Args:
+        model: The model with current parameters
+        init_params: Dict of {param_name: initial_param_value (detached)}
+
+    Returns:
+        Scalar regularization loss
+    """
+    reg_loss = 0.0
+    for name, param in model.named_parameters():
+        if name in init_params:
+            reg_loss = reg_loss + ((param - init_params[name]) ** 2).sum()
+    return reg_loss
+
+
+def train_epoch(model, trace_data, optimizer, config, device, logger, init_params=None, weight_decay=0.0):
     """
     Train for one epoch over all rounds in trace.
 
@@ -214,9 +238,11 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
         config: Configuration dict
         device: torch.device
         logger: Logger instance
+        init_params: Dict of initial parameter values for regularization (optional)
+        weight_decay: Regularization strength for pulling toward init (default: 0.0)
 
     Returns:
-        Average epoch loss
+        Average epoch loss (attraction + regularization)
     """
     model.train()
 
@@ -305,10 +331,20 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
         # Backward pass once per round (if we have valid losses)
         if valid_batches > 0:
             optimizer.zero_grad()
-            (round_loss / valid_batches).backward()
+
+            # Compute total loss = attraction loss + regularization loss
+            avg_attraction_loss = round_loss / valid_batches
+
+            if init_params is not None and weight_decay > 0:
+                reg_loss = compute_init_regularization_loss(model, init_params)
+                total_loss = avg_attraction_loss + weight_decay * reg_loss
+            else:
+                total_loss = avg_attraction_loss
+
+            total_loss.backward()
             optimizer.step()
 
-            epoch_loss += (round_loss / valid_batches).item()
+            epoch_loss += total_loss.item()
             num_batches += 1
 
         # Clear key probs after processing all query batches
@@ -321,7 +357,7 @@ def train_epoch(model, trace_data, optimizer, config, device, logger):
     return avg_loss
 
 
-def train(config, logger, use_magnitude_init=False, use_l2_norm=False, invert_to_origin=False):
+def train(config, logger, use_magnitude_init=False, use_l2_norm=False, invert_to_origin=False, weight_decay=0.0):
     """
     Main training loop.
 
@@ -332,6 +368,8 @@ def train(config, logger, use_magnitude_init=False, use_l2_norm=False, invert_to
                            (mean_of_magnitude - magnitude_of_mean) instead of zeros
         use_l2_norm: If True, L2 normalize vectors before K-means (default: False)
         invert_to_origin: If True, invert each Q to position 0 (default: False)
+        weight_decay: Regularization strength for pulling weights toward initialization (default: 0.0)
+                     Unlike standard weight decay (toward 0), this pulls toward init values.
 
     Returns:
         Path to final checkpoint
@@ -396,6 +434,12 @@ def train(config, logger, use_magnitude_init=False, use_l2_norm=False, invert_to
 
     model = model.to(device)
 
+    # Save initial parameters for regularization (pull toward init instead of zero)
+    init_params = None
+    if weight_decay > 0:
+        init_params = {name: param.detach().clone() for name, param in model.named_parameters()}
+        logger.info(f"Saved initial parameters for regularization (weight_decay={weight_decay})")
+
     param_counts = model.get_param_count()
     logger.info(f"Model parameters: {param_counts}")
     logger.info(f"Total parameters: {param_counts['total']:,}")
@@ -421,7 +465,10 @@ def train(config, logger, use_magnitude_init=False, use_l2_norm=False, invert_to
     best_loss = float('inf')
     for epoch in range(1, num_epochs + 1):
         # Train epoch
-        avg_loss = train_epoch(model, trace_data, optimizer, config, device, logger)
+        avg_loss = train_epoch(
+            model, trace_data, optimizer, config, device, logger,
+            init_params=init_params, weight_decay=weight_decay
+        )
 
         # Log progress
         if epoch % log_every == 0 or epoch == 1:
@@ -485,6 +532,14 @@ def main():
         dest='use_magnitude_init',
         help='Disable magnitude weight initialization (use zeros instead).'
     )
+    parser.add_argument(
+        '--weight-decay',
+        type=float,
+        default=0.0,
+        help='Regularization strength for pulling weights toward initialization. '
+             'Unlike standard weight decay (toward 0), this pulls toward init values. '
+             '(default: 0.0, no regularization)'
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -506,6 +561,7 @@ def main():
     use_l2_norm = False  # L2 norm hurts performance after layout fix
     invert_to_origin = False  # Use round-based reference position
     logger.info(f"Using fixed settings: use_l2_norm={use_l2_norm}, invert_to_origin={invert_to_origin}")
+    logger.info(f"Weight decay (toward init): {args.weight_decay}")
 
     try:
         # Run training
@@ -513,7 +569,8 @@ def main():
             config, logger,
             use_magnitude_init=args.use_magnitude_init,
             use_l2_norm=use_l2_norm,
-            invert_to_origin=invert_to_origin
+            invert_to_origin=invert_to_origin,
+            weight_decay=args.weight_decay
         )
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:
