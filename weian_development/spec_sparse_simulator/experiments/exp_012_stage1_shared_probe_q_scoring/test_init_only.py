@@ -57,6 +57,12 @@ def main():
     use_l2_norm = False  # <-- MODIFY THIS TO TEST WITH/WITHOUT L2 NORM
     logger.info(f"Using L2 normalization: {use_l2_norm}")
 
+    # Invert to origin toggle
+    # Set to True to invert each Q to position 0 (like Hybrid Frequency)
+    # Set to False to rotate all Q in round to reference position (original Module 2 behavior)
+    invert_to_origin = True  # <-- MODIFY THIS TO TEST HYBRID FREQ STYLE INIT
+    logger.info(f"Using invert_to_origin: {invert_to_origin}")
+
     # Create a modified config for model creation
     test_config = config.copy()
     test_config['model'] = config['model'].copy()
@@ -65,7 +71,8 @@ def main():
     # Compute K-means + magnitude initialization
     logger.info("Computing K-means initialization with magnitude init...")
     init_probes, cluster_labels, Q_relatives_unnorm = compute_kmeans_init(
-        config, logger, n_clusters=num_bins, return_extras=True, use_l2_norm=use_l2_norm
+        config, logger, n_clusters=num_bins, return_extras=True,
+        use_l2_norm=use_l2_norm, invert_to_origin=invert_to_origin
     )
     logger.info(f"K-means initialization completed. Probe shape: {init_probes.shape}")
 

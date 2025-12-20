@@ -13,9 +13,12 @@ Core algorithm:
 
 Optional magnitude weight initialization (--use-magnitude-init):
 For each cluster b, compute:
-- mean_of_magnitude[b, f] = mean(sqrt(x_{2f}^2 + x_{2f+1}^2))
-- magnitude_of_mean[b, f] = sqrt(mean_x_{2f}^2 + mean_x_{2f+1}^2)
+- mean_of_magnitude[b, f] = mean(sqrt(real_f^2 + imag_f^2))
+- magnitude_of_mean[b, f] = sqrt(mean_real_f^2 + mean_imag_f^2)
 - init[b, f] = mean_of_magnitude[b, f] - magnitude_of_mean[b, f]
+
+Vector layout: [real_0...real_63, imag_0...imag_63] (front/back, NOT interleaved)
+This matches transformers/Qwen3RotaryEmbedding.
 
 Reference: exp_012_asymmetric_probe_network.md
 """
@@ -30,14 +33,30 @@ import yaml
 from sklearn.cluster import KMeans
 
 
-def apply_rope_rotation(vectors, position, base=10000):
+def rotate_half(x):
     """
-    Apply RoPE rotation to vectors.
+    Rotate half of the hidden dims: [a, b] -> [-b, a]
+    Vector layout: [real_0...real_63, imag_0...imag_63] (front/back)
+    """
+    d = x.shape[-1] // 2
+    x1 = x[..., :d]   # real part
+    x2 = x[..., d:]   # imag part
+    return torch.cat((-x2, x1), dim=-1)
+
+
+def apply_rope_rotation(vectors, position, inv_freq=None, base=10000):
+    """
+    Apply RoPE rotation to vectors using front/back layout.
+
+    Vector layout: [real_0...real_63, imag_0...imag_63] (NOT interleaved)
+    This matches transformers/Qwen3RotaryEmbedding.
 
     Args:
         vectors: Tensor of shape (num_vectors, head_dim) or (head_dim,)
         position: Target position for rotation (scalar or tensor)
-        base: RoPE base (default: 10000)
+        inv_freq: Optional inverse frequency tensor from model's RoPE.
+                  If None, computes omega from base.
+        base: RoPE base (default: 10000), only used if inv_freq is None
 
     Returns:
         rotated_vectors: Same shape as input
@@ -49,39 +68,31 @@ def apply_rope_rotation(vectors, position, base=10000):
     num_vectors, head_dim = vectors.shape
     num_freqs = head_dim // 2
 
-    # Compute angular frequencies: omega_j = 1 / (base^(2j/d))
-    dim_indices = torch.arange(num_freqs, device=vectors.device, dtype=vectors.dtype)
-    omega = 1.0 / (base ** (2 * dim_indices / head_dim))
+    # Use provided inv_freq or compute from base
+    if inv_freq is not None:
+        omega = inv_freq.to(device=vectors.device, dtype=vectors.dtype)
+    else:
+        dim_indices = torch.arange(num_freqs, device=vectors.device, dtype=vectors.dtype)
+        omega = 1.0 / (base ** (2 * dim_indices / head_dim))
 
     # Compute rotation angles: theta_j = pos * omega_j
     if isinstance(position, (int, float)):
         theta = position * omega  # shape: (num_freqs,)
+        # Expand to full head_dim: [theta_0...theta_63, theta_0...theta_63]
+        theta_full = torch.cat([theta, theta], dim=-1)
+        cos_theta = torch.cos(theta_full)
+        sin_theta = torch.sin(theta_full)
     else:
+        # position is a tensor of shape (num_vectors,)
+        position = position.to(device=vectors.device, dtype=vectors.dtype)
         theta = position.unsqueeze(-1) * omega  # shape: (num_vectors, num_freqs)
+        # Expand to full head_dim
+        theta_full = torch.cat([theta, theta], dim=-1)  # (num_vectors, head_dim)
+        cos_theta = torch.cos(theta_full)
+        sin_theta = torch.sin(theta_full)
 
-    # Compute cos and sin
-    cos_theta = torch.cos(theta)
-    sin_theta = torch.sin(theta)
-
-    # Reshape vectors to complex pairs: (num_vectors, num_freqs, 2)
-    vectors_complex = vectors.view(num_vectors, num_freqs, 2)
-
-    # Apply 2D rotation
-    if theta.dim() == 1:
-        # Same rotation for all vectors
-        rotated = torch.stack([
-            vectors_complex[..., 0] * cos_theta - vectors_complex[..., 1] * sin_theta,
-            vectors_complex[..., 0] * sin_theta + vectors_complex[..., 1] * cos_theta
-        ], dim=-1)
-    else:
-        # Per-vector rotation
-        rotated = torch.stack([
-            vectors_complex[..., 0] * cos_theta - vectors_complex[..., 1] * sin_theta,
-            vectors_complex[..., 0] * sin_theta + vectors_complex[..., 1] * cos_theta
-        ], dim=-1)
-
-    # Restore original shape
-    rotated = rotated.view(num_vectors, head_dim)
+    # Apply RoPE: y = x * cos + rotate_half(x) * sin
+    rotated = vectors * cos_theta + rotate_half(vectors) * sin_theta
 
     if is_single:
         rotated = rotated.squeeze(0)
@@ -99,7 +110,9 @@ def compute_magnitude_features(x, num_freqs, eps=1e-8):
     """
     Compute per-frequency magnitude features.
 
-    m_f = sqrt(x_{2f}^2 + x_{2f+1}^2 + eps)
+    m_f = sqrt(real_f^2 + imag_f^2 + eps)
+
+    Vector layout: [real_0...real_63, imag_0...imag_63] (front/back, NOT interleaved)
 
     Args:
         x: Tensor of shape (..., head_dim) where head_dim = num_freqs * 2
@@ -109,10 +122,12 @@ def compute_magnitude_features(x, num_freqs, eps=1e-8):
     Returns:
         magnitude: Tensor of shape (..., num_freqs)
     """
-    original_shape = x.shape[:-1]
-    head_dim = x.shape[-1]
-    x_freq = x.view(*original_shape, num_freqs, 2)
-    magnitude = torch.sqrt(torch.sum(x_freq ** 2, dim=-1) + eps)
+    # Split into real and imag parts (front/back layout)
+    real_part = x[..., :num_freqs]  # (..., num_freqs)
+    imag_part = x[..., num_freqs:]  # (..., num_freqs)
+
+    # Compute magnitude: sqrt(real^2 + imag^2 + eps)
+    magnitude = torch.sqrt(real_part ** 2 + imag_part ** 2 + eps)
     return magnitude
 
 
@@ -120,9 +135,11 @@ def compute_magnitude_init(Q_relatives_unnorm, cluster_labels, n_clusters, num_f
     """
     Compute magnitude weight initialization for each cluster.
 
+    Vector layout: [real_0...real_63, imag_0...imag_63] (front/back, NOT interleaved)
+
     For each cluster b:
-    - mean_of_magnitude[b, f] = mean(sqrt(x_{2f}^2 + x_{2f+1}^2))  over cluster points
-    - magnitude_of_mean[b, f] = sqrt(mean_x_{2f}^2 + mean_x_{2f+1}^2)  of cluster mean
+    - mean_of_magnitude[b, f] = mean(sqrt(real_f^2 + imag_f^2))  over cluster points
+    - magnitude_of_mean[b, f] = sqrt(mean_real_f^2 + mean_imag_f^2)  of cluster mean
     - init[b, f] = mean_of_magnitude[b, f] - magnitude_of_mean[b, f]
 
     This follows the pattern from hybrid frequency baseline where:
@@ -153,11 +170,12 @@ def compute_magnitude_init(Q_relatives_unnorm, cluster_labels, n_clusters, num_f
         if cluster_vectors.shape[0] == 0:
             continue
 
-        # Reshape to frequency pairs: (n_points, num_freqs, 2)
-        vectors_freq = cluster_vectors.view(-1, num_freqs, 2)
+        # Split into real and imag parts (front/back layout)
+        real_parts = cluster_vectors[:, :num_freqs]  # (n_points, num_freqs)
+        imag_parts = cluster_vectors[:, num_freqs:]  # (n_points, num_freqs)
 
         # Compute magnitude for each point: (n_points, num_freqs)
-        magnitudes = torch.sqrt(vectors_freq[..., 0]**2 + vectors_freq[..., 1]**2 + eps)
+        magnitudes = torch.sqrt(real_parts**2 + imag_parts**2 + eps)
 
         # mean_of_magnitude: average magnitude across points (num_freqs,)
         mean_of_mag = magnitudes.mean(dim=0)
@@ -165,11 +183,12 @@ def compute_magnitude_init(Q_relatives_unnorm, cluster_labels, n_clusters, num_f
         # Compute mean vector of the cluster: (head_dim,)
         mean_vector = cluster_vectors.mean(dim=0)
 
-        # Reshape mean vector to frequency pairs: (num_freqs, 2)
-        mean_vector_freq = mean_vector.view(num_freqs, 2)
+        # Split mean vector into real and imag
+        mean_real = mean_vector[:num_freqs]
+        mean_imag = mean_vector[num_freqs:]
 
         # magnitude_of_mean: magnitude of the mean vector (num_freqs,)
-        mag_of_mean = torch.sqrt(mean_vector_freq[..., 0]**2 + mean_vector_freq[..., 1]**2 + eps)
+        mag_of_mean = torch.sqrt(mean_real**2 + mean_imag**2 + eps)
 
         # init = mean_of_magnitude - magnitude_of_mean
         magnitude_init[b] = mean_of_mag - mag_of_mean
@@ -177,15 +196,46 @@ def compute_magnitude_init(Q_relatives_unnorm, cluster_labels, n_clusters, num_f
     return magnitude_init
 
 
+def load_model_inv_freq(model_path, logger):
+    """
+    Load inverse frequency tensor from model's RoPE embedding.
+
+    Args:
+        model_path: Path to the model
+        logger: Logger instance
+
+    Returns:
+        inv_freq: Tensor of shape (num_freqs,)
+    """
+    try:
+        from transformers import AutoConfig
+        from transformers.models.qwen3.modeling_qwen3 import Qwen3RotaryEmbedding
+
+        config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+        rope_scaling = dict(config.rope_scaling or {})
+        if "attn_factor" in rope_scaling and "attention_factor" not in rope_scaling:
+            rope_scaling["attention_factor"] = rope_scaling["attn_factor"]
+        rope_scaling.pop("attn_factor", None)
+        config.rope_scaling = rope_scaling
+
+        rotary = Qwen3RotaryEmbedding(config=config, device='cpu')
+        inv_freq = rotary.inv_freq.to(dtype=torch.float32)
+        logger.info(f"Loaded model inv_freq from {model_path}, shape: {inv_freq.shape}")
+        return inv_freq
+    except Exception as e:
+        logger.warning(f"Failed to load model inv_freq: {e}, using default omega")
+        return None
+
+
 def compute_kmeans_init(config, logger, n_clusters=128, random_state=42, return_extras=False,
-                        use_l2_norm=True):
+                        use_l2_norm=True, invert_to_origin=False, inv_freq=None):
     """
     Compute K-means initialization for probe vectors.
 
     Algorithm:
     1. Load training data
     2. For each round, compute reference position: ref_pos = round_start + round_window / 2
-    3. For each Q in the round, compute Q_relative = RoPE(Q_post, -ref_pos)
+    3. For each Q in the round, compute Q_relative = RoPE(Q_post, -ref_pos) or invert to origin
     4. Optionally L2 normalize Q_relative to unit norm (Stage 3 alignment)
     5. Collect all Q_relative vectors
     6. Run K-means to get cluster centers
@@ -198,6 +248,10 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42, return_
         return_extras: If True, also return cluster labels and unnormalized Q_relatives
                        for magnitude initialization
         use_l2_norm: If True (default), L2 normalize vectors before K-means
+        invert_to_origin: If True, invert each Q to position 0 (like Hybrid Frequency)
+                         If False (default), rotate to reference position
+        inv_freq: Optional inverse frequency tensor from model's RoPE.
+                  If None, loads from model or computes from base=10000.
 
     Returns:
         If return_extras=False:
@@ -213,6 +267,12 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42, return_
 
     logger.info(f"Loading trace data from: {trace_path}")
     qk_data = torch.load(trace_path, map_location='cpu')
+
+    # Load inv_freq from model if not provided
+    if inv_freq is None:
+        model_path = config.get('model', {}).get('model_path',
+            "/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B")
+        inv_freq = load_model_inv_freq(model_path, logger)
 
     # Load head sample file
     head_sample_path = exp_dir / config['data']['head_sample_file']
@@ -255,8 +315,15 @@ def compute_kmeans_init(config, logger, n_clusters=128, random_state=42, return_
         # Extract Q vectors for this round
         round_Q = Q[round_start:valid_end]  # (num_queries, head_dim)
 
-        # Compute Q_relative = RoPE(Q_post, -ref_pos)
-        Q_relative = apply_rope_rotation(round_Q, -ref_pos)
+        if invert_to_origin:
+            # Invert each Q to position 0 (like Hybrid Frequency)
+            # Each Q at position i gets rotated by -i
+            positions = torch.arange(round_start, valid_end, dtype=round_Q.dtype)
+            Q_relative = apply_rope_rotation(round_Q, -positions, inv_freq=inv_freq)
+        else:
+            # Rotate all Q to reference position (original behavior)
+            # All Q in round get rotated by -ref_pos
+            Q_relative = apply_rope_rotation(round_Q, -ref_pos, inv_freq=inv_freq)
 
         # Store unnormalized version for magnitude init
         Q_relatives_unnorm_list.append(Q_relative.clone())

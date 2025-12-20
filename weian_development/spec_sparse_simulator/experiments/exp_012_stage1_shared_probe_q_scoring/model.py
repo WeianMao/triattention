@@ -53,7 +53,9 @@ def compute_magnitude_features(x, num_freqs, eps=1e-8):
     """
     Compute per-frequency magnitude features.
 
-    m_f = sqrt(x_{2f}^2 + x_{2f+1}^2 + eps)
+    m_f = sqrt(real_f^2 + imag_f^2 + eps)
+
+    Vector layout: [real_0...real_63, imag_0...imag_63] (front/back, NOT interleaved)
 
     Args:
         x: Tensor of shape (..., head_dim) where head_dim = num_freqs * 2
@@ -63,25 +65,40 @@ def compute_magnitude_features(x, num_freqs, eps=1e-8):
     Returns:
         magnitude: Tensor of shape (..., num_freqs)
     """
-    # Reshape to frequency pairs
-    original_shape = x.shape[:-1]
-    head_dim = x.shape[-1]
-    x_freq = x.view(*original_shape, num_freqs, 2)  # (..., num_freqs, 2)
+    # Split into real and imag parts (front/back layout)
+    real_part = x[..., :num_freqs]  # (..., num_freqs)
+    imag_part = x[..., num_freqs:]  # (..., num_freqs)
 
-    # Compute magnitude: sqrt(x_0^2 + x_1^2 + eps)
-    magnitude = torch.sqrt(torch.sum(x_freq ** 2, dim=-1) + eps)  # (..., num_freqs)
+    # Compute magnitude: sqrt(real^2 + imag^2 + eps)
+    magnitude = torch.sqrt(real_part ** 2 + imag_part ** 2 + eps)  # (..., num_freqs)
 
     return magnitude
 
 
-def apply_rope_rotation(vectors, position, base=10000):
+def rotate_half(x):
     """
-    Apply RoPE rotation to vectors.
+    Rotate half of the hidden dims: [a, b] -> [-b, a]
+    Vector layout: [real_0...real_63, imag_0...imag_63] (front/back)
+    """
+    d = x.shape[-1] // 2
+    x1 = x[..., :d]   # real part
+    x2 = x[..., d:]   # imag part
+    return torch.cat((-x2, x1), dim=-1)
+
+
+def apply_rope_rotation(vectors, position, inv_freq=None, base=10000):
+    """
+    Apply RoPE rotation to vectors using front/back layout.
+
+    Vector layout: [real_0...real_63, imag_0...imag_63] (NOT interleaved)
+    This matches transformers/Qwen3RotaryEmbedding.
 
     Args:
         vectors: Tensor of shape (num_vectors, head_dim) or (head_dim,)
         position: Target position for rotation (scalar)
-        base: RoPE base (default: 10000)
+        inv_freq: Optional inverse frequency tensor from model's RoPE.
+                  If None, computes omega from base.
+        base: RoPE base (default: 10000), only used if inv_freq is None
 
     Returns:
         rotated_vectors: Same shape as input
@@ -93,30 +110,23 @@ def apply_rope_rotation(vectors, position, base=10000):
     num_vectors, head_dim = vectors.shape
     num_freqs = head_dim // 2  # 64 for head_dim=128
 
-    # Compute angular frequencies: omega_j = 1 / (base^(2j/d))
-    dim_indices = torch.arange(num_freqs, device=vectors.device, dtype=vectors.dtype)
-    omega = 1.0 / (base ** (2 * dim_indices / head_dim))
+    # Use provided inv_freq or compute from base
+    if inv_freq is not None:
+        omega = inv_freq.to(device=vectors.device, dtype=vectors.dtype)
+    else:
+        dim_indices = torch.arange(num_freqs, device=vectors.device, dtype=vectors.dtype)
+        omega = 1.0 / (base ** (2 * dim_indices / head_dim))
 
     # Compute rotation angles: theta_j = pos * omega_j
     theta = position * omega  # shape: (num_freqs,)
 
-    # Compute cos and sin
-    cos_theta = torch.cos(theta)  # shape: (num_freqs,)
-    sin_theta = torch.sin(theta)  # shape: (num_freqs,)
+    # Expand to full head_dim: [theta_0...theta_63, theta_0...theta_63]
+    theta_full = torch.cat([theta, theta], dim=-1)
+    cos_theta = torch.cos(theta_full)
+    sin_theta = torch.sin(theta_full)
 
-    # Reshape vectors to complex pairs: (num_vectors, num_freqs, 2)
-    vectors_complex = vectors.view(num_vectors, num_freqs, 2)
-
-    # Apply 2D rotation
-    # v'_0 = v_0 * cos - v_1 * sin
-    # v'_1 = v_0 * sin + v_1 * cos
-    rotated = torch.stack([
-        vectors_complex[..., 0] * cos_theta - vectors_complex[..., 1] * sin_theta,
-        vectors_complex[..., 0] * sin_theta + vectors_complex[..., 1] * cos_theta
-    ], dim=-1)
-
-    # Restore original shape
-    rotated = rotated.view(num_vectors, head_dim)
+    # Apply RoPE: y = x * cos + rotate_half(x) * sin
+    rotated = vectors * cos_theta + rotate_half(vectors) * sin_theta
 
     if is_single:
         rotated = rotated.squeeze(0)
@@ -134,20 +144,28 @@ class SharedProbeLayer(nn.Module):
     Total parameters: 16,384 (128 bins * 128 head_dim)
     """
 
-    def __init__(self, num_bins=128, head_dim=128, base=10000, init_probes=None):
+    def __init__(self, num_bins=128, head_dim=128, base=10000, init_probes=None, inv_freq=None):
         """
         Args:
             num_bins: Number of output bins (default: 128)
             head_dim: Dimension of key/query vectors (default: 128)
-            base: RoPE base (default: 10000)
+            base: RoPE base (default: 10000), only used if inv_freq is None
             init_probes: Optional tensor of shape (num_bins, head_dim) for initialization
                          If provided, use this to initialize probes (e.g., K-means centers)
+            inv_freq: Optional inverse frequency tensor from model's RoPE.
+                      If provided, uses this instead of computing from base.
         """
         super().__init__()
         self.num_bins = num_bins
         self.head_dim = head_dim
         self.base = base
         self.num_freqs = head_dim // 2  # For compatibility with reference_angles interface
+
+        # Store inv_freq as a buffer (not a parameter)
+        if inv_freq is not None:
+            self.register_buffer('inv_freq', inv_freq.clone())
+        else:
+            self.inv_freq = None
 
         # Probe vectors: each row is a probe vector (base vector, unrotated)
         # Shape: (num_bins, head_dim)
@@ -210,7 +228,7 @@ class SharedProbeLayer(nn.Module):
             probes_to_rotate = self.probes
 
         # Apply RoPE rotation to all probe vectors
-        rotated_probes = apply_rope_rotation(probes_to_rotate, ref_pos, self.base)
+        rotated_probes = apply_rope_rotation(probes_to_rotate, ref_pos, inv_freq=self.inv_freq, base=self.base)
 
         return rotated_probes
 
@@ -292,22 +310,25 @@ class DistanceBasedQueryScorer(nn.Module):
         else:
             Q_processed = Q
 
-        # Reshape to frequency pairs: (*, num_freqs, 2)
-        Q_freq = Q_processed.view(num_queries, self.num_freqs, 2)  # (num_queries, num_freqs, 2)
-        P_freq = rotated_probes.view(self.num_bins, self.num_freqs, 2)  # (num_bins, num_freqs, 2)
+        # Split into real and imag parts (front/back layout)
+        # Vector layout: [real_0...real_63, imag_0...imag_63]
+        Q_real = Q_processed[:, :self.num_freqs]  # (num_queries, num_freqs)
+        Q_imag = Q_processed[:, self.num_freqs:]  # (num_queries, num_freqs)
+        P_real = rotated_probes[:, :self.num_freqs]  # (num_bins, num_freqs)
+        P_imag = rotated_probes[:, self.num_freqs:]  # (num_bins, num_freqs)
 
         # Compute per-frequency error vectors
-        # e_{b,f} = P_rot_{b,f} - Q_normalized_f
-        # Broadcasting: (num_bins, num_freqs, 2) - (num_queries, num_freqs, 2)
-        # Result: (num_queries, num_bins, num_freqs, 2)
-        error = P_freq.unsqueeze(0) - Q_freq.unsqueeze(1)  # (num_queries, num_bins, num_freqs, 2)
+        # e_{b,f} = P_rot_{b,f} - Q_f (in complex space)
+        # Broadcasting: (num_bins, num_freqs) - (num_queries, num_freqs)
+        error_real = P_real.unsqueeze(0) - Q_real.unsqueeze(1)  # (num_queries, num_bins, num_freqs)
+        error_imag = P_imag.unsqueeze(0) - Q_imag.unsqueeze(1)  # (num_queries, num_bins, num_freqs)
 
         # Compute distance (L2 norm with numerical stability)
-        # d_{b,f} = sqrt(||e_{b,f}||^2 + eps)
-        distance = torch.sqrt(torch.sum(error ** 2, dim=-1) + self.eps)  # (num_queries, num_bins, num_freqs)
+        # d_{b,f} = sqrt(error_real^2 + error_imag^2 + eps)
+        distance = torch.sqrt(error_real ** 2 + error_imag ** 2 + self.eps)  # (num_queries, num_bins, num_freqs)
 
         # Compute Q magnitude features (on processed Q, normalized or not)
-        # m^Q_f = sqrt(Q_{2f}^2 + Q_{2f+1}^2 + eps)
+        # m^Q_f = sqrt(real_f^2 + imag_f^2 + eps)
         Q_magnitude = compute_magnitude_features(Q_processed, self.num_freqs, self.eps)  # (num_queries, num_freqs)
 
         # Apply -softplus mapping to distance weights
@@ -515,13 +536,14 @@ class Module2Network(nn.Module):
     - K bias: 128
     """
 
-    def __init__(self, num_bins=128, head_dim=128, init_probes=None, use_l2_norm=True):
+    def __init__(self, num_bins=128, head_dim=128, init_probes=None, use_l2_norm=True, inv_freq=None):
         """
         Args:
             num_bins: Number of bins (default: 128)
             head_dim: Dimension of key/query vectors (default: 128)
             init_probes: Optional tensor of shape (num_bins, head_dim) for probe initialization
             use_l2_norm: If True (default), L2 normalize probes and Q vectors
+            inv_freq: Optional inverse frequency tensor from model's RoPE.
         """
         super().__init__()
         self.num_bins = num_bins
@@ -529,7 +551,7 @@ class Module2Network(nn.Module):
         num_freqs = head_dim // 2
 
         # Shared probe layer (used by both K and Q networks)
-        self.shared_probe_layer = SharedProbeLayer(num_bins, head_dim, init_probes=init_probes)
+        self.shared_probe_layer = SharedProbeLayer(num_bins, head_dim, init_probes=init_probes, inv_freq=inv_freq)
 
         # Key and Query networks sharing the same probe layer
         self.key_network = Module2KeyNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm)
@@ -603,7 +625,41 @@ class Module2Network(nn.Module):
         }
 
 
-def create_model(config, init_probes=None, use_l2_norm=True):
+def load_model_inv_freq(model_path, logger=None):
+    """
+    Load inverse frequency tensor from model's RoPE embedding.
+
+    Args:
+        model_path: Path to the model
+        logger: Optional logger instance
+
+    Returns:
+        inv_freq: Tensor of shape (num_freqs,) or None if loading fails
+    """
+    import torch
+    try:
+        from transformers import AutoConfig
+        from transformers.models.qwen3.modeling_qwen3 import Qwen3RotaryEmbedding
+
+        config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+        rope_scaling = dict(config.rope_scaling or {})
+        if "attn_factor" in rope_scaling and "attention_factor" not in rope_scaling:
+            rope_scaling["attention_factor"] = rope_scaling["attn_factor"]
+        rope_scaling.pop("attn_factor", None)
+        config.rope_scaling = rope_scaling
+
+        rotary = Qwen3RotaryEmbedding(config=config, device='cpu')
+        inv_freq = rotary.inv_freq.to(dtype=torch.float32)
+        if logger:
+            logger.info(f"Loaded model inv_freq from {model_path}, shape: {inv_freq.shape}")
+        return inv_freq
+    except Exception as e:
+        if logger:
+            logger.warning(f"Failed to load model inv_freq: {e}, using default omega")
+        return None
+
+
+def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None):
     """
     Factory function to create Module 2 network.
 
@@ -615,6 +671,8 @@ def create_model(config, init_probes=None, use_l2_norm=True):
         init_probes: Optional tensor of shape (num_bins, head_dim) for probe initialization
                      If provided, use this to initialize probes (e.g., K-means centers)
         use_l2_norm: If True (default), L2 normalize probes and Q vectors
+        inv_freq: Optional inverse frequency tensor from model's RoPE.
+                  If None, will try to load from model_path in config.
 
     Returns:
         Module2Network instance
@@ -629,10 +687,17 @@ def create_model(config, init_probes=None, use_l2_norm=True):
     num_freqs = model_cfg.get('num_freqs', 64)
     head_dim = num_freqs * 2  # 128 by default
 
+    # Load inv_freq if not provided
+    if inv_freq is None:
+        model_path = model_cfg.get('model_path',
+            "/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B")
+        inv_freq = load_model_inv_freq(model_path)
+
     model = Module2Network(
         num_bins=num_bins,
         head_dim=head_dim,
         init_probes=init_probes,
-        use_l2_norm=use_l2_norm
+        use_l2_norm=use_l2_norm,
+        inv_freq=inv_freq
     )
     return model
