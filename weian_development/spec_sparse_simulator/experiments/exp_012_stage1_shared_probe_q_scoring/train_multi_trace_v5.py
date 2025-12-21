@@ -149,6 +149,64 @@ def extract_round_labels(attention_trace, round_start, round_end, seq_len, exclu
     }
 
 
+def precompute_rounds_for_traces(all_traces, config, logger):
+    """
+    Pre-compute cached_rounds for all traces before training starts.
+    This is needed for precise step counting (e.g., for OneCycleLR).
+    """
+    round_window = config['training']['round_window']
+    exclude_tail = config['training']['exclude_tail']
+
+    logger.info("Pre-computing rounds for all traces...")
+    total_rounds = 0
+
+    for i, trace_data in enumerate(all_traces):
+        if 'cached_rounds' in trace_data:
+            total_rounds += len(trace_data['cached_rounds'])
+            continue
+
+        Q = trace_data['Q']
+        K = trace_data['K']
+        seq_len = trace_data['seq_len']
+
+        # Compute attention matrix
+        attention = compute_attention_matrix(Q, K, use_cache=True)
+
+        # Collect valid rounds
+        rounds = []
+        for round_start in range(round_window, seq_len, round_window):
+            round_end = min(round_start + round_window, seq_len)
+            labels = extract_round_labels(attention, round_start, round_end, seq_len, exclude_tail)
+            if labels is not None and len(labels['query_indices']) > 0:
+                rounds.append({
+                    'round_start': round_start,
+                    'round_end': round_end,
+                    'labels': labels
+                })
+
+        trace_data['cached_rounds'] = rounds
+        total_rounds += len(rounds)
+        del attention
+
+    logger.info(f"Pre-computed {total_rounds} total rounds across {len(all_traces)} traces")
+    return total_rounds
+
+
+def count_steps_per_epoch(all_traces, round_batch_size):
+    """
+    Count total optimizer steps per epoch across all traces.
+    Requires cached_rounds to be pre-computed for all traces.
+    """
+    total_steps = 0
+    for trace_data in all_traces:
+        num_rounds = len(trace_data.get('cached_rounds', []))
+        if num_rounds > 0:
+            # ceil division: (n + batch_size - 1) // batch_size
+            steps = (num_rounds + round_batch_size - 1) // round_batch_size
+            total_steps += steps
+    return total_steps
+
+
 def compute_attraction_loss(key_probs, query_bin_probs, argmax_keys, argmax_in_recent, eps=1e-8):
     """
     Compute Attraction Loss for Module 2.
@@ -302,7 +360,7 @@ def compute_batch_accuracy_fast(key_probs, query_bin_probs, argmax_keys, argmax_
 def train_on_trace_batched(
     model, trace_data, optimizer, config, device, logger,
     init_params=None, weight_decay=0.0, round_batch_size=64,
-    compute_accuracy=False
+    compute_accuracy=False, scheduler=None, scheduler_step_per_batch=False
 ):
     """
     Train on a single trace with round batching (V5 - batched forward).
@@ -325,6 +383,7 @@ def train_on_trace_batched(
         weight_decay: Regularization strength
         round_batch_size: Number of rounds to process together
         compute_accuracy: Whether to compute accuracy metrics (slow, default: False)
+        scheduler: Learning rate scheduler (optional, called after each optimizer.step())
 
     Returns:
         trace_loss: Average loss for this trace
@@ -501,6 +560,8 @@ def train_on_trace_batched(
             trace_grad_norm += grad_norm
 
             optimizer.step()
+            if scheduler is not None and scheduler_step_per_batch:
+                scheduler.step()
 
             trace_loss += total_loss.item()
             trace_attraction_loss += avg_batch_loss.item()
@@ -521,7 +582,7 @@ def train_on_trace_batched(
 def train_epoch_multi_trace(
     model, all_traces, optimizer, config, device, logger,
     init_params=None, weight_decay=0.0, round_batch_size=64,
-    compute_accuracy=False
+    compute_accuracy=False, scheduler=None, scheduler_step_per_batch=False
 ):
     """
     Train for one epoch over all preloaded traces.
@@ -543,7 +604,9 @@ def train_epoch_multi_trace(
             model, trace_data, optimizer, config, device, logger,
             init_params=init_params, weight_decay=weight_decay,
             round_batch_size=round_batch_size,
-            compute_accuracy=compute_accuracy
+            compute_accuracy=compute_accuracy,
+            scheduler=scheduler,
+            scheduler_step_per_batch=scheduler_step_per_batch
         )
 
         if trace_loss > 0:
@@ -975,7 +1038,8 @@ def preload_test_trace(test_trace_path, layer, head, config, logger, device='cud
 
 
 def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, weight_decay=0.0,
-          round_batch_size=64, eval_every=2, use_tensorboard=True):
+          round_batch_size=64, eval_every=2, use_tensorboard=True, optimizer_type='adam',
+          lr_scheduler_type='none'):
     """
     Main training loop with optimizations.
 
@@ -989,6 +1053,8 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         round_batch_size: Number of rounds to process together (default: 64)
         eval_every: Evaluate on test set every N epochs (default: 2)
         use_tensorboard: Enable TensorBoard logging (default: True)
+        optimizer_type: Optimizer type, 'adam' or 'adamw' (default: 'adam')
+        lr_scheduler_type: LR scheduler type, 'none' or 'onecycle' (default: 'none')
 
     Returns:
         Path to final checkpoint
@@ -1081,15 +1147,59 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
     logger.info(f"Model parameters: {param_counts}")
     logger.info(f"Total parameters: {param_counts['total']:,}")
 
-    optimizer = optim.Adam(
-        model.parameters(),
-        lr=config['training']['learning_rate']
-    )
+    # Create optimizer based on type
+    lr = config['training']['learning_rate']
+    if optimizer_type.lower() == 'adamw':
+        optimizer = optim.AdamW(model.parameters(), lr=lr)
+        logger.info(f"Using AdamW optimizer (lr={lr})")
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=lr)
+        logger.info(f"Using Adam optimizer (lr={lr})")
+
+    # Create learning rate scheduler if specified
+    num_epochs = config['training']['epochs']
+    scheduler = None
+    scheduler_step_per_batch = False  # If True, step after each batch; if False, step after each epoch
+    if lr_scheduler_type.lower() == 'onecycle':
+        # Pre-compute rounds for all traces (needed for exact step count)
+        precompute_rounds_for_traces(all_traces, config, logger)
+        steps_per_epoch = count_steps_per_epoch(all_traces, round_batch_size)
+        total_steps = num_epochs * steps_per_epoch
+        scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=lr,
+            total_steps=total_steps,
+            pct_start=0.3,
+            anneal_strategy='cos'
+        )
+        scheduler_step_per_batch = True
+        logger.info(f"Using OneCycleLR scheduler (steps/epoch={steps_per_epoch}, total_steps={total_steps})")
+    elif lr_scheduler_type.lower() == 'cosine_restart':
+        # CosineAnnealingWarmRestarts: restart every T_0 epochs
+        T_0 = 10  # Restart every 10 epochs
+        scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=T_0,
+            T_mult=1,  # Keep same period after each restart
+            eta_min=lr * 0.01  # Minimum LR = 1% of initial
+        )
+        scheduler_step_per_batch = False
+        logger.info(f"Using CosineAnnealingWarmRestarts scheduler (T_0={T_0}, eta_min={lr*0.01})")
+    elif lr_scheduler_type.lower() == 'step':
+        # StepLR: decay by gamma every step_size epochs
+        step_size = 10  # Decay every 10 epochs
+        gamma = 0.5  # Halve the LR
+        scheduler = optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=step_size,
+            gamma=gamma
+        )
+        scheduler_step_per_batch = False
+        logger.info(f"Using StepLR scheduler (step_size={step_size}, gamma={gamma})")
 
     checkpoints_dir = exp_dir / config['output']['checkpoints_dir']
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
-    num_epochs = config['training']['epochs']
     log_every = config['training'].get('log_every', 1)
     save_every = config['training'].get('save_every', 10)
 
@@ -1109,8 +1219,14 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
             model, all_traces, optimizer, config, device, logger,
             init_params=init_params, weight_decay=weight_decay,
             round_batch_size=round_batch_size,
-            compute_accuracy=compute_acc_this_epoch
+            compute_accuracy=compute_acc_this_epoch,
+            scheduler=scheduler,
+            scheduler_step_per_batch=scheduler_step_per_batch
         )
+
+        # Step epoch-level scheduler after each epoch
+        if scheduler is not None and not scheduler_step_per_batch:
+            scheduler.step()
 
         epoch_time = time.time() - epoch_start_time
 
@@ -1280,6 +1396,20 @@ def main():
         action='store_true',
         help='Disable TensorBoard logging'
     )
+    parser.add_argument(
+        '--optimizer',
+        type=str,
+        default='adam',
+        choices=['adam', 'adamw'],
+        help='Optimizer type: adam or adamw (default: adam)'
+    )
+    parser.add_argument(
+        '--lr-scheduler',
+        type=str,
+        default='none',
+        choices=['none', 'onecycle', 'cosine_restart', 'step'],
+        help='Learning rate scheduler: none, onecycle, cosine_restart, or step (default: none)'
+    )
     args = parser.parse_args()
 
     exp_dir = Path(__file__).parent
@@ -1310,7 +1440,9 @@ def main():
             weight_decay=args.weight_decay,
             round_batch_size=args.round_batch_size,
             eval_every=args.eval_every,
-            use_tensorboard=not args.no_tensorboard
+            use_tensorboard=not args.no_tensorboard,
+            optimizer_type=args.optimizer,
+            lr_scheduler_type=args.lr_scheduler
         )
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:
