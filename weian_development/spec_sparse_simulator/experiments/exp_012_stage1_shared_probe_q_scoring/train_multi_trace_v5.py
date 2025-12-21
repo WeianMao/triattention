@@ -34,13 +34,13 @@ from compute_kmeans_init_multi_trace_v2 import (
 from compute_kmeans_init import compute_magnitude_init
 
 
-def setup_logging(config):
-    """Setup logging configuration."""
+def setup_logging(config, exp_name):
+    """Setup logging configuration with experiment-specific log file."""
     exp_dir = Path(__file__).parent
-    log_dir = exp_dir / config['output']['logs_dir']
+    log_dir = exp_dir / config['output']['logs_dir'] / exp_name
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    log_file = log_dir / 'train_multi_trace_v5.log'
+    log_file = log_dir / 'train.log'
 
     handlers = [
         logging.FileHandler(log_file),
@@ -54,7 +54,11 @@ def setup_logging(config):
         force=True
     )
 
-    return logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)
+    logger.info(f"Experiment: {exp_name}")
+    logger.info(f"Log file: {log_file}")
+
+    return logger
 
 
 # Global cache for causal masks to avoid repeated creation
@@ -970,7 +974,7 @@ def preload_test_trace(test_trace_path, layer, head, config, logger, device='cud
     }
 
 
-def train(config, logger, use_l2_norm=False, invert_to_origin=False, weight_decay=0.0,
+def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, weight_decay=0.0,
           round_batch_size=64, eval_every=2, use_tensorboard=True):
     """
     Main training loop with optimizations.
@@ -978,6 +982,7 @@ def train(config, logger, use_l2_norm=False, invert_to_origin=False, weight_deca
     Args:
         config: Configuration dict
         logger: Logger instance
+        exp_name: Experiment name for logging and checkpoints
         use_l2_norm: If True, use L2 normalization (default: False)
         invert_to_origin: If True, invert to origin (default: False)
         weight_decay: Regularization strength (default: 0.0)
@@ -1001,12 +1006,12 @@ def train(config, logger, use_l2_norm=False, invert_to_origin=False, weight_deca
 
     exp_dir = Path(__file__).parent
 
-    # Setup TensorBoard
+    # Setup TensorBoard with experiment-specific directory
     writer = None
     if use_tensorboard:
         try:
             from torch.utils.tensorboard import SummaryWriter
-            tb_dir = exp_dir / config['output']['logs_dir'] / 'tensorboard'
+            tb_dir = exp_dir / config['output']['logs_dir'] / exp_name / 'tensorboard'
             tb_dir.mkdir(parents=True, exist_ok=True)
             writer = SummaryWriter(log_dir=str(tb_dir))
             logger.info(f"TensorBoard logging enabled: {tb_dir}")
@@ -1242,6 +1247,11 @@ def main():
 
     parser = argparse.ArgumentParser(description='Multi-Trace Module 2 Training (V5 - Batched Forward)')
     parser.add_argument(
+        'exp_name',
+        type=str,
+        help='Experiment name (required, used for log directory and TensorBoard)'
+    )
+    parser.add_argument(
         '--weight-decay',
         type=float,
         default=7e-5,
@@ -1282,7 +1292,7 @@ def main():
     if args.epochs is not None:
         config['training']['epochs'] = args.epochs
 
-    logger = setup_logging(config)
+    logger = setup_logging(config, args.exp_name)
 
     # Fixed settings based on experiments
     use_l2_norm = False
@@ -1294,7 +1304,7 @@ def main():
 
     try:
         final_checkpoint = train(
-            config, logger,
+            config, logger, args.exp_name,
             use_l2_norm=use_l2_norm,
             invert_to_origin=invert_to_origin,
             weight_decay=args.weight_decay,
