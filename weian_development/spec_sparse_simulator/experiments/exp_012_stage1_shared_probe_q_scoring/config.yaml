@@ -15,7 +15,7 @@ model:
   # Q-side: s_Q = tilde_w^T * d + v^T * m^Q_normalized + c
 
 training:
-  epochs: 25
+  epochs: 10
   learning_rate: 0.001
   optimizer: "adam"
   round_window: 128
