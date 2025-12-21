@@ -297,7 +297,7 @@ def compute_batch_accuracy_fast(key_probs, query_bin_probs, argmax_keys, argmax_
 
 def train_on_trace_batched(
     model, trace_data, optimizer, config, device, logger,
-    init_params=None, weight_decay=0.0, round_batch_size=8,
+    init_params=None, weight_decay=0.0, round_batch_size=64,
     compute_accuracy=False
 ):
     """
@@ -516,7 +516,7 @@ def train_on_trace_batched(
 
 def train_epoch_multi_trace(
     model, all_traces, optimizer, config, device, logger,
-    init_params=None, weight_decay=0.0, round_batch_size=8,
+    init_params=None, weight_decay=0.0, round_batch_size=64,
     compute_accuracy=False
 ):
     """
@@ -971,7 +971,7 @@ def preload_test_trace(test_trace_path, layer, head, config, logger, device='cud
 
 
 def train(config, logger, use_l2_norm=False, invert_to_origin=False, weight_decay=0.0,
-          round_batch_size=8, eval_every=2, use_tensorboard=True):
+          round_batch_size=64, eval_every=2, use_tensorboard=True):
     """
     Main training loop with optimizations.
 
@@ -981,7 +981,7 @@ def train(config, logger, use_l2_norm=False, invert_to_origin=False, weight_deca
         use_l2_norm: If True, use L2 normalization (default: False)
         invert_to_origin: If True, invert to origin (default: False)
         weight_decay: Regularization strength (default: 0.0)
-        round_batch_size: Number of rounds to process together (default: 8)
+        round_batch_size: Number of rounds to process together (default: 64)
         eval_every: Evaluate on test set every N epochs (default: 2)
         use_tensorboard: Enable TensorBoard logging (default: True)
 
@@ -1250,8 +1250,8 @@ def main():
     parser.add_argument(
         '--round-batch-size',
         type=int,
-        default=8,
-        help='Number of rounds to process together (default: 8)'
+        default=64,
+        help='Number of rounds to process together (default: 64)'
     )
     parser.add_argument(
         '--eval-every',
