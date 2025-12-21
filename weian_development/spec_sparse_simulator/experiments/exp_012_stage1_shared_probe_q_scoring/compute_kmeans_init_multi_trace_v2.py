@@ -12,11 +12,12 @@ Key differences from compute_kmeans_init_multi_trace.py:
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 
 import torch
 import yaml
-from sklearn.cluster import KMeans
+from fast_pytorch_kmeans import KMeans
 
 # Import correct RoPE functions from single-trace version
 from compute_kmeans_init import (
@@ -62,7 +63,8 @@ def get_training_trace_paths(test_trace_path, logger):
 
 def compute_kmeans_init_multi_trace(config, logger, n_clusters=128, random_state=42,
                                      return_extras=False, use_l2_norm=False,
-                                     invert_to_origin=False, inv_freq=None):
+                                     invert_to_origin=False, inv_freq=None,
+                                     preloaded_traces=None):
     """
     Compute K-means initialization from ALL training traces.
 
@@ -83,6 +85,8 @@ def compute_kmeans_init_multi_trace(config, logger, n_clusters=128, random_state
         use_l2_norm: If True, L2 normalize vectors before K-means (default: False)
         invert_to_origin: If True, invert each Q to position 0 (default: False)
         inv_freq: Optional inverse frequency tensor from model's RoPE
+        preloaded_traces: Optional list of preloaded trace dicts with 'Q', 'name', 'seq_len'
+                         If provided, uses these instead of loading from disk
 
     Returns:
         If return_extras=False:
@@ -98,24 +102,6 @@ def compute_kmeans_init_multi_trace(config, logger, n_clusters=128, random_state
             "/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B")
         inv_freq = load_model_inv_freq(model_path, logger)
 
-    # Load head sample file
-    head_sample_path = exp_dir / config['data']['head_sample_file']
-    if not head_sample_path.exists():
-        raise FileNotFoundError(f"Head sample file not found: {head_sample_path}")
-
-    with open(head_sample_path, 'r') as f:
-        head_samples = json.load(f)
-
-    layer, head = head_samples[0]
-    logger.info(f"Using head [layer={layer}, head={head}] for K-means initialization")
-
-    # Get test trace path and find training traces
-    test_trace_path = exp_dir / config['data']['test_trace_path']
-    trace_paths = get_training_trace_paths(test_trace_path, logger)
-
-    if len(trace_paths) == 0:
-        raise ValueError("No training traces found!")
-
     round_window = config['training']['round_window']
     exclude_tail = config['training']['exclude_tail']
 
@@ -123,62 +109,101 @@ def compute_kmeans_init_multi_trace(config, logger, n_clusters=128, random_state
     all_Q_relatives_unnorm = []
     total_vectors = 0
 
-    for trace_idx, trace_path in enumerate(trace_paths):
-        logger.info(f"[{trace_idx+1}/{len(trace_paths)}] Processing {trace_path.parent.name}...")
+    # Move inv_freq to GPU once
+    inv_freq_gpu = inv_freq.cuda() if inv_freq is not None else None
 
-        # Load trace and extract only the required head (memory efficient)
-        qk_data = torch.load(trace_path, map_location='cpu')
-        Q = qk_data['q'][layer, head].clone()  # (seq_len, head_dim)
-        del qk_data  # Free memory
+    # Determine data source
+    if preloaded_traces is not None:
+        # Use preloaded traces (already on GPU)
+        logger.info(f"Using {len(preloaded_traces)} preloaded traces for K-means init")
+        traces_to_process = preloaded_traces
+        use_preloaded = True
+    else:
+        # Load from disk (legacy path)
+        head_sample_path = exp_dir / config['data']['head_sample_file']
+        if not head_sample_path.exists():
+            raise FileNotFoundError(f"Head sample file not found: {head_sample_path}")
 
-        seq_len, head_dim = Q.shape
+        with open(head_sample_path, 'r') as f:
+            head_samples = json.load(f)
 
-        # Collect Q_relative for this trace
-        trace_Q_relatives = []
+        layer, head = head_samples[0]
+        logger.info(f"Using head [layer={layer}, head={head}] for K-means initialization")
 
-        for round_start in range(0, seq_len, round_window):
-            round_end = min(round_start + round_window, seq_len)
+        test_trace_path = exp_dir / config['data']['test_trace_path']
+        trace_paths = get_training_trace_paths(test_trace_path, logger)
 
-            # Skip first round (no historical keys)
-            if round_start == 0:
-                continue
+        if len(trace_paths) == 0:
+            raise ValueError("No training traces found!")
 
-            # Compute reference position (middle of round)
-            ref_pos = round_start + round_window // 2
+        traces_to_process = trace_paths
+        use_preloaded = False
 
-            # Get queries in this round (exclude tail)
-            valid_end = min(round_end, seq_len - exclude_tail)
-            if valid_end <= round_start:
-                continue
+    # Step 1: Collect Q_relative vectors from all traces
+    step1_start = time.time()
+    for trace_idx, trace_item in enumerate(traces_to_process):
+        if use_preloaded:
+            # Use preloaded trace data
+            trace_name = trace_item['name']
+            Q = trace_item['Q']  # Already on GPU
+            seq_len = trace_item['seq_len']
+            logger.info(f"[{trace_idx+1}/{len(traces_to_process)}] Processing {trace_name}...")
+        else:
+            # Load from disk
+            trace_path = trace_item
+            logger.info(f"[{trace_idx+1}/{len(traces_to_process)}] Processing {trace_path.parent.name}...")
+            qk_data = torch.load(trace_path, map_location='cuda')
+            Q = qk_data['q'][layer, head]  # (seq_len, head_dim), already on GPU
+            del qk_data
+            seq_len = Q.shape[0]
 
-            # Extract Q vectors for this round
-            round_Q = Q[round_start:valid_end]  # (num_queries, head_dim)
+        head_dim = Q.shape[1]
 
-            if invert_to_origin:
-                # Invert each Q to position 0 (like Hybrid Frequency)
-                positions = torch.arange(round_start, valid_end, dtype=round_Q.dtype)
-                Q_relative = apply_rope_rotation(round_Q, -positions, inv_freq=inv_freq)
-            else:
-                # Rotate all Q to reference position
-                Q_relative = apply_rope_rotation(round_Q, -ref_pos, inv_freq=inv_freq)
+        # Vectorized: compute all valid indices at once
+        # Skip first round (round_start=0) and exclude tail
+        valid_start = round_window  # First valid round starts at round_window
+        valid_end_seq = seq_len - exclude_tail
 
-            trace_Q_relatives.append(Q_relative)
+        if valid_start >= valid_end_seq:
+            logger.info(f"  Skipped (too short)")
+            del Q
+            continue
 
-        # Concatenate this trace's vectors
-        if trace_Q_relatives:
-            trace_vectors = torch.cat(trace_Q_relatives, dim=0)
-            all_Q_relatives_unnorm.append(trace_vectors)
-            total_vectors += trace_vectors.shape[0]
-            logger.info(f"  Collected {trace_vectors.shape[0]} vectors (total: {total_vectors})")
+        # Extract all valid Q vectors at once
+        Q_valid = Q[valid_start:valid_end_seq]  # (num_valid, head_dim)
+        num_valid = Q_valid.shape[0]
 
-        # Free memory
-        del Q, trace_Q_relatives
+        if invert_to_origin:
+            # Invert each Q to position 0
+            positions = torch.arange(valid_start, valid_end_seq, device='cuda', dtype=Q_valid.dtype)
+            Q_relative = apply_rope_rotation(Q_valid, -positions, inv_freq=inv_freq_gpu)
+        else:
+            # Compute reference positions for each query (vectorized)
+            # Each query at position p belongs to round (p // round_window)
+            # Reference position = round_start + round_window // 2
+            query_positions = torch.arange(valid_start, valid_end_seq, device='cuda')
+            round_starts = (query_positions // round_window) * round_window
+            ref_positions = round_starts + round_window // 2
+            # Rotation amount: -(ref_pos - 0) = -ref_pos
+            Q_relative = apply_rope_rotation(Q_valid, -ref_positions, inv_freq=inv_freq_gpu)
+
+        # Move result to CPU to save GPU memory (non_blocking for async transfer)
+        all_Q_relatives_unnorm.append(Q_relative.cpu(memory_format=torch.contiguous_format))
+        total_vectors += num_valid
+        logger.info(f"  Collected {num_valid} vectors (total: {total_vectors})")
+
+        # Free GPU memory (only delete Q if loaded from disk, not if preloaded)
+        del Q_valid, Q_relative
+        if not use_preloaded:
+            del Q
 
     # Stack all vectors from all traces
     Q_relatives_unnorm = torch.cat(all_Q_relatives_unnorm, dim=0)  # (total_vectors, head_dim)
-    logger.info(f"Total Q_relative vectors from all traces: {Q_relatives_unnorm.shape[0]}")
+    step1_time = time.time() - step1_start
+    logger.info(f"Step 1: Collected {Q_relatives_unnorm.shape[0]} Q_relative vectors in {step1_time:.1f}s")
 
-    # Optionally L2 normalize for K-means clustering
+    # Step 2: Optionally L2 normalize for K-means clustering
+    step2_start = time.time()
     if use_l2_norm:
         Q_relatives = l2_normalize(Q_relatives_unnorm)
         logger.info("Using L2 normalized vectors for K-means")
@@ -186,21 +211,25 @@ def compute_kmeans_init_multi_trace(config, logger, n_clusters=128, random_state
         Q_relatives = Q_relatives_unnorm.clone()
         logger.info("Using unnormalized vectors for K-means (no L2 norm)")
 
-    # Convert to float32 for sklearn
+    # Convert to float32 for K-means
     Q_relatives = Q_relatives.float()
     Q_relatives_unnorm = Q_relatives_unnorm.float()
 
-    # Run K-means clustering
-    logger.info(f"Running K-means with {n_clusters} clusters...")
-    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
-    kmeans.fit(Q_relatives.numpy())
+    # Step 3: Run K-means clustering on GPU
+    step3_start = time.time()
+    logger.info(f"Step 3: Running K-means with {n_clusters} clusters on GPU...")
+    kmeans = KMeans(n_clusters=n_clusters, mode='euclidean', max_iter=100)
+    # Move to GPU for fast clustering
+    Q_relatives_gpu = Q_relatives.cuda()
+    kmeans.fit(Q_relatives_gpu)
 
-    cluster_centers = torch.from_numpy(kmeans.cluster_centers_).float()
-    logger.info(f"K-means clustering completed. Cluster centers shape: {cluster_centers.shape}")
-    logger.info(f"K-means inertia: {kmeans.inertia_:.4f}")
+    cluster_centers = kmeans.centroids.cpu().float()
+    step3_time = time.time() - step3_start
+    logger.info(f"Step 3: K-means completed in {step3_time:.1f}s. Cluster centers shape: {cluster_centers.shape}")
 
     if return_extras:
-        cluster_labels = kmeans.labels_
+        # Get cluster labels by predicting on the data
+        cluster_labels = kmeans.predict(Q_relatives_gpu).cpu().numpy()
         return cluster_centers, cluster_labels, Q_relatives_unnorm
 
     return cluster_centers

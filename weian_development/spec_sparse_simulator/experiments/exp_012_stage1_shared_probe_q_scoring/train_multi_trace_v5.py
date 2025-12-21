@@ -306,9 +306,13 @@ def train_on_trace_batched(
     Uses forward_keys_batched/forward_queries_batched to process multiple
     rounds in parallel with a single forward pass.
 
+    Label caching: On first epoch, computes attention matrix to extract labels,
+    then caches labels and discards attention to save memory. Subsequent epochs
+    use cached labels directly without recomputing attention.
+
     Args:
         model: Module2Network instance
-        trace_data: Dict with Q, K, attention (precomputed) for single head
+        trace_data: Dict with Q, K for single head. Labels are cached after first epoch.
         optimizer: Optimizer
         config: Configuration dict
         device: torch.device
@@ -329,26 +333,35 @@ def train_on_trace_batched(
     K = trace_data['K']
     seq_len = trace_data['seq_len']
 
-    # Use precomputed attention if available, otherwise compute
-    if 'attention' in trace_data:
-        attention = trace_data['attention']
-    else:
-        attention = compute_attention_matrix(Q, K, use_cache=True)
-
     round_window = config['training']['round_window']
     exclude_tail = config['training']['exclude_tail']
 
-    # Collect all valid rounds
-    rounds = []
-    for round_start in range(round_window, seq_len, round_window):  # Skip first round
-        round_end = min(round_start + round_window, seq_len)
-        labels = extract_round_labels(attention, round_start, round_end, seq_len, exclude_tail)
-        if labels is not None and len(labels['query_indices']) > 0:
-            rounds.append({
-                'round_start': round_start,
-                'round_end': round_end,
-                'labels': labels
-            })
+    # Check if labels are cached (from previous epoch)
+    if 'cached_rounds' in trace_data:
+        # Use cached labels - no attention computation needed
+        rounds = trace_data['cached_rounds']
+    else:
+        # First epoch: compute attention, extract labels, cache them
+        # Compute attention matrix (will be discarded after extracting labels)
+        attention = compute_attention_matrix(Q, K, use_cache=True)
+
+        # Collect all valid rounds and their labels
+        rounds = []
+        for round_start in range(round_window, seq_len, round_window):  # Skip first round
+            round_end = min(round_start + round_window, seq_len)
+            labels = extract_round_labels(attention, round_start, round_end, seq_len, exclude_tail)
+            if labels is not None and len(labels['query_indices']) > 0:
+                rounds.append({
+                    'round_start': round_start,
+                    'round_end': round_end,
+                    'labels': labels
+                })
+
+        # Cache labels for subsequent epochs (small memory footprint)
+        trace_data['cached_rounds'] = rounds
+
+        # Delete attention matrix to free memory (labels are already extracted)
+        del attention
 
     if len(rounds) == 0:
         return 0.0, {'top1_hits': 0, 'top8_hits': 0, 'total': 0, 'recent_hits': 0}
@@ -580,35 +593,210 @@ def train_epoch_multi_trace(
     return avg_loss, epoch_metrics
 
 
-def evaluate_on_test(model, config, device, logger):
+def compute_topk_hit_rate_fast(model, test_trace_data, K_values, device, logger, top_bins=1):
+    """
+    Compute TopK Hit Rate using vectorized operations (fast version).
+
+    Uses preloaded test data with cached labels to avoid recomputing attention.
+    Processes all queries in a round together (batched forward).
+
+    Args:
+        model: Module2Network instance (in eval mode)
+        test_trace_data: Preloaded test trace dict with Q, K, cached_rounds
+        K_values: List of K values to evaluate
+        device: torch.device
+        logger: Logger instance
+        top_bins: Number of top bins to use
+
+    Returns:
+        Dict with hit rates for each K value
+    """
+    Q = test_trace_data['Q']
+    K = test_trace_data['K']
+    cached_rounds = test_trace_data['cached_rounds']
+    round_window = test_trace_data['round_window']
+
+    # Initialize counters for each K value
+    results = {k: {'hits': 0, 'total': 0, 'recent_hits': 0, 'bin_hits': 0} for k in K_values}
+
+    with torch.no_grad():
+        for round_info in cached_rounds:
+            round_start = round_info['round_start']
+            labels = round_info['labels']
+
+            query_indices = labels['query_indices']
+            argmax_keys = labels['argmax_keys'].to(device)
+            argmax_in_recent = labels['argmax_in_recent'].to(device)
+
+            num_queries = len(query_indices)
+            if num_queries == 0:
+                continue
+
+            # Historical keys
+            historical_keys = K[:round_start]
+            num_historical = round_start
+
+            # Compute reference angles
+            reference_angles = model.compute_reference_angles(round_start, round_window)
+
+            # Forward pass: Key network (once per round)
+            key_probs = model.forward_keys(historical_keys, reference_angles)
+
+            # Detect empty bins
+            empty_bin_mask = (key_probs.sum(dim=0) == 0).detach()
+
+            # Forward pass: Query network (batched for all queries in this round)
+            queries = Q[query_indices]
+            query_bin_probs = model.forward_queries(queries, reference_angles, empty_bin_mask)
+
+            # Pre-compute topk keys for all bins at once (key optimization!)
+            max_k = max(K_values)
+            actual_k = min(max_k, num_historical)
+            _, topk_keys_per_bin = torch.topk(key_probs, actual_k, dim=0)
+            # topk_keys_per_bin: (actual_k, num_bins)
+
+            # Get top bins for each query
+            actual_top_bins = min(top_bins, model.num_bins)
+            _, top_bin_indices = torch.topk(query_bin_probs, actual_top_bins, dim=1)
+            # top_bin_indices: (num_queries, top_bins)
+
+            # Count recent hits (vectorized)
+            recent_mask = argmax_in_recent
+            num_recent = recent_mask.sum().item()
+
+            # For non-recent queries, check if argmax is in selected bins' topk
+            non_recent_mask = ~argmax_in_recent
+            num_non_recent = non_recent_mask.sum().item()
+
+            # For each K value
+            for k_val in K_values:
+                results[k_val]['total'] += num_queries
+                results[k_val]['recent_hits'] += num_recent
+                results[k_val]['hits'] += num_recent
+
+                if num_non_recent > 0:
+                    # Get topk keys for this K value
+                    k_actual = min(k_val, actual_k)
+                    topk_keys_k = topk_keys_per_bin[:k_actual, :]  # (k_actual, num_bins)
+
+                    # For each non-recent query, check if argmax is in any selected bin's topk
+                    non_recent_indices = torch.where(non_recent_mask)[0]
+                    non_recent_argmax = argmax_keys[non_recent_mask]
+                    non_recent_top_bins = top_bin_indices[non_recent_mask]  # (num_non_recent, top_bins)
+
+                    # Gather topk keys for selected bins
+                    # topk_keys_k: (k_actual, num_bins)
+                    # non_recent_top_bins: (num_non_recent, top_bins)
+                    # We need: for each query, gather keys from its selected bins
+
+                    # Expand for broadcasting
+                    expanded_bins = non_recent_top_bins.unsqueeze(0).expand(k_actual, -1, -1)
+                    # expanded_bins: (k_actual, num_non_recent, top_bins)
+
+                    topk_expanded = topk_keys_k.unsqueeze(1).expand(-1, num_non_recent, -1)
+                    # topk_expanded: (k_actual, num_non_recent, num_bins)
+
+                    selected_keys = topk_expanded.gather(2, expanded_bins)
+                    # selected_keys: (k_actual, num_non_recent, top_bins)
+
+                    # Check if argmax matches any selected key
+                    argmax_expanded = non_recent_argmax.view(1, num_non_recent, 1)
+                    matches = (selected_keys == argmax_expanded)
+                    # matches: (k_actual, num_non_recent, top_bins)
+
+                    query_hits = matches.any(dim=0).any(dim=1)  # (num_non_recent,)
+                    bin_hits = query_hits.sum().item()
+
+                    results[k_val]['bin_hits'] += bin_hits
+                    results[k_val]['hits'] += bin_hits
+
+    # Compute hit rates
+    hit_rates = {}
+    for k_val in K_values:
+        total = results[k_val]['total']
+        if total > 0:
+            hit_rate = results[k_val]['hits'] / total * 100
+            recent_rate = results[k_val]['recent_hits'] / total * 100
+            bin_rate = results[k_val]['bin_hits'] / total * 100
+        else:
+            hit_rate = recent_rate = bin_rate = 0.0
+
+        keys_per_query = top_bins * k_val
+        hit_rates[k_val] = {
+            'hit_rate': hit_rate,
+            'recent_hit_rate': recent_rate,
+            'bin_hit_rate': bin_rate,
+            'total_queries': total,
+            'total_hits': results[k_val]['hits'],
+            'recent_hits': results[k_val]['recent_hits'],
+            'bin_hits': results[k_val]['bin_hits'],
+            'top_bins': top_bins,
+            'keys_per_query': keys_per_query
+        }
+
+        if top_bins == 1:
+            logger.info(
+                f"K={k_val}: Hit Rate = {hit_rate:.2f}% "
+                f"(Recent: {recent_rate:.2f}%, Bin: {bin_rate:.2f}%, "
+                f"Total: {results[k_val]['hits']}/{total})"
+            )
+        else:
+            logger.info(
+                f"K={k_val} (top-{top_bins} bins, {keys_per_query} keys/query): Hit Rate = {hit_rate:.2f}% "
+                f"(Recent: {recent_rate:.2f}%, Bin: {bin_rate:.2f}%, "
+                f"Total: {results[k_val]['hits']}/{total})"
+            )
+
+    return hit_rates
+
+
+def evaluate_on_test(model, config, device, logger, test_trace_data=None):
     """
     Evaluate model on test set.
+
+    Args:
+        model: Model to evaluate
+        config: Configuration dict
+        device: torch.device
+        logger: Logger instance
+        test_trace_data: Preloaded test trace data (optional, will load if not provided)
 
     Returns:
         hit_rates: Dict with hit rates for different K values
     """
-    from evaluate import load_trace_data, compute_topk_hit_rate
-
+    eval_start = time.time()
     model.eval()
 
-    trace_data = load_trace_data(config, logger, trace_type='test')
-    K_values = config['evaluation']['topk_K']
-    round_window = config['evaluation'].get('round_window', config['training']['round_window'])
-    exclude_tail = config['training']['exclude_tail']
+    # Use preloaded data or load from disk (fallback for standalone evaluation)
+    if test_trace_data is None:
+        from evaluate import load_trace_data, compute_topk_hit_rate
+        trace_data = load_trace_data(config, logger, trace_type='test')
+        K_values = config['evaluation']['topk_K']
+        round_window = config['evaluation'].get('round_window', config['training']['round_window'])
+        exclude_tail = config['training']['exclude_tail']
 
-    # Evaluate with top-1 bins
-    hit_rates_top1 = compute_topk_hit_rate(
-        model, trace_data, K_values, round_window, exclude_tail, device, logger,
-        top_bins=1
-    )
+        # Use original slow path
+        hit_rates_top1 = compute_topk_hit_rate(
+            model, trace_data, K_values, round_window, exclude_tail, device, logger, top_bins=1
+        )
+        hit_rates_top8 = compute_topk_hit_rate(
+            model, trace_data, K_values, round_window, exclude_tail, device, logger, top_bins=8
+        )
+    else:
+        # Use fast vectorized evaluation
+        K_values = config['evaluation']['topk_K']
 
-    # Evaluate with top-8 bins
-    hit_rates_top8 = compute_topk_hit_rate(
-        model, trace_data, K_values, round_window, exclude_tail, device, logger,
-        top_bins=8
-    )
+        hit_rates_top1 = compute_topk_hit_rate_fast(
+            model, test_trace_data, K_values, device, logger, top_bins=1
+        )
+        hit_rates_top8 = compute_topk_hit_rate_fast(
+            model, test_trace_data, K_values, device, logger, top_bins=8
+        )
 
     model.train()
+
+    eval_time = time.time() - eval_start
+    logger.info(f"Evaluation completed in {eval_time:.1f}s")
 
     return {'top1': hit_rates_top1, 'top8': hit_rates_top8}
 
@@ -634,14 +822,37 @@ def preload_all_traces(trace_paths, layer, head, logger, device='cpu', precomput
     total_queries = 0
 
     for i, trace_path in enumerate(trace_paths):
-        logger.info(f"  [{i+1}/{len(trace_paths)}] Loading {trace_path.parent.name}...")
+        trace_name = trace_path.parent.name
+        logger.info(f"  [{i+1}/{len(trace_paths)}] Loading {trace_name}...")
 
-        qk_data = torch.load(trace_path, map_location='cpu')
+        # Check for cached single-head file
+        cache_dir = trace_path.parent / 'head_cache'
+        cache_file = cache_dir / f'layer{layer}_head{head}.pt'
 
-        Q = qk_data['q'][layer, head].clone().to(device)
-        K = qk_data['k'][layer, head].clone().to(device)
+        if cache_file.exists():
+            # Load from cache (fast path)
+            cached_data = torch.load(cache_file, map_location='cpu')
+            Q = cached_data['q'].to(device)
+            K = cached_data['k'].to(device)
+            del cached_data
+            logger.info(f"       loaded from cache")
+        else:
+            # Load from full file, then cache
+            qk_data = torch.load(trace_path, map_location='cpu')
+            Q = qk_data['q'][layer, head].clone().to(device)
+            K = qk_data['k'][layer, head].clone().to(device)
 
-        del qk_data
+            # Save to cache for future runs
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_data = {
+                'q': qk_data['q'][layer, head].clone(),
+                'k': qk_data['k'][layer, head].clone(),
+                'layer': layer,
+                'head': head,
+            }
+            torch.save(cache_data, cache_file)
+            del qk_data
+            logger.info(f"       cached to {cache_file.name}")
 
         seq_len = Q.shape[0]
         total_queries += seq_len
@@ -651,7 +862,7 @@ def preload_all_traces(trace_paths, layer, head, logger, device='cpu', precomput
             'K': K,
             'seq_len': seq_len,
             'head_dim': Q.shape[1],
-            'name': trace_path.parent.name
+            'name': trace_name
         }
 
         # Precompute attention matrix (deterministic, only needs to be done once)
@@ -671,6 +882,92 @@ def preload_all_traces(trace_paths, layer, head, logger, device='cpu', precomput
         logger.info(f"GPU memory after preload: {gpu_mem:.2f} GB")
 
     return all_traces
+
+
+def preload_test_trace(test_trace_path, layer, head, config, logger, device='cuda'):
+    """
+    Preload test trace and extract labels for evaluation.
+
+    This avoids reloading the test trace and recomputing attention on every evaluation.
+
+    Args:
+        test_trace_path: Path to test trace qk.pt file
+        layer: Layer index
+        head: Head index
+        config: Configuration dict
+        logger: Logger instance
+        device: Device to load data to
+
+    Returns:
+        dict with Q, K, cached_rounds (labels), and metadata
+    """
+    from pathlib import Path
+    test_trace_path = Path(test_trace_path)
+
+    # Check for cached single-head file
+    cache_dir = test_trace_path.parent / 'head_cache'
+    cache_file = cache_dir / f'layer{layer}_head{head}.pt'
+
+    if cache_file.exists():
+        cached_data = torch.load(cache_file, map_location='cpu')
+        Q = cached_data['q'].to(device)
+        K = cached_data['k'].to(device)
+        del cached_data
+        logger.info(f"       test trace loaded from cache")
+    else:
+        qk_data = torch.load(test_trace_path, map_location='cpu')
+        Q = qk_data['q'][layer, head].clone().to(device)
+        K = qk_data['k'][layer, head].clone().to(device)
+
+        # Save to cache
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_data = {
+            'q': qk_data['q'][layer, head].clone(),
+            'k': qk_data['k'][layer, head].clone(),
+            'layer': layer,
+            'head': head,
+        }
+        torch.save(cache_data, cache_file)
+        del qk_data
+        logger.info(f"       test trace cached")
+
+    seq_len = Q.shape[0]
+    round_window = config['evaluation'].get('round_window', config['training']['round_window'])
+    exclude_tail = config['training']['exclude_tail']
+
+    # Compute attention and extract labels (then delete attention)
+    logger.info(f"       extracting labels (seq_len={seq_len})...")
+    with torch.no_grad():
+        attention = compute_attention_matrix(Q, K, use_cache=True)
+
+        # Extract labels for all rounds
+        cached_rounds = []
+        for round_start in range(round_window, seq_len, round_window):
+            round_end = min(round_start + round_window, seq_len)
+            labels = extract_round_labels(attention, round_start, round_end, seq_len, exclude_tail)
+            if labels is not None and len(labels['query_indices']) > 0:
+                cached_rounds.append({
+                    'round_start': round_start,
+                    'round_end': round_end,
+                    'labels': labels
+                })
+
+        # Free attention memory
+        del attention
+
+    logger.info(f"       {len(cached_rounds)} rounds extracted")
+
+    return {
+        'Q': Q,
+        'K': K,
+        'seq_len': seq_len,
+        'head_dim': Q.shape[1],
+        'layer': layer,
+        'head': head,
+        'cached_rounds': cached_rounds,
+        'round_window': round_window,
+        'exclude_tail': exclude_tail,
+    }
 
 
 def train(config, logger, use_l2_norm=False, invert_to_origin=False, weight_decay=0.0,
@@ -728,23 +1025,42 @@ def train(config, logger, use_l2_norm=False, invert_to_origin=False, weight_deca
     test_trace_path = exp_dir / config['data']['test_trace_path']
     trace_paths = get_training_trace_paths(test_trace_path, logger)
 
-    # Preload all traces to GPU with precomputed attention
+    # Step 1: Preload all traces to GPU (training + test)
+    step1_start = time.time()
+    logger.info("=" * 60)
+    logger.info("Step 1: Preloading traces to GPU...")
+
+    # 1a. Preload training traces
     all_traces = preload_all_traces(
         trace_paths, layer, head, logger,
-        device=device, precompute_attention=True
+        device=device, precompute_attention=False
     )
 
-    # Compute K-means initialization
+    # 1b. Preload test trace (for evaluation)
+    logger.info("  Preloading test trace...")
+    test_trace_data = preload_test_trace(
+        test_trace_path, layer, head, config, logger, device
+    )
+
+    step1_time = time.time() - step1_start
+    logger.info(f"Step 1 completed in {step1_time:.1f}s")
+    logger.info("=" * 60)
+
+    # Step 2: Compute K-means initialization
     use_kmeans_init = config.get('model', {}).get('use_kmeans_init', True)
     init_probes = None
 
     if use_kmeans_init:
-        logger.info("Computing K-means initialization from ALL training traces...")
+        step2_start = time.time()
+        logger.info("Step 2: Computing K-means initialization...")
         init_probes = compute_kmeans_init_multi_trace(
             config, logger, n_clusters=config['model']['num_bins'],
-            use_l2_norm=use_l2_norm, invert_to_origin=invert_to_origin
+            use_l2_norm=use_l2_norm, invert_to_origin=invert_to_origin,
+            preloaded_traces=all_traces  # Reuse already loaded data
         )
-        logger.info(f"K-means initialization completed. Probe shape: {init_probes.shape}")
+        step2_time = time.time() - step2_start
+        logger.info(f"Step 2 completed in {step2_time:.1f}s. Probe shape: {init_probes.shape}")
+        logger.info("=" * 60)
 
     # Create model
     model = create_model(config, init_probes=init_probes, use_l2_norm=use_l2_norm)
@@ -793,16 +1109,15 @@ def train(config, logger, use_l2_norm=False, invert_to_origin=False, weight_deca
 
         epoch_time = time.time() - epoch_start_time
 
-        # Log to console
-        if epoch % log_every == 0 or epoch == 1:
-            if compute_acc_this_epoch and epoch_metrics['total'] > 0:
-                logger.info(f"Epoch {epoch}/{num_epochs} - Loss: {avg_loss:.6f}, "
-                           f"Top1: {epoch_metrics['top1_acc']:.2f}%, "
-                           f"Top8: {epoch_metrics['top8_acc']:.2f}%, "
-                           f"Time: {epoch_time:.1f}s")
-            else:
-                logger.info(f"Epoch {epoch}/{num_epochs} - Loss: {avg_loss:.6f}, "
-                           f"Time: {epoch_time:.1f}s")
+        # Log to console (always log epoch summary with timing)
+        if compute_acc_this_epoch and epoch_metrics['total'] > 0:
+            logger.info(f"Epoch {epoch}/{num_epochs} - Loss: {avg_loss:.6f}, "
+                       f"Top1: {epoch_metrics['top1_acc']:.2f}%, "
+                       f"Top8: {epoch_metrics['top8_acc']:.2f}%, "
+                       f"Time: {epoch_time:.1f}s")
+        else:
+            logger.info(f"Epoch {epoch}/{num_epochs} - Loss: {avg_loss:.6f}, "
+                       f"Time: {epoch_time:.1f}s")
 
         # Log to TensorBoard
         if writer is not None:
@@ -885,7 +1200,7 @@ def train(config, logger, use_l2_norm=False, invert_to_origin=False, weight_deca
         # Periodic evaluation on test set
         if epoch % eval_every == 0:
             logger.info(f"=== Evaluating on test set (epoch {epoch}) ===")
-            eval_results = evaluate_on_test(model, config, device, logger)
+            eval_results = evaluate_on_test(model, config, device, logger, test_trace_data)
 
             # Log evaluation results
             if writer is not None:
