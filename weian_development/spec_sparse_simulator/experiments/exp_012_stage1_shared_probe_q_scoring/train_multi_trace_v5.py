@@ -1416,6 +1416,12 @@ def main():
         action='store_true',
         help='Add error vector term to Q network (default: off)'
     )
+    parser.add_argument(
+        '--num-bins',
+        type=int,
+        default=None,
+        help='Override number of bins/probes from config'
+    )
     args = parser.parse_args()
 
     exp_dir = Path(__file__).parent
@@ -1428,6 +1434,10 @@ def main():
     if args.epochs is not None:
         config['training']['epochs'] = args.epochs
 
+    # Override num_bins if specified
+    if args.num_bins is not None:
+        config['model']['num_bins'] = args.num_bins
+
     logger = setup_logging(config, args.exp_name)
 
     # Fixed settings based on experiments
@@ -1438,6 +1448,7 @@ def main():
     logger.info(f"Round batch size: {args.round_batch_size}")
     logger.info(f"Eval every: {args.eval_every} epochs")
     logger.info(f"Use error term: {args.use_error_term}")
+    logger.info(f"Num bins: {config['model']['num_bins']}")
 
     try:
         final_checkpoint = train(
