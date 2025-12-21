@@ -176,11 +176,12 @@ Labels 缓存内容：
 ## 状态
 
 - [ ] 问题 1：显存优化（方案 B - Q/K 留 GPU，attention 不缓存）
-- [ ] 问题 2：batch 内并行化（需要修改 model 支持 batched rotated_probes）
-- [ ] 问题 3.1：accuracy 计算向量化
-- [ ] 问题 3.2：round 收集循环优化
-- [ ] 问题 3.3：regularization loss 向量化
-- [ ] 问题 3.4：norm 计算向量化
+- [x] 问题 2：batch 内并行化（V5 已实现 forward_keys_batched/forward_queries_batched）
+- [x] 问题 3.1：accuracy 计算向量化 ✅ **~10x speedup** (168s → 17s)
+- [x] 问题 3.2：round 收集循环优化（extract_round_labels 内部已向量化，Python 循环开销可忽略）
+- [x] 问题 3.3：regularization loss 向量化 ✅
+- [x] 问题 3.4：norm 计算向量化 ✅ (避免多次 .item() 调用)
+- [x] 问题 3.5：inner round 处理循环 ✅ (V5 batched forward)
 - [ ] 问题 4：Label 缓存（第一个 epoch 计算时缓存，后续复用）
 
 ---

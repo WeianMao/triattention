@@ -169,29 +169,38 @@ def compute_attraction_loss(key_probs, query_bin_probs, argmax_keys, argmax_in_r
 def compute_init_regularization_loss(model, init_params):
     """
     Compute regularization loss that pulls weights toward initialization.
+    Vectorized: avoids Python loop over parameters.
     """
-    reg_loss = 0.0
-    for name, param in model.named_parameters():
-        if name in init_params:
-            reg_loss = reg_loss + ((param - init_params[name]) ** 2).sum()
-    return reg_loss
+    # Collect all parameter differences in a list, then sum
+    diffs = [(param - init_params[name]).pow(2).sum()
+             for name, param in model.named_parameters() if name in init_params]
+    if len(diffs) == 0:
+        return torch.tensor(0.0, device=next(model.parameters()).device)
+    return torch.stack(diffs).sum()
 
 
 def compute_gradient_norm(model):
-    """Compute the L2 norm of all gradients."""
-    total_norm = 0.0
-    for param in model.parameters():
-        if param.grad is not None:
-            total_norm += param.grad.data.norm(2).item() ** 2
-    return total_norm ** 0.5
+    """
+    Compute the L2 norm of all gradients.
+    Vectorized: avoids multiple .item() calls that cause CPU-GPU sync.
+    """
+    grads = [p.grad.detach().pow(2).sum() for p in model.parameters() if p.grad is not None]
+    if len(grads) == 0:
+        return 0.0
+    total_norm_sq = torch.stack(grads).sum()
+    return total_norm_sq.sqrt().item()
 
 
 def compute_parameter_norm(model):
-    """Compute the L2 norm of all parameters."""
-    total_norm = 0.0
-    for param in model.parameters():
-        total_norm += param.data.norm(2).item() ** 2
-    return total_norm ** 0.5
+    """
+    Compute the L2 norm of all parameters.
+    Vectorized: avoids multiple .item() calls that cause CPU-GPU sync.
+    """
+    norms = [p.detach().pow(2).sum() for p in model.parameters()]
+    if len(norms) == 0:
+        return 0.0
+    total_norm_sq = torch.stack(norms).sum()
+    return total_norm_sq.sqrt().item()
 
 
 def compute_parameter_stats(model):
@@ -212,7 +221,7 @@ def compute_parameter_stats(model):
 
 def compute_batch_accuracy_fast(key_probs, query_bin_probs, argmax_keys, argmax_in_recent, top_k_bins=1, k_threshold=50):
     """
-    Compute bin accuracy for a batch of queries (vectorized, fast).
+    Compute bin accuracy for a batch of queries (fully vectorized).
 
     Args:
         key_probs: (num_keys, num_bins) - key probability distribution
@@ -229,47 +238,56 @@ def compute_batch_accuracy_fast(key_probs, query_bin_probs, argmax_keys, argmax_
         bin_hits: Number of queries where argmax key is in selected bins' top keys
     """
     num_queries = query_bin_probs.shape[0]
-    num_keys = key_probs.shape[0]
+    num_keys, num_bins = key_probs.shape
+    device = key_probs.device
 
     # Count recent hits
     recent_hits = argmax_in_recent.sum().item()
 
     # For non-recent queries, check if argmax key is in top bins' top keys
     non_recent_mask = ~argmax_in_recent
+    num_non_recent = non_recent_mask.sum().item()
     bin_hits = 0
 
-    if non_recent_mask.sum() > 0:
-        # Get top-k bins for each query: (num_non_recent, top_k_bins)
-        _, top_bin_indices = torch.topk(query_bin_probs[non_recent_mask], min(top_k_bins, query_bin_probs.shape[1]), dim=1)
-        non_recent_argmax = argmax_keys[non_recent_mask]
+    if num_non_recent > 0:
+        # Step 1: Pre-compute top-k_threshold keys for ALL bins at once
+        # This is the key optimization - only ONE topk call instead of O(queries * bins)
+        actual_k = min(k_threshold, num_keys)
+        _, topk_keys_per_bin = torch.topk(key_probs, actual_k, dim=0)
+        # topk_keys_per_bin: (k_threshold, num_bins) - indices of top keys for each bin
 
-        # Vectorized: check if argmax key is in top-k_threshold of any selected bin
-        # For each non-recent query, get the argmax key's probability in each selected bin
-        # key_probs: (num_keys, num_bins)
-        # non_recent_argmax: (num_non_recent,)
+        # Step 2: Get top bins for each non-recent query
+        actual_top_bins = min(top_k_bins, num_bins)
+        _, top_bin_indices = torch.topk(query_bin_probs[non_recent_mask], actual_top_bins, dim=1)
         # top_bin_indices: (num_non_recent, top_k_bins)
 
-        # Get prob of argmax key in each selected bin
-        # argmax_key_probs[i, j] = key_probs[argmax_keys[i], top_bin_indices[i, j]]
-        argmax_key_probs = key_probs[non_recent_argmax.clamp(max=num_keys-1)]  # (num_non_recent, num_bins)
-        selected_probs = argmax_key_probs.gather(1, top_bin_indices)  # (num_non_recent, top_k_bins)
+        non_recent_argmax = argmax_keys[non_recent_mask]
+        # Clamp to valid range
+        non_recent_argmax = non_recent_argmax.clamp(0, num_keys - 1)
 
-        # Get top-k_threshold keys for each selected bin
-        # For simplicity, use the fact that if argmax_key's prob is high, it's likely in top-k
-        # Check if any selected bin has argmax_key in its top-k_threshold
-        for i in range(top_bin_indices.shape[0]):
-            argmax_key = non_recent_argmax[i].item()
-            if argmax_key >= num_keys:
-                continue
-            for j in range(top_bin_indices.shape[1]):
-                bin_idx = top_bin_indices[i, j].item()
-                bin_scores = key_probs[:, bin_idx]
-                # Use topk to find if argmax_key is among top-k_threshold
-                actual_k = min(k_threshold, num_keys)
-                _, topk_keys = torch.topk(bin_scores, actual_k)
-                if argmax_key in topk_keys:
-                    bin_hits += 1
-                    break
+        # Step 3: For each query, check if argmax_key is in topk of ANY selected bin
+        # Gather the topk keys for the selected bins
+        # topk_keys_per_bin: (k_threshold, num_bins)
+        # top_bin_indices: (num_non_recent, top_k_bins)
+        # We need: topk_keys_selected[q, b, k] = topk_keys_per_bin[k, top_bin_indices[q, b]]
+
+        # Expand for gathering: (k_threshold, num_non_recent, top_k_bins)
+        expanded_bin_indices = top_bin_indices.unsqueeze(0).expand(actual_k, -1, -1)
+        # topk_keys_per_bin: (k_threshold, num_bins) -> expand for queries
+        topk_keys_expanded = topk_keys_per_bin.unsqueeze(1).expand(-1, num_non_recent, -1)
+        # Gather: select the bins for each query
+        topk_keys_selected = topk_keys_expanded.gather(2, expanded_bin_indices)
+        # topk_keys_selected: (k_threshold, num_non_recent, top_k_bins)
+
+        # Step 4: Check if argmax_key matches any of the topk keys in any selected bin
+        # non_recent_argmax: (num_non_recent,) -> (1, num_non_recent, 1) for broadcasting
+        argmax_expanded = non_recent_argmax.view(1, num_non_recent, 1)
+        # Compare: (k_threshold, num_non_recent, top_k_bins)
+        matches = (topk_keys_selected == argmax_expanded)
+        # For each query, check if ANY match exists across all (k, bin) combinations
+        query_hits = matches.any(dim=0).any(dim=1)  # (num_non_recent,)
+
+        bin_hits = query_hits.sum().item()
 
     total = num_queries
     hits = recent_hits + bin_hits
