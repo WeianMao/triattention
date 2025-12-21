@@ -379,13 +379,14 @@ def compute_topk_hit_rate(
     round_window,
     exclude_tail,
     device,
-    logger
+    logger,
+    top_bins: int = 1
 ):
     """
     Compute TopK Hit Rate for different K values.
 
     TopK Hit Rate: Percentage of queries whose argmax key is either:
-    1. In the selected bin's TopK keys (historical)
+    1. In the selected bin(s)'s TopK keys (historical)
     2. In recent keys (auto-hit, always included via full attention)
 
     Args:
@@ -396,6 +397,7 @@ def compute_topk_hit_rate(
         exclude_tail: Number of tail queries to exclude
         device: torch.device
         logger: Logger instance
+        top_bins: Number of top bins to use for key selection (default: 1)
 
     Returns:
         Dict with hit rates for each K value and detailed statistics
@@ -432,6 +434,9 @@ def compute_topk_hit_rate(
             # Forward pass: Key network on historical keys
             key_probs = model.forward_keys(historical_keys, reference_angles)  # (num_historical, num_bins)
 
+            # Detect empty bins (for masking)
+            empty_bin_mask = (key_probs.sum(dim=0) == 0).detach()  # (num_bins,)
+
             # Iterate over queries in this round
             for q_idx in range(round_start, min(round_end, valid_end)):
                 # Get attention weights for all keys <= q_idx (causal)
@@ -446,18 +451,12 @@ def compute_topk_hit_rate(
                 # Get query vector
                 query = Q[q_idx:q_idx + 1]  # (1, head_dim)
 
-                # Detect empty bins (for masking)
-                empty_bin_mask = key_probs.sum(dim=0) == 0  # (num_bins,)
-
                 # Forward pass: Query network
                 query_bin_probs = model.forward_queries(query, reference_angles, empty_bin_mask)  # (1, num_bins)
 
-                # Select bin (argmax of query bin probabilities)
-                selected_bin = query_bin_probs.argmax(dim=-1).item()
-
-                # Get key scores for selected bin
-                # key_probs: (num_historical, num_bins)
-                bin_scores = key_probs[:, selected_bin]  # (num_historical,)
+                # Get top-N bins
+                actual_top_bins = min(top_bins, model.num_bins)
+                _, top_bin_indices = torch.topk(query_bin_probs[0], actual_top_bins)
 
                 # For each K value, check if argmax key is hit
                 for k_val in K_values:
@@ -468,14 +467,15 @@ def compute_topk_hit_rate(
                         results[k_val]['hits'] += 1
                         results[k_val]['recent_hits'] += 1
                     else:
-                        # Check if argmax key is in TopK of selected bin
-                        # Limit k to available historical keys
-                        actual_k = min(k_val, num_historical)
+                        # Collect top-K keys from each selected bin
+                        all_selected_keys = set()
+                        for bin_idx in top_bin_indices:
+                            bin_scores = key_probs[:, bin_idx]
+                            actual_k = min(k_val, num_historical)
+                            _, topk_indices = torch.topk(bin_scores, actual_k)
+                            all_selected_keys.update(topk_indices.tolist())
 
-                        # Get TopK key indices from bin scores
-                        _, topk_indices = torch.topk(bin_scores, actual_k)
-
-                        if argmax_key in topk_indices:
+                        if argmax_key in all_selected_keys:
                             results[k_val]['hits'] += 1
                             results[k_val]['bin_hits'] += 1
 
@@ -492,6 +492,9 @@ def compute_topk_hit_rate(
             recent_rate = 0.0
             bin_rate = 0.0
 
+        # Calculate effective keys per query
+        keys_per_query = top_bins * k_val
+
         hit_rates[k_val] = {
             'hit_rate': hit_rate,
             'recent_hit_rate': recent_rate,
@@ -499,14 +502,23 @@ def compute_topk_hit_rate(
             'total_queries': total,
             'total_hits': results[k_val]['hits'],
             'recent_hits': results[k_val]['recent_hits'],
-            'bin_hits': results[k_val]['bin_hits']
+            'bin_hits': results[k_val]['bin_hits'],
+            'top_bins': top_bins,
+            'keys_per_query': keys_per_query
         }
 
-        logger.info(
-            f"K={k_val}: Hit Rate = {hit_rate:.2f}% "
-            f"(Recent: {recent_rate:.2f}%, Bin: {bin_rate:.2f}%, "
-            f"Total: {results[k_val]['hits']}/{total})"
-        )
+        if top_bins == 1:
+            logger.info(
+                f"K={k_val}: Hit Rate = {hit_rate:.2f}% "
+                f"(Recent: {recent_rate:.2f}%, Bin: {bin_rate:.2f}%, "
+                f"Total: {results[k_val]['hits']}/{total})"
+            )
+        else:
+            logger.info(
+                f"K={k_val} (top-{top_bins} bins, {keys_per_query} keys/query): Hit Rate = {hit_rate:.2f}% "
+                f"(Recent: {recent_rate:.2f}%, Bin: {bin_rate:.2f}%, "
+                f"Total: {results[k_val]['hits']}/{total})"
+            )
 
     return hit_rates
 
@@ -697,7 +709,7 @@ def evaluate_baseline(config, logger, model_path: Path = None):
     return hit_rates
 
 
-def evaluate(config, checkpoint_path, logger):
+def evaluate(config, checkpoint_path, logger, top_bins_list: List[int] = None):
     """
     Main evaluation function.
 
@@ -705,11 +717,16 @@ def evaluate(config, checkpoint_path, logger):
         config: Configuration dict
         checkpoint_path: Path to model checkpoint
         logger: Logger instance
+        top_bins_list: List of top_bins values to evaluate (default: [1, 8])
 
     Returns:
-        Evaluation results dict
+        Evaluation results dict with results for each top_bins setting
     """
     logger.info("Starting Module 2 evaluation...")
+
+    # Default to evaluating both top-1 and top-8 bins
+    if top_bins_list is None:
+        top_bins_list = [1, 8]
 
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -726,12 +743,18 @@ def evaluate(config, checkpoint_path, logger):
     round_window = config['evaluation'].get('round_window', config['training']['round_window'])
     exclude_tail = config['training']['exclude_tail']
 
-    logger.info(f"Evaluating TopK Hit Rate for K={K_values}")
+    # Evaluate for each top_bins setting
+    all_results = {}
+    for top_bins in top_bins_list:
+        logger.info(f"\n--- Evaluating with top-{top_bins} bins ---")
+        logger.info(f"Evaluating TopK Hit Rate for K={K_values}")
 
-    # Compute hit rates
-    hit_rates = compute_topk_hit_rate(
-        model, trace_data, K_values, round_window, exclude_tail, device, logger
-    )
+        hit_rates = compute_topk_hit_rate(
+            model, trace_data, K_values, round_window, exclude_tail, device, logger,
+            top_bins=top_bins
+        )
+
+        all_results[f'top_{top_bins}_bins'] = hit_rates
 
     # Save results
     exp_dir = Path(__file__).parent
@@ -740,11 +763,11 @@ def evaluate(config, checkpoint_path, logger):
 
     results_file = results_dir / 'evaluation_results.json'
     with open(results_file, 'w') as f:
-        json.dump(hit_rates, f, indent=2)
+        json.dump(all_results, f, indent=2)
 
-    logger.info(f"Results saved to: {results_file}")
+    logger.info(f"\nResults saved to: {results_file}")
 
-    return hit_rates
+    return all_results
 
 
 def main():
@@ -771,7 +794,16 @@ def main():
         default=Path("/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B"),
         help='Model directory for RoPE parameters (only used with --baseline)'
     )
+    parser.add_argument(
+        '--top-bins',
+        type=str,
+        default='1,8',
+        help='Comma-separated list of top_bins values to evaluate (default: 1,8)'
+    )
     args = parser.parse_args()
+
+    # Parse top_bins list
+    top_bins_list = [int(x.strip()) for x in args.top_bins.split(',')]
 
     # Load configuration
     exp_dir = Path(__file__).parent
@@ -808,13 +840,16 @@ def main():
                 return
 
             # Run evaluation
-            results = evaluate(config, checkpoint_path, logger)
+            results = evaluate(config, checkpoint_path, logger, top_bins_list=top_bins_list)
             logger.info("Evaluation completed successfully")
 
             # Print summary
             logger.info("\n=== Evaluation Summary ===")
-            for k_val, metrics in results.items():
-                logger.info(f"K={k_val}: {metrics['hit_rate']:.2f}% hit rate")
+            for top_bins_key, top_bins_results in results.items():
+                logger.info(f"\n{top_bins_key}:")
+                for k_val, metrics in top_bins_results.items():
+                    keys_per_query = metrics.get('keys_per_query', k_val)
+                    logger.info(f"  K={k_val}: {metrics['hit_rate']:.2f}% hit rate ({keys_per_query} keys/query)")
 
     except Exception as e:
         logger.error(f"Evaluation failed: {e}", exc_info=True)
