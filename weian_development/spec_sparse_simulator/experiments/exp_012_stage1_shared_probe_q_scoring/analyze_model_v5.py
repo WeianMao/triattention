@@ -113,7 +113,7 @@ def load_trace_data(config, logger, use_test=True):
     }
 
 
-def load_checkpoint_v5(config, device, logger, checkpoint_name='final_model_multi_trace_v5.pt'):
+def load_checkpoint_v5(config, device, logger, checkpoint_name='final_model_multi_trace_v5.pt', use_error_term=None):
     """Load model from v5 checkpoint."""
     exp_dir = Path(__file__).parent
     checkpoint_path = exp_dir / config['output']['checkpoints_dir'] / checkpoint_name
@@ -122,13 +122,18 @@ def load_checkpoint_v5(config, device, logger, checkpoint_name='final_model_mult
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
+    # Auto-detect use_error_term from checkpoint if not specified
+    if use_error_term is None:
+        use_error_term = 'query_network.distance_scorer.q_error_weights' in checkpoint['model_state_dict']
+        logger.info(f"Auto-detected use_error_term={use_error_term}")
+
     # Load inv_freq from model
     model_path = config.get('model', {}).get('model_path',
         "/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B")
     inv_freq = load_model_inv_freq(model_path, logger)
 
     # Create model with v5 API
-    model = create_model(config, init_probes=None, use_l2_norm=True, inv_freq=inv_freq)
+    model = create_model(config, init_probes=None, use_l2_norm=True, inv_freq=inv_freq, use_error_term=use_error_term)
     model.load_state_dict(checkpoint['model_state_dict'])
     model = model.to(device)
     model.eval()

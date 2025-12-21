@@ -310,29 +310,34 @@ class DistanceBasedQueryScorer(nn.Module):
     """
     Distance-based Query Scorer for exp_012 stage 3.
 
-    Computes Q-side scores using frequency-wise distance features + magnitude:
+    Computes Q-side scores using frequency-wise distance features + magnitude + optional error vector:
     1. L2 normalize Q to unit norm
     2. Compute per-frequency error: e_{b,f} = P_rot_{b,f} - Q_normalized_f
     3. Compute distance: d_{b,f} = sqrt(||e_{b,f}||^2 + eps)
     4. Compute Q magnitude: m^Q_f = sqrt(Q_{2f}^2 + Q_{2f+1}^2 + eps)
-    5. Linear transform: s_Q^(b) = tilde_w_b^T * d_b + v_b^T * m^Q + c_b
+    5. Linear transform: s_Q^(b) = tilde_w_b^T * d_b + v_b^T * m^Q + [alpha_b^T * e_b] + c_b
        where tilde_w_b = -softplus(w_raw_b) to ensure negative weights
+       and [alpha_b^T * e_b] is optional (use_error_term=True)
 
-    Parameters: 128 * 64 (weights_raw) + 128 * 64 (v_weights) + 128 (bias) = 16,512
+    Parameters (use_error_term=False): 128 * 64 + 128 * 64 + 128 = 16,512
+    Parameters (use_error_term=True): 128 * 64 + 128 * 64 + 128 * 128 + 128 = 32,896
     """
 
-    def __init__(self, num_bins=128, num_freqs=64, use_l2_norm=True):
+    def __init__(self, num_bins=128, num_freqs=64, use_l2_norm=True, use_error_term=False):
         """
         Args:
             num_bins: Number of bins (default: 128)
             num_freqs: Number of frequency components (default: 64)
             use_l2_norm: If True (default), L2 normalize Q before distance computation
+            use_error_term: If True, add error vector term alpha_b^T * e_b (default: False)
         """
         super().__init__()
         self.num_bins = num_bins
         self.num_freqs = num_freqs
+        self.head_dim = num_freqs * 2
         self.eps = 1e-8
         self.use_l2_norm = use_l2_norm
+        self.use_error_term = use_error_term
 
         # Raw weights for distance transformation (will be mapped via -softplus)
         # Shape: (num_bins, num_freqs)
@@ -348,6 +353,14 @@ class DistanceBasedQueryScorer(nn.Module):
         self.q_magnitude_weights = nn.Parameter(
             torch.zeros(num_bins, num_freqs)
         )
+
+        # Error vector weights (Stage 4) - optional
+        # Shape: (num_bins, head_dim)
+        # Initialize to 0 so it starts equivalent to without this term
+        if use_error_term:
+            self.q_error_weights = nn.Parameter(
+                torch.zeros(num_bins, self.head_dim)
+            )
 
         # Bias for each bin
         # Shape: (num_bins,)
@@ -414,7 +427,7 @@ class DistanceBasedQueryScorer(nn.Module):
         bias = self.q_bias.to(dtype=Q.dtype)
 
         # Linear transformation:
-        # s_Q^(b) = tilde_w_b^T * d_b + v_b^T * m^Q_normalized + c_b
+        # s_Q^(b) = tilde_w_b^T * d_b + v_b^T * m^Q + [alpha_b^T * e_b] + c_b
 
         # Distance term: (num_queries, num_bins, num_freqs) * (num_bins, num_freqs) -> (num_queries, num_bins)
         distance_term = torch.sum(distance * effective_weights.unsqueeze(0), dim=-1)
@@ -423,6 +436,16 @@ class DistanceBasedQueryScorer(nn.Module):
         magnitude_term = torch.matmul(Q_magnitude, v_weights.t())
 
         scores = distance_term + magnitude_term + bias
+
+        # Optional error vector term
+        if self.use_error_term:
+            # Concatenate error vectors to full head_dim: [error_real, error_imag]
+            # Shape: (num_queries, num_bins, head_dim)
+            error_full = torch.cat([error_real, error_imag], dim=-1)
+            error_weights = self.q_error_weights.to(dtype=error_full.dtype)
+            # einsum('qbd,bd->qb'): (num_queries, num_bins, head_dim) dot (num_bins, head_dim) -> (num_queries, num_bins)
+            error_term = torch.einsum('qbd,bd->qb', error_full, error_weights)
+            scores = scores + error_term
 
         if is_single:
             scores = scores.squeeze(0)  # (num_bins,)
@@ -485,6 +508,17 @@ class DistanceBasedQueryScorer(nn.Module):
         magnitude_term = torch.matmul(Q_magnitude, v_weights.t())
 
         scores = distance_term + magnitude_term + bias
+
+        # Optional error vector term
+        if self.use_error_term:
+            # Concatenate error vectors to full head_dim: [error_real, error_imag]
+            # Shape: (batch_size, num_queries, num_bins, head_dim)
+            error_full = torch.cat([error_real, error_imag], dim=-1)
+            error_weights = self.q_error_weights.to(dtype=error_full.dtype)
+            # einsum('bqnd,nd->bqn'): (batch_size, num_queries, num_bins, head_dim) dot (num_bins, head_dim)
+            # -> (batch_size, num_queries, num_bins)
+            error_term = torch.einsum('bqnd,nd->bqn', error_full, error_weights)
+            scores = scores + error_term
 
         return scores
 
@@ -665,7 +699,7 @@ class Module2QueryNetwork(nn.Module):
     2. L2 normalize probes before RoPE rotation
     3. Compute per-frequency distances between normalized Q and normalized probes
     4. Apply linear transformation with -softplus weights
-    5. s_Q^(b) = tilde_w_b^T * d_b + v_b^T * m^Q_normalized + c_b
+    5. s_Q^(b) = tilde_w_b^T * d_b + v_b^T * m^Q_normalized + [alpha_b^T * e_b] + c_b
 
     Input: Q (post-RoPE query vector) of shape (head_dim,) or (num_queries, head_dim)
     Output: logits of shape (num_bins,) or (num_queries, num_bins)
@@ -676,18 +710,19 @@ class Module2QueryNetwork(nn.Module):
     Execution timing: Every decoding step
     """
 
-    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True):
+    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True, use_error_term=False):
         """
         Args:
             shared_probe_layer: SharedProbeLayer instance (shared with KeyNetwork)
             num_bins: Number of bins (default: 128)
             num_freqs: Number of frequency components (default: 64)
             use_l2_norm: If True (default), L2 normalize Q and probes
+            use_error_term: If True, add error vector term (default: False)
         """
         super().__init__()
         self.probe_layer = shared_probe_layer
         self.use_l2_norm = use_l2_norm
-        self.distance_scorer = DistanceBasedQueryScorer(num_bins, num_freqs, use_l2_norm=use_l2_norm)
+        self.distance_scorer = DistanceBasedQueryScorer(num_bins, num_freqs, use_l2_norm=use_l2_norm, use_error_term=use_error_term)
 
     def forward(self, Q, reference_angles):
         """
@@ -742,18 +777,20 @@ class Module2Network(nn.Module):
 
     Uses shared probe layer between K and Q networks.
     - K network: dot product + magnitude term + bias
-    - Q network: distance-based + magnitude term + bias
+    - Q network: distance-based + magnitude term + [error vector term] + bias
 
-    Total parameters: 41,216
+    Total parameters (use_error_term=False): 41,216
+    Total parameters (use_error_term=True): 57,600 (+16,384)
     - Shared probes: 128 * 128 = 16,384
     - Q weights_raw: 128 * 64 = 8,192
     - Q magnitude weights v: 128 * 64 = 8,192
+    - Q error weights alpha: 128 * 128 = 16,384 (optional)
     - Q bias: 128
     - K magnitude weights u: 128 * 64 = 8,192
     - K bias: 128
     """
 
-    def __init__(self, num_bins=128, head_dim=128, init_probes=None, use_l2_norm=True, inv_freq=None):
+    def __init__(self, num_bins=128, head_dim=128, init_probes=None, use_l2_norm=True, inv_freq=None, use_error_term=False):
         """
         Args:
             num_bins: Number of bins (default: 128)
@@ -761,10 +798,12 @@ class Module2Network(nn.Module):
             init_probes: Optional tensor of shape (num_bins, head_dim) for probe initialization
             use_l2_norm: If True (default), L2 normalize probes and Q vectors
             inv_freq: Optional inverse frequency tensor from model's RoPE.
+            use_error_term: If True, add error vector term to Q network (default: False)
         """
         super().__init__()
         self.num_bins = num_bins
         self.use_l2_norm = use_l2_norm
+        self.use_error_term = use_error_term
         num_freqs = head_dim // 2
 
         # Shared probe layer (used by both K and Q networks)
@@ -772,7 +811,7 @@ class Module2Network(nn.Module):
 
         # Key and Query networks sharing the same probe layer
         self.key_network = Module2KeyNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm)
-        self.query_network = Module2QueryNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm)
+        self.query_network = Module2QueryNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm, use_error_term=use_error_term)
 
     def forward_keys(self, K, reference_angles):
         """
@@ -934,7 +973,7 @@ def load_model_inv_freq(model_path, logger=None):
         return None
 
 
-def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None):
+def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None, use_error_term=False):
     """
     Factory function to create Module 2 network.
 
@@ -948,6 +987,7 @@ def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None):
         use_l2_norm: If True (default), L2 normalize probes and Q vectors
         inv_freq: Optional inverse frequency tensor from model's RoPE.
                   If None, will try to load from model_path in config.
+        use_error_term: If True, add error vector term to Q network (default: False)
 
     Returns:
         Module2Network instance
@@ -973,6 +1013,7 @@ def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None):
         head_dim=head_dim,
         init_probes=init_probes,
         use_l2_norm=use_l2_norm,
-        inv_freq=inv_freq
+        inv_freq=inv_freq,
+        use_error_term=use_error_term
     )
     return model

@@ -1039,7 +1039,7 @@ def preload_test_trace(test_trace_path, layer, head, config, logger, device='cud
 
 def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, weight_decay=0.0,
           round_batch_size=64, eval_every=2, use_tensorboard=True, optimizer_type='adam',
-          lr_scheduler_type='none'):
+          lr_scheduler_type='none', use_error_term=False):
     """
     Main training loop with optimizations.
 
@@ -1055,6 +1055,7 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         use_tensorboard: Enable TensorBoard logging (default: True)
         optimizer_type: Optimizer type, 'adam' or 'adamw' (default: 'adam')
         lr_scheduler_type: LR scheduler type, 'none' or 'onecycle' (default: 'none')
+        use_error_term: If True, add error vector term to Q network (default: False)
 
     Returns:
         Path to final checkpoint
@@ -1134,7 +1135,7 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         logger.info("=" * 60)
 
     # Create model
-    model = create_model(config, init_probes=init_probes, use_l2_norm=use_l2_norm)
+    model = create_model(config, init_probes=init_probes, use_l2_norm=use_l2_norm, use_error_term=use_error_term)
     model = model.to(device)
 
     # Save initial parameters for regularization
@@ -1410,6 +1411,11 @@ def main():
         choices=['none', 'onecycle', 'cosine_restart', 'step'],
         help='Learning rate scheduler: none, onecycle, cosine_restart, or step (default: none)'
     )
+    parser.add_argument(
+        '--use-error-term',
+        action='store_true',
+        help='Add error vector term to Q network (default: off)'
+    )
     args = parser.parse_args()
 
     exp_dir = Path(__file__).parent
@@ -1431,6 +1437,7 @@ def main():
     logger.info(f"Weight decay: {args.weight_decay}")
     logger.info(f"Round batch size: {args.round_batch_size}")
     logger.info(f"Eval every: {args.eval_every} epochs")
+    logger.info(f"Use error term: {args.use_error_term}")
 
     try:
         final_checkpoint = train(
@@ -1442,7 +1449,8 @@ def main():
             eval_every=args.eval_every,
             use_tensorboard=not args.no_tensorboard,
             optimizer_type=args.optimizer,
-            lr_scheduler_type=args.lr_scheduler
+            lr_scheduler_type=args.lr_scheduler,
+            use_error_term=args.use_error_term
         )
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:
