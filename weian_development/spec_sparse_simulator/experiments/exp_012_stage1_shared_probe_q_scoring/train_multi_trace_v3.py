@@ -53,13 +53,33 @@ def setup_logging(config):
     return logging.getLogger(__name__)
 
 
-def compute_attention_matrix(Q, K):
-    """Compute causal attention matrix."""
+# Global cache for causal masks to avoid repeated creation
+_causal_mask_cache = {}
+
+
+def get_causal_mask(seq_len, device='cpu'):
+    """Get or create cached causal mask."""
+    key = (seq_len, device)
+    if key not in _causal_mask_cache:
+        _causal_mask_cache[key] = torch.triu(
+            torch.ones(seq_len, seq_len, dtype=torch.bool, device=device), diagonal=1
+        )
+    return _causal_mask_cache[key]
+
+
+def compute_attention_matrix(Q, K, use_cache=True):
+    """Compute causal attention matrix with optional mask caching."""
     seq_len, head_dim = Q.shape
     scale = head_dim ** -0.5
+    device = Q.device
 
     attention_logits = Q @ K.T * scale
-    causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool), diagonal=1)
+
+    if use_cache:
+        causal_mask = get_causal_mask(seq_len, device)
+    else:
+        causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=device), diagonal=1)
+
     attention_logits.masked_fill_(causal_mask, float('-inf'))
     attention = F.softmax(attention_logits, dim=-1)
 
@@ -68,7 +88,7 @@ def compute_attention_matrix(Q, K):
 
 def extract_round_labels(attention_trace, round_start, round_end, seq_len, exclude_tail=1000):
     """
-    Extract argmax key indices for each query in the round.
+    Extract argmax key indices for each query in the round (vectorized).
 
     Returns:
         query_indices: Tensor of query indices
@@ -76,26 +96,48 @@ def extract_round_labels(attention_trace, round_start, round_end, seq_len, exclu
         argmax_in_recent: Tensor of bools indicating if argmax is in recent keys
     """
     valid_end = min(seq_len - exclude_tail, seq_len)
+    actual_end = min(round_end, valid_end)
 
-    query_indices = []
-    argmax_keys = []
-    argmax_in_recent = []
-
-    for q_idx in range(round_start, min(round_end, valid_end)):
-        attn_weights = attention_trace[q_idx, :q_idx + 1]
-        argmax_key = attn_weights.argmax().item()
-
-        query_indices.append(q_idx)
-        argmax_keys.append(argmax_key)
-        argmax_in_recent.append(argmax_key >= round_start)
-
-    if len(query_indices) == 0:
+    if actual_end <= round_start:
         return None
 
+    # Vectorized: extract all queries at once
+    # query_indices: [round_start, round_start+1, ..., actual_end-1]
+    query_indices = torch.arange(round_start, actual_end, dtype=torch.long)
+    num_queries = len(query_indices)
+
+    if num_queries == 0:
+        return None
+
+    # For causal attention, query q_idx can only attend to keys [0, q_idx]
+    # We need argmax of attention_trace[q_idx, :q_idx+1] for each q_idx
+    # This is tricky to vectorize perfectly due to variable-length rows
+
+    # Approach: Use the full attention slice and mask out future positions
+    # attention_trace[round_start:actual_end, :] has shape (num_queries, seq_len)
+    attn_slice = attention_trace[round_start:actual_end, :]  # (num_queries, seq_len)
+
+    # Create a mask for valid positions: position j is valid for query i if j <= round_start + i
+    # query i (0-indexed in slice) corresponds to q_idx = round_start + i
+    # valid positions: j <= round_start + i, i.e., j < round_start + i + 1
+    row_indices = torch.arange(num_queries, device=attn_slice.device).unsqueeze(1)  # (num_queries, 1)
+    col_indices = torch.arange(seq_len, device=attn_slice.device).unsqueeze(0)  # (1, seq_len)
+    valid_mask = col_indices <= (round_start + row_indices)  # (num_queries, seq_len)
+
+    # Mask out invalid positions with -inf before argmax
+    masked_attn = attn_slice.clone()
+    masked_attn[~valid_mask] = float('-inf')
+
+    # Vectorized argmax
+    argmax_keys = masked_attn.argmax(dim=1)  # (num_queries,)
+
+    # Check if argmax is in recent keys (>= round_start)
+    argmax_in_recent = argmax_keys >= round_start
+
     return {
-        'query_indices': torch.tensor(query_indices, dtype=torch.long),
-        'argmax_keys': torch.tensor(argmax_keys, dtype=torch.long),
-        'argmax_in_recent': torch.tensor(argmax_in_recent, dtype=torch.bool)
+        'query_indices': query_indices,
+        'argmax_keys': argmax_keys.cpu() if argmax_keys.is_cuda else argmax_keys,
+        'argmax_in_recent': argmax_in_recent.cpu() if argmax_in_recent.is_cuda else argmax_in_recent
     }
 
 
@@ -241,7 +283,7 @@ def train_on_trace_batched(
 
     Args:
         model: Module2Network instance
-        trace_data: Dict with Q, K for single head
+        trace_data: Dict with Q, K, attention (precomputed) for single head
         optimizer: Optimizer
         config: Configuration dict
         device: torch.device
@@ -257,16 +299,19 @@ def train_on_trace_batched(
     """
     model.train()
 
+    # Data is already on device (preloaded)
     Q = trace_data['Q']
     K = trace_data['K']
     seq_len = trace_data['seq_len']
 
-    # Compute attention matrix
-    attention = compute_attention_matrix(Q, K)
+    # Use precomputed attention if available, otherwise compute
+    if 'attention' in trace_data:
+        attention = trace_data['attention']
+    else:
+        attention = compute_attention_matrix(Q, K, use_cache=True)
 
     round_window = config['training']['round_window']
     exclude_tail = config['training']['exclude_tail']
-    query_batch_size = config['training'].get('query_batch_size', 64)
 
     # Collect all valid rounds
     rounds = []
@@ -307,20 +352,24 @@ def train_on_trace_batched(
             argmax_keys = labels['argmax_keys']
             argmax_in_recent = labels['argmax_in_recent']
 
-            # Forward pass for keys
-            historical_keys = K[:round_start].to(device)
+            # Forward pass for keys (K already on device)
+            historical_keys = K[:round_start]
             reference_angles = model.compute_reference_angles(round_start, round_window)
             key_probs = model.forward_keys(historical_keys, reference_angles)
             empty_bin_mask = (key_probs.sum(dim=0) == 0).detach()
 
-            # Forward pass for queries
-            queries = Q[query_indices].to(device)
+            # Forward pass for queries (Q already on device)
+            queries = Q[query_indices]
             query_bin_probs = model.forward_queries(queries, reference_angles, empty_bin_mask)
+
+            # Labels may be on CPU from extract_round_labels, move to device if needed
+            argmax_keys_dev = argmax_keys.to(device) if argmax_keys.device != device else argmax_keys
+            argmax_in_recent_dev = argmax_in_recent.to(device) if argmax_in_recent.device != device else argmax_in_recent
 
             # Compute loss
             round_loss = compute_attraction_loss(
                 key_probs, query_bin_probs,
-                argmax_keys.to(device), argmax_in_recent.to(device)
+                argmax_keys_dev, argmax_in_recent_dev
             )
 
             if round_loss.item() > 0:
@@ -333,7 +382,7 @@ def train_on_trace_batched(
                     # Top-1 accuracy
                     hits1, total, recent, bin_hits1 = compute_batch_accuracy_fast(
                         key_probs, query_bin_probs,
-                        argmax_keys.to(device), argmax_in_recent.to(device),
+                        argmax_keys_dev, argmax_in_recent_dev,
                         top_k_bins=1
                     )
                     metrics['top1_hits'] += hits1
@@ -342,14 +391,11 @@ def train_on_trace_batched(
                     # Top-8 accuracy
                     hits8, _, _, bin_hits8 = compute_batch_accuracy_fast(
                         key_probs, query_bin_probs,
-                        argmax_keys.to(device), argmax_in_recent.to(device),
+                        argmax_keys_dev, argmax_in_recent_dev,
                         top_k_bins=8
                     )
                     metrics['top8_hits'] += hits8
                     metrics['total'] += total
-
-            # Clean up
-            del historical_keys, queries, query_bin_probs
 
         # Backward pass for the batch
         if valid_rounds > 0:
@@ -375,12 +421,6 @@ def train_on_trace_batched(
             trace_loss += total_loss.item()
             trace_attraction_loss += avg_batch_loss.item()
             num_batches += 1
-
-        # Clean up
-        if device.type == 'cuda':
-            torch.cuda.empty_cache()
-
-    del attention
 
     avg_loss = trace_loss / num_batches if num_batches > 0 else 0.0
     avg_attraction_loss = trace_attraction_loss / num_batches if num_batches > 0 else 0.0
@@ -451,9 +491,6 @@ def train_epoch_multi_trace(
                 # Just log loss
                 logger.info(f"  {trace_data['name']}: loss={trace_loss:.6f}")
 
-        if device.type == 'cuda':
-            torch.cuda.empty_cache()
-
     avg_loss = epoch_loss / num_traces if num_traces > 0 else 0.0
 
     # Compute overall accuracy
@@ -509,9 +546,22 @@ def evaluate_on_test(model, config, device, logger):
     return {'top1': hit_rates_top1, 'top8': hit_rates_top8}
 
 
-def preload_all_traces(trace_paths, layer, head, logger):
-    """Preload all traces at startup, keeping only the required head."""
-    logger.info(f"Preloading {len(trace_paths)} traces (keeping only head [{layer}, {head}])...")
+def preload_all_traces(trace_paths, layer, head, logger, device='cpu', precompute_attention=True):
+    """
+    Preload all traces at startup, keeping only the required head.
+
+    Args:
+        trace_paths: List of paths to trace files
+        layer: Layer index
+        head: Head index
+        logger: Logger instance
+        device: Device to load data to ('cpu' or 'cuda')
+        precompute_attention: If True, precompute attention matrix (saves time during training)
+
+    Returns:
+        List of trace_data dicts with Q, K, attention (optional), and metadata
+    """
+    logger.info(f"Preloading {len(trace_paths)} traces to {device} (head [{layer}, {head}])...")
 
     all_traces = []
     total_queries = 0
@@ -521,8 +571,8 @@ def preload_all_traces(trace_paths, layer, head, logger):
 
         qk_data = torch.load(trace_path, map_location='cpu')
 
-        Q = qk_data['q'][layer, head].clone()
-        K = qk_data['k'][layer, head].clone()
+        Q = qk_data['q'][layer, head].clone().to(device)
+        K = qk_data['k'][layer, head].clone().to(device)
 
         del qk_data
 
@@ -536,11 +586,23 @@ def preload_all_traces(trace_paths, layer, head, logger):
             'head_dim': Q.shape[1],
             'name': trace_path.parent.name
         }
+
+        # Precompute attention matrix (deterministic, only needs to be done once)
+        if precompute_attention:
+            with torch.no_grad():
+                attention = compute_attention_matrix(Q, K, use_cache=True)
+                trace_data['attention'] = attention
+            logger.info(f"       seq_len={seq_len}, attention precomputed")
+        else:
+            logger.info(f"       seq_len={seq_len}")
+
         all_traces.append(trace_data)
 
-        logger.info(f"       seq_len={seq_len}")
-
     logger.info(f"Preloading complete. Total sequences: {total_queries}")
+    if device != 'cpu' and torch.cuda.is_available():
+        gpu_mem = torch.cuda.memory_allocated() / 1024**3
+        logger.info(f"GPU memory after preload: {gpu_mem:.2f} GB")
+
     return all_traces
 
 
@@ -599,8 +661,11 @@ def train(config, logger, use_l2_norm=False, invert_to_origin=False, weight_deca
     test_trace_path = exp_dir / config['data']['test_trace_path']
     trace_paths = get_training_trace_paths(test_trace_path, logger)
 
-    # Preload all traces
-    all_traces = preload_all_traces(trace_paths, layer, head, logger)
+    # Preload all traces to GPU with precomputed attention
+    all_traces = preload_all_traces(
+        trace_paths, layer, head, logger,
+        device=device, precompute_attention=True
+    )
 
     # Compute K-means initialization
     use_kmeans_init = config.get('model', {}).get('use_kmeans_init', True)
