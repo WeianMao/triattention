@@ -207,11 +207,14 @@ def count_steps_per_epoch(all_traces, round_batch_size):
     return total_steps
 
 
-def compute_attraction_loss(key_probs, query_bin_probs, argmax_keys, argmax_in_recent, eps=1e-8):
+def compute_attraction_loss(key_probs, query_bin_probs, argmax_keys, argmax_in_recent, eps=1e-8, focal_gamma=0.0):
     """
     Compute Attraction Loss for Module 2.
 
     Loss = -log(sum_bins(p_q[b] * P[argmax_key, b]) + eps).mean()
+
+    With focal loss (gamma > 0):
+    Loss = -((1 - match_prob)^gamma) * log(match_prob + eps).mean()
     """
     valid_mask = ~argmax_in_recent
 
@@ -224,8 +227,105 @@ def compute_attraction_loss(key_probs, query_bin_probs, argmax_keys, argmax_in_r
     P_matched = key_probs[valid_argmax_keys]
     match_prob = (valid_query_probs * P_matched).sum(dim=1)
 
-    loss = -torch.log(match_prob + eps).mean()
+    if focal_gamma > 0:
+        # Focal loss: down-weight easy samples, focus on hard samples
+        focal_weight = (1 - match_prob) ** focal_gamma
+        loss = -(focal_weight * torch.log(match_prob + eps)).mean()
+    else:
+        # Standard cross-entropy
+        loss = -torch.log(match_prob + eps).mean()
     return loss
+
+
+def compute_rank_based_loss(key_logits, query_logits, argmax_keys, argmax_in_recent, k_prime=45, lam=1.0, strategy='B'):
+    """
+    Compute Rank-Based Loss that aligns with inference behavior.
+
+    This loss directly optimizes for the ranking objective:
+    - Key side: argmax_key should rank in top-K' (hinge loss)
+    - Query side: query should select the positive bin(s) (multi-label CE)
+
+    Args:
+        key_logits: (num_keys, num_bins) - raw logits from key network (before softmax)
+        query_logits: (num_queries, num_bins) - raw logits from query network (before softmax)
+        argmax_keys: (num_queries,) - ground truth argmax key indices
+        argmax_in_recent: (num_queries,) - whether argmax is in recent keys
+        k_prime: training threshold (default: 45, stricter than inference K=50)
+        lam: weight for query loss (default: 1.0)
+        strategy: 'A' = best rank bin(s), 'B' = all bins where rank <= k_prime
+
+    Returns:
+        total_loss: combined key + query loss
+    """
+    valid_mask = ~argmax_in_recent
+    num_valid = valid_mask.sum().item()
+
+    if num_valid == 0:
+        return torch.tensor(0.0, device=key_logits.device, requires_grad=True)
+
+    num_keys, num_bins = key_logits.shape
+    device = key_logits.device
+
+    # Filter to valid queries only
+    valid_query_logits = query_logits[valid_mask]  # (num_valid, num_bins)
+    valid_argmax_keys = argmax_keys[valid_mask]    # (num_valid,)
+
+    total_key_loss = torch.tensor(0.0, device=device, requires_grad=True)
+    total_query_loss = torch.tensor(0.0, device=device, requires_grad=True)
+    valid_samples = 0
+
+    for i in range(num_valid):
+        argmax_key = valid_argmax_keys[i].item()
+        q_logits = valid_query_logits[i]  # (num_bins,)
+
+        # Step 1: Compute rank of argmax_key in each bin
+        # rank = number of keys with logit >= argmax_key's logit (1 = best)
+        argmax_key_logits = key_logits[argmax_key, :]  # (num_bins,)
+        ranks = (key_logits >= argmax_key_logits.unsqueeze(0)).sum(dim=0)  # (num_bins,)
+
+        # Step 2: Find positive bins based on strategy
+        if strategy == 'A':
+            # Strategy A: select bin(s) with best rank
+            best_rank = ranks.min()
+            positive_mask = (ranks == best_rank)
+        else:
+            # Strategy B: select all bins where argmax_key ranks <= k_prime
+            positive_mask = (ranks <= k_prime)
+            # Fallback to strategy A if no bin qualifies
+            if not positive_mask.any():
+                best_rank = ranks.min()
+                positive_mask = (ranks == best_rank)
+
+        positive_bins = positive_mask.nonzero().squeeze(-1)
+        if positive_bins.dim() == 0:
+            positive_bins = positive_bins.unsqueeze(0)
+
+        # Step 3: Key loss (hinge) - only on first positive bin
+        target_bin = positive_bins[0].item()
+        # Get threshold: k_prime-th largest logit in target bin (detached)
+        if num_keys >= k_prime:
+            threshold = torch.topk(key_logits[:, target_bin], k_prime).values[-1].detach()
+        else:
+            threshold = key_logits[:, target_bin].min().detach()
+
+        key_loss_i = F.relu(threshold - key_logits[argmax_key, target_bin])
+        total_key_loss = total_key_loss + key_loss_i
+
+        # Step 4: Query loss (multi-positive CE with logsumexp)
+        positive_logits = q_logits[positive_bins]
+        # L_bin = logsumexp(all) - logsumexp(positive)
+        query_loss_i = torch.logsumexp(q_logits, dim=0) - torch.logsumexp(positive_logits, dim=0)
+        total_query_loss = total_query_loss + query_loss_i
+
+        valid_samples += 1
+
+    if valid_samples == 0:
+        return torch.tensor(0.0, device=device, requires_grad=True)
+
+    avg_key_loss = total_key_loss / valid_samples
+    avg_query_loss = total_query_loss / valid_samples
+
+    return avg_key_loss + lam * avg_query_loss
 
 
 def compute_init_regularization_loss(model, init_params):
@@ -360,7 +460,8 @@ def compute_batch_accuracy_fast(key_probs, query_bin_probs, argmax_keys, argmax_
 def train_on_trace_batched(
     model, trace_data, optimizer, config, device, logger,
     init_params=None, weight_decay=0.0, round_batch_size=64,
-    compute_accuracy=False, scheduler=None, scheduler_step_per_batch=False
+    compute_accuracy=False, scheduler=None, scheduler_step_per_batch=False,
+    focal_gamma=0.0, use_rank_loss=False, k_prime=45, rank_loss_strategy='B'
 ):
     """
     Train on a single trace with round batching (V5 - batched forward).
@@ -384,6 +485,9 @@ def train_on_trace_batched(
         round_batch_size: Number of rounds to process together
         compute_accuracy: Whether to compute accuracy metrics (slow, default: False)
         scheduler: Learning rate scheduler (optional, called after each optimizer.step())
+        use_rank_loss: If True, use rank-based loss instead of attraction loss
+        k_prime: Training threshold for rank-based loss (default: 45)
+        rank_loss_strategy: 'A' or 'B' for positive bin selection strategy
 
     Returns:
         trace_loss: Average loss for this trace
@@ -456,7 +560,13 @@ def train_on_trace_batched(
         # Batched key forward: all rounds share K[:max_round_start]
         # Each round uses keys up to its own round_start (handled by key_lengths mask)
         K_shared = K[:max_round_start]
-        key_probs_batch, key_mask = model.forward_keys_batched(K_shared, ref_positions, key_lengths)
+        if use_rank_loss:
+            key_probs_batch, key_mask, key_logits_batch = model.forward_keys_batched(
+                K_shared, ref_positions, key_lengths, return_logits=True
+            )
+        else:
+            key_probs_batch, key_mask = model.forward_keys_batched(K_shared, ref_positions, key_lengths)
+            key_logits_batch = None
         # key_probs_batch: (batch_size, max_round_start, num_bins)
 
         # Compute empty_bin_mask for each round
@@ -484,7 +594,13 @@ def train_on_trace_batched(
             query_lengths.append(num_queries)
 
         # Batched query forward
-        bin_probs_batch = model.forward_queries_batched(Q_batch, ref_positions, empty_bin_mask_batch)
+        if use_rank_loss:
+            bin_probs_batch, query_logits_batch = model.forward_queries_batched(
+                Q_batch, ref_positions, empty_bin_mask_batch, return_logits=True
+            )
+        else:
+            bin_probs_batch = model.forward_queries_batched(Q_batch, ref_positions, empty_bin_mask_batch)
+            query_logits_batch = None
         # bin_probs_batch: (batch_size, max_num_queries, num_bins)
 
         # Compute loss for each round and accumulate
@@ -510,10 +626,21 @@ def train_on_trace_batched(
             argmax_in_recent_dev = argmax_in_recent.to(device) if argmax_in_recent.device != device else argmax_in_recent
 
             # Compute loss
-            round_loss = compute_attraction_loss(
-                key_probs_i, query_bin_probs_i,
-                argmax_keys_dev, argmax_in_recent_dev
-            )
+            if use_rank_loss:
+                # Extract logits for rank-based loss
+                key_logits_i = key_logits_batch[i, :rs, :]  # (rs, num_bins)
+                query_logits_i = query_logits_batch[i, :num_queries, :]  # (num_queries, num_bins)
+                round_loss = compute_rank_based_loss(
+                    key_logits_i, query_logits_i,
+                    argmax_keys_dev, argmax_in_recent_dev,
+                    k_prime=k_prime, lam=1.0, strategy=rank_loss_strategy
+                )
+            else:
+                round_loss = compute_attraction_loss(
+                    key_probs_i, query_bin_probs_i,
+                    argmax_keys_dev, argmax_in_recent_dev,
+                    focal_gamma=focal_gamma
+                )
 
             if round_loss.item() > 0:
                 batch_loss = batch_loss + round_loss
@@ -582,7 +709,8 @@ def train_on_trace_batched(
 def train_epoch_multi_trace(
     model, all_traces, optimizer, config, device, logger,
     init_params=None, weight_decay=0.0, round_batch_size=64,
-    compute_accuracy=False, scheduler=None, scheduler_step_per_batch=False
+    compute_accuracy=False, scheduler=None, scheduler_step_per_batch=False,
+    focal_gamma=0.0, use_rank_loss=False, k_prime=45, rank_loss_strategy='B'
 ):
     """
     Train for one epoch over all preloaded traces.
@@ -606,7 +734,11 @@ def train_epoch_multi_trace(
             round_batch_size=round_batch_size,
             compute_accuracy=compute_accuracy,
             scheduler=scheduler,
-            scheduler_step_per_batch=scheduler_step_per_batch
+            scheduler_step_per_batch=scheduler_step_per_batch,
+            focal_gamma=focal_gamma,
+            use_rank_loss=use_rank_loss,
+            k_prime=k_prime,
+            rank_loss_strategy=rank_loss_strategy
         )
 
         if trace_loss > 0:
@@ -1039,7 +1171,8 @@ def preload_test_trace(test_trace_path, layer, head, config, logger, device='cud
 
 def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, weight_decay=0.0,
           round_batch_size=64, eval_every=2, use_tensorboard=True, optimizer_type='adam',
-          lr_scheduler_type='none', use_error_term=False):
+          lr_scheduler_type='none', use_error_term=False, focal_gamma=0.0,
+          use_rank_loss=False, k_prime=45, rank_loss_strategy='B'):
     """
     Main training loop with optimizations.
 
@@ -1056,6 +1189,9 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         optimizer_type: Optimizer type, 'adam' or 'adamw' (default: 'adam')
         lr_scheduler_type: LR scheduler type, 'none' or 'onecycle' (default: 'none')
         use_error_term: If True, add error vector term to Q network (default: False)
+        use_rank_loss: If True, use rank-based loss instead of attraction loss
+        k_prime: Training threshold for rank-based loss (default: 45)
+        rank_loss_strategy: 'A' or 'B' for positive bin selection strategy
 
     Returns:
         Path to final checkpoint
@@ -1223,7 +1359,11 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
             round_batch_size=round_batch_size,
             compute_accuracy=compute_acc_this_epoch,
             scheduler=scheduler,
-            scheduler_step_per_batch=scheduler_step_per_batch
+            scheduler_step_per_batch=scheduler_step_per_batch,
+            focal_gamma=focal_gamma,
+            use_rank_loss=use_rank_loss,
+            k_prime=k_prime,
+            rank_loss_strategy=rank_loss_strategy
         )
 
         # Step epoch-level scheduler after each epoch
@@ -1423,6 +1563,30 @@ def main():
         default=None,
         help='Override number of bins/probes from config'
     )
+    parser.add_argument(
+        '--focal-gamma',
+        type=float,
+        default=0.0,
+        help='Focal loss gamma (0=disabled/cross-entropy, 2=typical focal loss)'
+    )
+    parser.add_argument(
+        '--rank-loss',
+        action='store_true',
+        help='Use rank-based loss instead of attraction loss (default: off)'
+    )
+    parser.add_argument(
+        '--k-prime',
+        type=int,
+        default=45,
+        help='Training threshold for rank-based loss (default: 45, stricter than inference K=50)'
+    )
+    parser.add_argument(
+        '--rank-loss-strategy',
+        type=str,
+        default='B',
+        choices=['A', 'B'],
+        help='Positive bin selection strategy: A=best rank, B=all bins with rank<=k_prime (default: B)'
+    )
     args = parser.parse_args()
 
     exp_dir = Path(__file__).parent
@@ -1450,6 +1614,8 @@ def main():
     logger.info(f"Eval every: {args.eval_every} epochs")
     logger.info(f"Use error term: {args.use_error_term}")
     logger.info(f"Num bins: {config['model']['num_bins']}")
+    logger.info(f"Focal gamma: {args.focal_gamma}")
+    logger.info(f"Rank loss: {args.rank_loss}, k_prime: {args.k_prime}, strategy: {args.rank_loss_strategy}")
 
     try:
         final_checkpoint = train(
@@ -1462,7 +1628,11 @@ def main():
             use_tensorboard=not args.no_tensorboard,
             optimizer_type=args.optimizer,
             lr_scheduler_type=args.lr_scheduler,
-            use_error_term=args.use_error_term
+            use_error_term=args.use_error_term,
+            focal_gamma=args.focal_gamma,
+            use_rank_loss=args.rank_loss,
+            k_prime=args.k_prime,
+            rank_loss_strategy=args.rank_loss_strategy
         )
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:

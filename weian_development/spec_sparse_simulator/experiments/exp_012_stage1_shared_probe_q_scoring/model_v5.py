@@ -864,7 +864,7 @@ class Module2Network(nn.Module):
         """Compute reference angles for a round."""
         return self.key_network._compute_reference_angles(round_start, round_window)
 
-    def forward_keys_batched(self, K, ref_positions, key_lengths=None):
+    def forward_keys_batched(self, K, ref_positions, key_lengths=None, return_logits=False):
         """
         Batched forward pass for keys with multiple rounds.
 
@@ -874,15 +874,20 @@ class Module2Network(nn.Module):
             K: Key vectors of shape (max_keys, head_dim) - shared across all rounds
             ref_positions: Tensor of shape (batch_size,) - reference positions for each round
             key_lengths: Optional tensor of shape (batch_size,) - valid key length for each round
+            return_logits: If True, also return raw logits (for rank-based loss)
 
         Returns:
             key_probs: Probability distribution of shape (batch_size, max_keys, num_bins)
                        For each round, only positions < key_lengths[i] are valid.
                        Invalid positions have near-zero probability.
             key_mask: Bool tensor of shape (batch_size, max_keys) if key_lengths provided
+            key_logits: (optional) Raw logits if return_logits=True
         """
         # Get logits and mask
         logits, key_mask = self.key_network.forward_batched(K, ref_positions, key_lengths)
+
+        # Store raw logits before masking (for rank-based loss)
+        raw_logits = logits.clone() if return_logits else None
 
         # Apply mask before softmax (set invalid positions to -inf)
         if key_mask is not None:
@@ -893,9 +898,11 @@ class Module2Network(nn.Module):
         # Softmax over keys (dim=1)
         key_probs = F.softmax(logits, dim=1)
 
+        if return_logits:
+            return key_probs, key_mask, raw_logits
         return key_probs, key_mask
 
-    def forward_queries_batched(self, Q_batch, ref_positions, empty_bin_mask_batch=None):
+    def forward_queries_batched(self, Q_batch, ref_positions, empty_bin_mask_batch=None, return_logits=False):
         """
         Batched forward pass for queries with multiple rounds.
 
@@ -904,16 +911,21 @@ class Module2Network(nn.Module):
             ref_positions: Tensor of shape (batch_size,) - reference positions for each round
             empty_bin_mask_batch: Optional bool tensor of shape (batch_size, num_bins)
                                   True for empty bins (will be masked with -inf)
+            return_logits: If True, also return raw logits (for rank-based loss)
 
         Returns:
             bin_probs: Probability distribution of shape (batch_size, num_queries, num_bins)
                        Each row sums to 1 (softmax over bins)
+            query_logits: (optional) Raw logits if return_logits=True
         """
         # L2 normalize Q to unit norm as the first step
         Q_batch = l2_normalize(Q_batch)
 
         # Get logits: (batch_size, num_queries, num_bins)
         logits = self.query_network.forward_batched(Q_batch, ref_positions)
+
+        # Store raw logits before masking (for rank-based loss)
+        raw_logits = logits.clone() if return_logits else None
 
         # Mask empty bins with -inf before softmax
         if empty_bin_mask_batch is not None:
@@ -923,6 +935,8 @@ class Module2Network(nn.Module):
         # Softmax over bins (dim=-1)
         bin_probs = F.softmax(logits, dim=-1)
 
+        if return_logits:
+            return bin_probs, raw_logits
         return bin_probs
 
     def get_param_count(self):
