@@ -263,6 +263,11 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument("--kv_budget", "--kv-budget", dest="kv_budget", type=int, default=None)
     parser.add_argument("--window_size", "--window-size", dest="window_size", type=int, default=8)
+    # Round-based compression params (for fair comparison with sparse_prefill_keep)
+    parser.add_argument("--round_window", "--round-window", dest="round_window", type=int, default=0,
+                        help="Round size for round-based compression (0=disabled, 363=match sparse_prefill_keep)")
+    parser.add_argument("--round_base_budget", "--round-base-budget", dest="round_base_budget", type=int, default=None,
+                        help="Target budget at round start (default: kv_budget - round_window)")
     parser.add_argument("--first_tokens", "--first-tokens", dest="first_tokens", type=int, default=4)
     parser.add_argument("--mix_lambda", "--mix-lambda", dest="mix_lambda", type=float, default=0.1)
     parser.add_argument("--retain_ratio", "--retain-ratio", dest="retain_ratio", type=float, default=0.2)
@@ -430,6 +435,9 @@ def main(args: argparse.Namespace) -> None:
                 "retain_direction": args.retain_direction,
                 "first_tokens": args.first_tokens,
                 "fp32_topk": args.fp32_topk,
+                # Round-based compression (for fair comparison with sparse_prefill_keep)
+                "round_window": args.round_window,
+                "round_base_budget": args.round_base_budget,
             }
         )
     elif method_name == "streamingllm":
