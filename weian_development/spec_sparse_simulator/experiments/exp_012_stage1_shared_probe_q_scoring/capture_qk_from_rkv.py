@@ -51,6 +51,7 @@ class TraceTask:
     prompt: str
     output: str
     answer: str
+    prefill_tokens: int  # From R-KV inference, exact prompt token count
 
 
 @dataclass
@@ -272,6 +273,7 @@ def load_rkv_outputs_with_diversity(
             prompt=record["prompt"],
             output=record["output"],
             answer=record["answer"],
+            prefill_tokens=record["prefill_tokens"],
         ))
 
     unique_questions = len(set(t.sample_idx for t in tasks))
@@ -325,11 +327,6 @@ def capture_single_trace(
         collector.remove()
 
     tokens_total = int(attention_mask.sum().item())
-    prompt_tokens = tokenizer(
-        task.prompt,
-        add_special_tokens=True,
-        return_length=True,
-    )["length"][0]
 
     trace_dir = output_dir / f"sample{task.sample_idx:04d}_draw{task.draw_idx:02d}"
     trace_dir.mkdir(parents=True, exist_ok=True)
@@ -346,7 +343,7 @@ def capture_single_trace(
         "question": task.question,
         "answer": task.answer,
         "token_count": tokens_total,
-        "prompt_tokens": int(prompt_tokens),
+        "prompt_tokens": task.prefill_tokens,
         "sequence_length": seq_len,
         "num_layers": num_layers,
         "num_heads": num_heads,
@@ -367,7 +364,7 @@ def capture_single_trace(
         output_pt=tensor_path,
         output_json=meta_path,
         tokens=tokens_total,
-        prompt_tokens=int(prompt_tokens),
+        prompt_tokens=task.prefill_tokens,
         device=str(model.device),
     )
 
