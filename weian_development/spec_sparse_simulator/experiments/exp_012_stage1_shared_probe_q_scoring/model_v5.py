@@ -844,6 +844,9 @@ class Module2Network(nn.Module):
             bin_probs: Probability distribution of shape (num_bins,) or (num_queries, num_bins)
                 Each row sums to 1 (softmax over bins)
         """
+        # L2 normalize Q to unit norm as the first step
+        Q = l2_normalize(Q)
+
         logits = self.query_network(Q, reference_angles)
 
         # Mask empty bins with -inf before softmax
@@ -906,6 +909,9 @@ class Module2Network(nn.Module):
             bin_probs: Probability distribution of shape (batch_size, num_queries, num_bins)
                        Each row sums to 1 (softmax over bins)
         """
+        # L2 normalize Q to unit norm as the first step
+        Q_batch = l2_normalize(Q_batch)
+
         # Get logits: (batch_size, num_queries, num_bins)
         logits = self.query_network.forward_batched(Q_batch, ref_positions)
 
