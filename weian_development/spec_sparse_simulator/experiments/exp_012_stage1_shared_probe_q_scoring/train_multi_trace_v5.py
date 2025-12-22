@@ -868,7 +868,8 @@ def evaluate_on_test(model, config, device, logger, test_trace_data=None):
     return {'top1': hit_rates_top1, 'top8': hit_rates_top8}
 
 
-def preload_all_traces(trace_paths, layer, head, logger, device='cpu', precompute_attention=True):
+def preload_all_traces(trace_paths, layer, head, logger, device='cpu', precompute_attention=True,
+                       normalize_q_input=False):
     """
     Preload all traces at startup, keeping only the required head.
 
@@ -879,11 +880,14 @@ def preload_all_traces(trace_paths, layer, head, logger, device='cpu', precomput
         logger: Logger instance
         device: Device to load data to ('cpu' or 'cuda')
         precompute_attention: If True, precompute attention matrix (saves time during training)
+        normalize_q_input: If True, L2-normalize Q vectors after loading (default: False)
 
     Returns:
         List of trace_data dicts with Q, K, attention (optional), and metadata
     """
     logger.info(f"Preloading {len(trace_paths)} traces to {device} (head [{layer}, {head}])...")
+    if normalize_q_input:
+        logger.info("  Q normalization enabled: all Q vectors will be L2-normalized")
 
     all_traces = []
     total_queries = 0
@@ -921,6 +925,10 @@ def preload_all_traces(trace_paths, layer, head, logger, device='cpu', precomput
             del qk_data
             logger.info(f"       cached to {cache_file.name}")
 
+        # Optionally L2-normalize Q vectors (in code, not modifying cache)
+        if normalize_q_input:
+            Q = Q / (Q.norm(dim=-1, keepdim=True) + 1e-8)
+
         seq_len = Q.shape[0]
         total_queries += seq_len
 
@@ -951,7 +959,8 @@ def preload_all_traces(trace_paths, layer, head, logger, device='cpu', precomput
     return all_traces
 
 
-def preload_test_trace(test_trace_path, layer, head, config, logger, device='cuda'):
+def preload_test_trace(test_trace_path, layer, head, config, logger, device='cuda',
+                       normalize_q_input=False):
     """
     Preload test trace and extract labels for evaluation.
 
@@ -964,6 +973,7 @@ def preload_test_trace(test_trace_path, layer, head, config, logger, device='cud
         config: Configuration dict
         logger: Logger instance
         device: Device to load data to
+        normalize_q_input: If True, L2-normalize Q vectors after loading (default: False)
 
     Returns:
         dict with Q, K, cached_rounds (labels), and metadata
@@ -997,6 +1007,10 @@ def preload_test_trace(test_trace_path, layer, head, config, logger, device='cud
         torch.save(cache_data, cache_file)
         del qk_data
         logger.info(f"       test trace cached")
+
+    # Optionally L2-normalize Q vectors (in code, not modifying cache)
+    if normalize_q_input:
+        Q = Q / (Q.norm(dim=-1, keepdim=True) + 1e-8)
 
     seq_len = Q.shape[0]
     round_window = config['evaluation'].get('round_window', config['training']['round_window'])
@@ -1039,7 +1053,7 @@ def preload_test_trace(test_trace_path, layer, head, config, logger, device='cud
 
 def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, weight_decay=0.0,
           round_batch_size=64, eval_every=2, use_tensorboard=True, optimizer_type='adam',
-          lr_scheduler_type='none', use_error_term=False):
+          lr_scheduler_type='none', use_error_term=False, normalize_q_input=False):
     """
     Main training loop with optimizations.
 
@@ -1056,6 +1070,7 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         optimizer_type: Optimizer type, 'adam' or 'adamw' (default: 'adam')
         lr_scheduler_type: LR scheduler type, 'none' or 'onecycle' (default: 'none')
         use_error_term: If True, add error vector term to Q network (default: False)
+        normalize_q_input: If True, L2-normalize Q vectors after loading (default: False)
 
     Returns:
         Path to final checkpoint
@@ -1105,13 +1120,15 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
     # 1a. Preload training traces
     all_traces = preload_all_traces(
         trace_paths, layer, head, logger,
-        device=device, precompute_attention=False
+        device=device, precompute_attention=False,
+        normalize_q_input=normalize_q_input
     )
 
     # 1b. Preload test trace (for evaluation)
     logger.info("  Preloading test trace...")
     test_trace_data = preload_test_trace(
-        test_trace_path, layer, head, config, logger, device
+        test_trace_path, layer, head, config, logger, device,
+        normalize_q_input=normalize_q_input
     )
 
     step1_time = time.time() - step1_start
@@ -1422,6 +1439,11 @@ def main():
         default=None,
         help='Override number of bins/probes from config'
     )
+    parser.add_argument(
+        '--no-normalize-q-input',
+        action='store_true',
+        help='Disable L2-normalization of Q vectors after loading (default: enabled)'
+    )
     args = parser.parse_args()
 
     exp_dir = Path(__file__).parent
@@ -1449,6 +1471,7 @@ def main():
     logger.info(f"Eval every: {args.eval_every} epochs")
     logger.info(f"Use error term: {args.use_error_term}")
     logger.info(f"Num bins: {config['model']['num_bins']}")
+    logger.info(f"Normalize Q input: {not args.no_normalize_q_input}")
 
     try:
         final_checkpoint = train(
@@ -1461,7 +1484,8 @@ def main():
             use_tensorboard=not args.no_tensorboard,
             optimizer_type=args.optimizer,
             lr_scheduler_type=args.lr_scheduler,
-            use_error_term=args.use_error_term
+            use_error_term=args.use_error_term,
+            normalize_q_input=not args.no_normalize_q_input
         )
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:

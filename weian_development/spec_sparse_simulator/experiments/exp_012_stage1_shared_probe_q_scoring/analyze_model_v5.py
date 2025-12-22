@@ -62,7 +62,7 @@ def load_config():
     return config
 
 
-def load_trace_data(config, logger, use_test=True):
+def load_trace_data(config, logger, use_test=True, normalize_q_input=True):
     """Load trace data from qk.pt file."""
     exp_dir = Path(__file__).parent
 
@@ -89,6 +89,11 @@ def load_trace_data(config, logger, use_test=True):
 
     Q = qk_data['q'][layer, head]
     K = qk_data['k'][layer, head]
+
+    # Optionally L2-normalize Q vectors
+    if normalize_q_input:
+        Q = Q / (Q.norm(dim=-1, keepdim=True) + 1e-8)
+        logger.info("Q vectors L2-normalized")
 
     seq_len, head_dim = Q.shape
     logger.info(f"Trace shape: Q={Q.shape}, K={K.shape}")
@@ -554,6 +559,8 @@ def main():
                         help='Skip bin utilization analysis')
     parser.add_argument('--skip-miss-analysis', action='store_true',
                         help='Skip miss case analysis')
+    parser.add_argument('--no-normalize-q-input', action='store_true',
+                        help='Disable L2-normalization of Q vectors (default: enabled)')
     args = parser.parse_args()
 
     logger = setup_logging()
@@ -566,7 +573,10 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using device: {device}")
 
-    trace_data = load_trace_data(config, logger, use_test=True)
+    normalize_q_input = not args.no_normalize_q_input
+    logger.info(f"Normalize Q input: {normalize_q_input}")
+
+    trace_data = load_trace_data(config, logger, use_test=True, normalize_q_input=normalize_q_input)
     model = load_checkpoint_v5(config, device, logger, checkpoint_name=args.checkpoint)
 
     round_window = config['evaluation'].get('round_window', config['training']['round_window'])
