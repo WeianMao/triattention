@@ -207,6 +207,83 @@ def count_steps_per_epoch(all_traces, round_batch_size):
     return total_steps
 
 
+def compute_discrete_topk_loss(key_logits, query_logits, argmax_keys, argmax_in_recent, top_k=50, eps=1e-8):
+    """
+    Compute Discrete Top-K Loss (MOE-style).
+
+    This loss aligns training with inference by:
+    1. Only considering the top-1 bin selected by query (discrete selection)
+    2. Only computing loss when GT key is NOT in top-k of that bin (miss case)
+    3. Loss = p_q(b*) * CE(p_k[:, b*], argmax_key) for miss cases
+
+    Gradient behavior:
+    - Query side: p_q(b*) decreases (wrong bin selected)
+    - Key side: p_k(argmax_key | b*) increases (improve ranking)
+
+    Args:
+        key_logits: (num_keys, num_bins) - raw logits from key network
+        query_logits: (num_queries, num_bins) - raw logits from query network
+        argmax_keys: (num_queries,) - ground truth argmax key indices
+        argmax_in_recent: (num_queries,) - whether argmax is in recent keys
+        top_k: number of top keys to consider as "hit" (default: 50)
+        eps: small value for numerical stability
+
+    Returns:
+        loss: scalar tensor
+    """
+    # Step 0: Filter out queries where argmax is in recent keys
+    valid_mask = ~argmax_in_recent
+    if valid_mask.sum() == 0:
+        return torch.tensor(0.0, device=key_logits.device, requires_grad=True)
+
+    valid_query_logits = query_logits[valid_mask]  # (num_valid, num_bins)
+    valid_argmax_keys = argmax_keys[valid_mask]     # (num_valid,)
+    num_valid = valid_query_logits.shape[0]
+    num_keys, num_bins = key_logits.shape
+    device = key_logits.device
+
+    # Step 1: Compute probabilities
+    query_probs = F.softmax(valid_query_logits, dim=-1)  # (num_valid, num_bins)
+    key_log_probs = F.log_softmax(key_logits, dim=0)     # (num_keys, num_bins) - softmax over keys
+
+    # Step 2: Get top-1 bin for each query (discrete selection, aligned with inference)
+    b_star = valid_query_logits.argmax(dim=-1)  # (num_valid,)
+
+    # Step 3: Get p_q(b*) for each query (differentiable)
+    p_q_bstar = query_probs[torch.arange(num_valid, device=device), b_star]  # (num_valid,)
+
+    # Step 4: For each query, check if argmax_key is in top-k of bin b*
+    # key_logits[:, b_star] -> (num_keys, num_valid)
+    key_logits_selected = key_logits[:, b_star]  # (num_keys, num_valid)
+
+    # Get top-k key indices for each query's bin
+    actual_k = min(top_k, num_keys)
+    _, topk_indices = key_logits_selected.topk(actual_k, dim=0)  # (top_k, num_valid)
+
+    # Check if argmax_key is in top-k (vectorized)
+    hit_mask = (topk_indices == valid_argmax_keys.unsqueeze(0)).any(dim=0)  # (num_valid,)
+    miss_mask = ~hit_mask  # (num_valid,)
+
+    # If all queries hit, return 0 loss
+    num_miss = miss_mask.sum().item()
+    if num_miss == 0:
+        return torch.tensor(0.0, device=device, requires_grad=True)
+
+    # Step 5: Compute CE loss only for miss cases
+    # Get log_p_k(argmax_key | b*) for each query
+    log_p_k_target = key_log_probs[valid_argmax_keys, b_star]  # (num_valid,)
+    ce_loss = -log_p_k_target  # (num_valid,)
+
+    # Step 6: Compute final loss with mask
+    # loss = p_q(b*) * CE * miss_mask
+    per_sample_loss = p_q_bstar * ce_loss * miss_mask.float()  # (num_valid,)
+
+    # Mean over miss samples only
+    loss = per_sample_loss.sum() / (miss_mask.sum() + eps)
+
+    return loss
+
+
 def compute_attraction_loss(key_probs, query_bin_probs, argmax_keys, argmax_in_recent, eps=1e-8, focal_gamma=0.0):
     """
     Compute Attraction Loss for Module 2.
@@ -461,7 +538,8 @@ def train_on_trace_batched(
     model, trace_data, optimizer, config, device, logger,
     init_params=None, weight_decay=0.0, round_batch_size=64,
     compute_accuracy=False, scheduler=None, scheduler_step_per_batch=False,
-    focal_gamma=0.0, use_rank_loss=False, k_prime=45, rank_loss_strategy='B'
+    focal_gamma=0.0, use_rank_loss=False, k_prime=45, rank_loss_strategy='B',
+    use_discrete_topk_loss=False, topk_threshold=50
 ):
     """
     Train on a single trace with round batching (V5 - batched forward).
@@ -488,6 +566,8 @@ def train_on_trace_batched(
         use_rank_loss: If True, use rank-based loss instead of attraction loss
         k_prime: Training threshold for rank-based loss (default: 45)
         rank_loss_strategy: 'A' or 'B' for positive bin selection strategy
+        use_discrete_topk_loss: If True, use discrete top-k loss (MOE-style)
+        topk_threshold: Top-k threshold for discrete loss (default: 50)
 
     Returns:
         trace_loss: Average loss for this trace
@@ -560,7 +640,8 @@ def train_on_trace_batched(
         # Batched key forward: all rounds share K[:max_round_start]
         # Each round uses keys up to its own round_start (handled by key_lengths mask)
         K_shared = K[:max_round_start]
-        if use_rank_loss:
+        need_logits = use_rank_loss or use_discrete_topk_loss
+        if need_logits:
             key_probs_batch, key_mask, key_logits_batch = model.forward_keys_batched(
                 K_shared, ref_positions, key_lengths, return_logits=True
             )
@@ -594,7 +675,7 @@ def train_on_trace_batched(
             query_lengths.append(num_queries)
 
         # Batched query forward
-        if use_rank_loss:
+        if need_logits:
             bin_probs_batch, query_logits_batch = model.forward_queries_batched(
                 Q_batch, ref_positions, empty_bin_mask_batch, return_logits=True
             )
@@ -626,7 +707,16 @@ def train_on_trace_batched(
             argmax_in_recent_dev = argmax_in_recent.to(device) if argmax_in_recent.device != device else argmax_in_recent
 
             # Compute loss
-            if use_rank_loss:
+            if use_discrete_topk_loss:
+                # Extract logits for discrete top-k loss
+                key_logits_i = key_logits_batch[i, :rs, :]  # (rs, num_bins)
+                query_logits_i = query_logits_batch[i, :num_queries, :]  # (num_queries, num_bins)
+                round_loss = compute_discrete_topk_loss(
+                    key_logits_i, query_logits_i,
+                    argmax_keys_dev, argmax_in_recent_dev,
+                    top_k=topk_threshold
+                )
+            elif use_rank_loss:
                 # Extract logits for rank-based loss
                 key_logits_i = key_logits_batch[i, :rs, :]  # (rs, num_bins)
                 query_logits_i = query_logits_batch[i, :num_queries, :]  # (num_queries, num_bins)
@@ -710,7 +800,8 @@ def train_epoch_multi_trace(
     model, all_traces, optimizer, config, device, logger,
     init_params=None, weight_decay=0.0, round_batch_size=64,
     compute_accuracy=False, scheduler=None, scheduler_step_per_batch=False,
-    focal_gamma=0.0, use_rank_loss=False, k_prime=45, rank_loss_strategy='B'
+    focal_gamma=0.0, use_rank_loss=False, k_prime=45, rank_loss_strategy='B',
+    use_discrete_topk_loss=False, topk_threshold=50
 ):
     """
     Train for one epoch over all preloaded traces.
@@ -738,7 +829,9 @@ def train_epoch_multi_trace(
             focal_gamma=focal_gamma,
             use_rank_loss=use_rank_loss,
             k_prime=k_prime,
-            rank_loss_strategy=rank_loss_strategy
+            rank_loss_strategy=rank_loss_strategy,
+            use_discrete_topk_loss=use_discrete_topk_loss,
+            topk_threshold=topk_threshold
         )
 
         if trace_loss > 0:
@@ -1172,7 +1265,8 @@ def preload_test_trace(test_trace_path, layer, head, config, logger, device='cud
 def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, weight_decay=0.0,
           round_batch_size=64, eval_every=2, use_tensorboard=True, optimizer_type='adam',
           lr_scheduler_type='none', use_error_term=False, focal_gamma=0.0,
-          use_rank_loss=False, k_prime=45, rank_loss_strategy='B'):
+          use_rank_loss=False, k_prime=45, rank_loss_strategy='B',
+          use_discrete_topk_loss=False, topk_threshold=50):
     """
     Main training loop with optimizations.
 
@@ -1192,6 +1286,8 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         use_rank_loss: If True, use rank-based loss instead of attraction loss
         k_prime: Training threshold for rank-based loss (default: 45)
         rank_loss_strategy: 'A' or 'B' for positive bin selection strategy
+        use_discrete_topk_loss: If True, use discrete top-k loss (MOE-style)
+        topk_threshold: Top-k threshold for discrete loss (default: 50)
 
     Returns:
         Path to final checkpoint
@@ -1363,7 +1459,9 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
             focal_gamma=focal_gamma,
             use_rank_loss=use_rank_loss,
             k_prime=k_prime,
-            rank_loss_strategy=rank_loss_strategy
+            rank_loss_strategy=rank_loss_strategy,
+            use_discrete_topk_loss=use_discrete_topk_loss,
+            topk_threshold=topk_threshold
         )
 
         # Step epoch-level scheduler after each epoch
@@ -1587,6 +1685,17 @@ def main():
         choices=['A', 'B'],
         help='Positive bin selection strategy: A=best rank, B=all bins with rank<=k_prime (default: B)'
     )
+    parser.add_argument(
+        '--discrete-topk-loss',
+        action='store_true',
+        help='Use discrete top-k loss (MOE-style) instead of attraction loss (default: off)'
+    )
+    parser.add_argument(
+        '--topk-threshold',
+        type=int,
+        default=50,
+        help='Top-k threshold for discrete loss (default: 50)'
+    )
     args = parser.parse_args()
 
     exp_dir = Path(__file__).parent
@@ -1616,6 +1725,7 @@ def main():
     logger.info(f"Num bins: {config['model']['num_bins']}")
     logger.info(f"Focal gamma: {args.focal_gamma}")
     logger.info(f"Rank loss: {args.rank_loss}, k_prime: {args.k_prime}, strategy: {args.rank_loss_strategy}")
+    logger.info(f"Discrete top-k loss: {args.discrete_topk_loss}, topk_threshold: {args.topk_threshold}")
 
     try:
         final_checkpoint = train(
@@ -1632,7 +1742,9 @@ def main():
             focal_gamma=args.focal_gamma,
             use_rank_loss=args.rank_loss,
             k_prime=args.k_prime,
-            rank_loss_strategy=args.rank_loss_strategy
+            rank_loss_strategy=args.rank_loss_strategy,
+            use_discrete_topk_loss=args.discrete_topk_loss,
+            topk_threshold=args.topk_threshold
         )
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:
