@@ -22,7 +22,7 @@ import torch.nn.functional as F
 import yaml
 from transformers import AutoConfig
 
-from model import Module2Network, create_model
+from model_v5 import Module2Network, create_model
 
 # Import utilities from hf_offline_runner_sparse for hybrid frequency baseline
 import sys as _sys
@@ -244,6 +244,211 @@ class HybridFrequencyBaseline:
         _, topk_indices = torch.topk(scores, actual_k)
 
         return key_indices[topk_indices]
+
+
+###############################################################################
+# Training-Aligned Inference (Optimized)
+###############################################################################
+
+def compute_topk_hit_rate_aligned(
+    model,
+    trace_data,
+    K_values,
+    round_window,
+    exclude_tail,
+    device,
+    logger,
+    top_k_per_bin: int = 50,
+):
+    """
+    Compute TopK Hit Rate using training-aligned inference (optimized).
+
+    Optimization: Per-round precomputation of top-K keys and their log probs,
+    then batch process all queries in the round.
+
+    Args:
+        model: Module2Network instance (in eval mode)
+        trace_data: Dict with Q, K, attention, seq_len
+        K_values: List of K values to evaluate (e.g., [50, 500, 1000])
+        round_window: Size of each round
+        exclude_tail: Number of tail queries to exclude
+        device: torch.device
+        logger: Logger instance
+        top_k_per_bin: Number of top keys to consider from each bin (default: 50)
+
+    Returns:
+        Dict with hit rates for each K value and detailed statistics
+    """
+    model.eval()
+
+    Q = trace_data['Q'].to(device)
+    K = trace_data['K'].to(device)
+    attention = trace_data['attention'].to(device)
+    seq_len = trace_data['seq_len']
+
+    # Initialize counters for each K value
+    results = {k: {'hits': 0, 'total': 0, 'recent_hits': 0, 'bin_hits': 0} for k in K_values}
+
+    # Determine valid query range (exclude tail)
+    valid_end = min(seq_len - exclude_tail, seq_len)
+
+    with torch.no_grad():
+        # Iterate over rounds
+        for round_start in range(0, seq_len, round_window):
+            round_end = min(round_start + round_window, seq_len)
+
+            # Skip first round (no historical keys)
+            if round_start == 0:
+                continue
+
+            # Historical keys (< round_start)
+            historical_keys = K[:round_start]
+            num_historical = round_start
+
+            # Compute reference angles for this round
+            reference_angles = model.compute_reference_angles(round_start, round_window)
+
+            # === Per-round precomputation (done ONCE) ===
+            # Forward pass: Key network -> log probs
+            key_logits = model.key_network(historical_keys, reference_angles)
+            key_log_probs = F.log_softmax(key_logits, dim=0)  # (num_historical, num_bins)
+
+            # Precompute top-K keys per bin and their log probs
+            actual_k = min(top_k_per_bin, num_historical)
+            topk_key_log_probs, topk_indices = torch.topk(key_log_probs, actual_k, dim=0)
+            # topk_indices: (actual_k, num_bins) - key IDs
+            # topk_key_log_probs: (actual_k, num_bins) - their log probs
+
+            # Precompute unique keys and inverse mapping for aggregation
+            topk_indices_flat = topk_indices.view(-1)  # (actual_k * num_bins,)
+            unique_keys, inverse_indices = torch.unique(topk_indices_flat, return_inverse=True)
+            num_unique = unique_keys.shape[0]
+            # inverse_indices: (actual_k * num_bins,) - maps each entry to unique key index
+
+            # Detect empty bins (for masking)
+            empty_bin_mask = (key_log_probs.exp().sum(dim=0) == 0).detach()
+
+            # === Batch process all queries in this round ===
+            query_indices = list(range(round_start, min(round_end, valid_end)))
+            if not query_indices:
+                continue
+
+            # Get all queries for this round
+            queries = Q[query_indices]  # (num_queries, head_dim)
+            num_queries = len(query_indices)
+
+            # Forward pass: Query network (batched)
+            # IMPORTANT: L2 normalize Q first (same as forward_queries does)
+            queries_normalized = F.normalize(queries, p=2, dim=-1)
+            query_logits = model.query_network(queries_normalized, reference_angles)
+            if empty_bin_mask.any():
+                query_logits = query_logits.masked_fill(empty_bin_mask.unsqueeze(0), float('-inf'))
+            query_log_probs = F.log_softmax(query_logits, dim=-1)  # (num_queries, num_bins)
+
+            # Compute log_joint for all queries at once
+            # query_log_probs: (num_queries, num_bins) -> (num_queries, 1, num_bins)
+            # topk_key_log_probs: (actual_k, num_bins) -> (1, actual_k, num_bins)
+            log_joint = query_log_probs.unsqueeze(1) + topk_key_log_probs.unsqueeze(0)
+            # log_joint: (num_queries, actual_k, num_bins)
+
+            # Flatten for aggregation: (num_queries, actual_k * num_bins)
+            log_joint_flat = log_joint.view(num_queries, -1)
+
+            # Proper logsumexp aggregation using exp-sum-log with numerical stability
+            # log_P[q, k] = logsumexp({log_joint_flat[q, j] : inverse_indices[j] == k})
+            #             = log(sum(exp(log_joint_flat[q, j]))) for j where inverse_indices[j] == k
+
+            # Step 1: Find max per group for numerical stability
+            log_P_max = torch.full((num_queries, num_unique), float('-inf'), device=device, dtype=log_joint.dtype)
+            inverse_expanded = inverse_indices.unsqueeze(0).expand(num_queries, -1)
+            log_P_max.scatter_reduce_(1, inverse_expanded, log_joint_flat, reduce='amax', include_self=True)
+
+            # Step 2: Compute exp(log_joint - max) and sum per group
+            # Subtract max for stability: exp(x - max) instead of exp(x)
+            log_joint_shifted = log_joint_flat - log_P_max.gather(1, inverse_expanded)
+            exp_shifted = log_joint_shifted.exp()
+
+            # Sum exp values per group
+            sum_exp = torch.zeros((num_queries, num_unique), device=device, dtype=log_joint.dtype)
+            sum_exp.scatter_add_(1, inverse_expanded, exp_shifted)
+
+            # Step 3: log_P = log(sum_exp) + max
+            log_P = sum_exp.log() + log_P_max
+
+            # Get attention argmax for all queries
+            argmax_keys = []
+            argmax_in_recent = []
+            for i, q_idx in enumerate(query_indices):
+                attn_weights = attention[q_idx, :q_idx + 1]
+                argmax_key = attn_weights.argmax().item()
+                argmax_keys.append(argmax_key)
+                argmax_in_recent.append(argmax_key >= round_start)
+
+            argmax_keys = torch.tensor(argmax_keys, device=device)
+            argmax_in_recent = torch.tensor(argmax_in_recent, device=device)
+
+            # For each K value, compute hits
+            for k_val in K_values:
+                results[k_val]['total'] += num_queries
+
+                # Count recent hits
+                num_recent = argmax_in_recent.sum().item()
+                results[k_val]['recent_hits'] += num_recent
+                results[k_val]['hits'] += num_recent
+
+                # For non-recent queries, check if argmax is in top-K by aggregated prob
+                non_recent_mask = ~argmax_in_recent
+                num_non_recent = non_recent_mask.sum().item()
+
+                if num_non_recent > 0:
+                    # Get top-K unique keys for each non-recent query
+                    actual_final_k = min(k_val, num_unique)
+                    _, topk_unique_indices = torch.topk(log_P[non_recent_mask], actual_final_k, dim=1)
+                    # topk_unique_indices: (num_non_recent, actual_final_k)
+
+                    # Map back to actual key IDs
+                    topk_actual_keys = unique_keys[topk_unique_indices]  # (num_non_recent, actual_final_k)
+
+                    # Check if argmax is in top-K
+                    non_recent_argmax = argmax_keys[non_recent_mask].unsqueeze(1)  # (num_non_recent, 1)
+                    hits = (topk_actual_keys == non_recent_argmax).any(dim=1)  # (num_non_recent,)
+                    bin_hits = hits.sum().item()
+
+                    results[k_val]['bin_hits'] += bin_hits
+                    results[k_val]['hits'] += bin_hits
+
+    # Compute hit rates
+    hit_rates = {}
+    for k_val in K_values:
+        total = results[k_val]['total']
+        if total > 0:
+            hit_rate = results[k_val]['hits'] / total * 100
+            recent_rate = results[k_val]['recent_hits'] / total * 100
+            bin_rate = results[k_val]['bin_hits'] / total * 100
+        else:
+            hit_rate = 0.0
+            recent_rate = 0.0
+            bin_rate = 0.0
+
+        hit_rates[k_val] = {
+            'hit_rate': hit_rate,
+            'recent_hit_rate': recent_rate,
+            'bin_hit_rate': bin_rate,
+            'total_queries': total,
+            'total_hits': results[k_val]['hits'],
+            'recent_hits': results[k_val]['recent_hits'],
+            'bin_hits': results[k_val]['bin_hits'],
+            'inference_mode': 'aligned',
+            'top_k_per_bin': top_k_per_bin
+        }
+
+        logger.info(
+            f"K={k_val} (aligned, {top_k_per_bin}/bin): Hit Rate = {hit_rate:.2f}% "
+            f"(Recent: {recent_rate:.2f}%, Bin: {bin_rate:.2f}%, "
+            f"Total: {results[k_val]['hits']}/{total})"
+        )
+
+    return hit_rates
 
 
 ###############################################################################
@@ -709,7 +914,8 @@ def evaluate_baseline(config, logger, model_path: Path = None):
     return hit_rates
 
 
-def evaluate(config, checkpoint_path, logger, top_bins_list: List[int] = None):
+def evaluate(config, checkpoint_path, logger, top_bins_list: List[int] = None,
+             inference_mode: str = 'original', top_k_per_bin: int = 50):
     """
     Main evaluation function.
 
@@ -718,15 +924,15 @@ def evaluate(config, checkpoint_path, logger, top_bins_list: List[int] = None):
         checkpoint_path: Path to model checkpoint
         logger: Logger instance
         top_bins_list: List of top_bins values to evaluate (default: [1, 8])
+            Only used for 'original' inference mode.
+        inference_mode: 'original' (hard bin selection) or 'aligned' (training-aligned)
+        top_k_per_bin: Keys to consider per bin for aligned mode (default: 50)
 
     Returns:
         Evaluation results dict with results for each top_bins setting
     """
     logger.info("Starting Module 2 evaluation...")
-
-    # Default to evaluating both top-1 and top-8 bins
-    if top_bins_list is None:
-        top_bins_list = [1, 8]
+    logger.info(f"Inference mode: {inference_mode}")
 
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -743,25 +949,44 @@ def evaluate(config, checkpoint_path, logger, top_bins_list: List[int] = None):
     round_window = config['evaluation'].get('round_window', config['training']['round_window'])
     exclude_tail = config['training']['exclude_tail']
 
-    # Evaluate for each top_bins setting
     all_results = {}
-    for top_bins in top_bins_list:
-        logger.info(f"\n--- Evaluating with top-{top_bins} bins ---")
+
+    if inference_mode == 'aligned':
+        # Training-aligned inference mode
+        logger.info(f"\n--- Evaluating with aligned inference (top_k_per_bin={top_k_per_bin}) ---")
         logger.info(f"Evaluating TopK Hit Rate for K={K_values}")
 
-        hit_rates = compute_topk_hit_rate(
+        hit_rates = compute_topk_hit_rate_aligned(
             model, trace_data, K_values, round_window, exclude_tail, device, logger,
-            top_bins=top_bins
+            top_k_per_bin=top_k_per_bin,
         )
 
-        all_results[f'top_{top_bins}_bins'] = hit_rates
+        all_results['aligned'] = hit_rates
+        results_suffix = f'_aligned_{top_k_per_bin}perbin'
+    else:
+        # Original inference mode (hard bin selection)
+        if top_bins_list is None:
+            top_bins_list = [1, 8]
+
+        for top_bins in top_bins_list:
+            logger.info(f"\n--- Evaluating with top-{top_bins} bins ---")
+            logger.info(f"Evaluating TopK Hit Rate for K={K_values}")
+
+            hit_rates = compute_topk_hit_rate(
+                model, trace_data, K_values, round_window, exclude_tail, device, logger,
+                top_bins=top_bins
+            )
+
+            all_results[f'top_{top_bins}_bins'] = hit_rates
+
+        results_suffix = ''
 
     # Save results
     exp_dir = Path(__file__).parent
     results_dir = exp_dir / config['output']['results_dir']
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    results_file = results_dir / 'evaluation_results.json'
+    results_file = results_dir / f'evaluation_results{results_suffix}.json'
     with open(results_file, 'w') as f:
         json.dump(all_results, f, indent=2)
 
@@ -799,6 +1024,19 @@ def main():
         type=str,
         default='1,8',
         help='Comma-separated list of top_bins values to evaluate (default: 1,8)'
+    )
+    parser.add_argument(
+        '--inference-mode',
+        type=str,
+        choices=['original', 'aligned'],
+        default='original',
+        help='Inference mode: original (hard bin selection) or aligned (training-aligned soft aggregation)'
+    )
+    parser.add_argument(
+        '--top-k-per-bin',
+        type=int,
+        default=50,
+        help='Number of top keys to consider per bin for aligned inference (default: 50)'
     )
     args = parser.parse_args()
 
@@ -840,7 +1078,12 @@ def main():
                 return
 
             # Run evaluation
-            results = evaluate(config, checkpoint_path, logger, top_bins_list=top_bins_list)
+            results = evaluate(
+                config, checkpoint_path, logger,
+                top_bins_list=top_bins_list,
+                inference_mode=args.inference_mode,
+                top_k_per_bin=args.top_k_per_bin,
+            )
             logger.info("Evaluation completed successfully")
 
             # Print summary
