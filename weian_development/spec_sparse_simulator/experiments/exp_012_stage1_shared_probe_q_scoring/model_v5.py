@@ -545,13 +545,14 @@ class Module2KeyNetwork(nn.Module):
     Parameters: 128 * 64 (u_weights) + 128 (k_bias) = 8,320
     """
 
-    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True):
+    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True, use_key_temperature=False):
         """
         Args:
             shared_probe_layer: SharedProbeLayer instance (shared with QueryNetwork)
             num_bins: Number of bins (default: 128)
             num_freqs: Number of frequency components (default: 64)
             use_l2_norm: If True (default), L2 normalize probes before rotation
+            use_key_temperature: If True, add learnable temperature for softmax scaling
         """
         super().__init__()
         self.probe_layer = shared_probe_layer
@@ -559,6 +560,7 @@ class Module2KeyNetwork(nn.Module):
         self.num_freqs = num_freqs
         self.eps = 1e-8
         self.use_l2_norm = use_l2_norm
+        self.use_key_temperature = use_key_temperature
 
         # K magnitude weights (Stage 2)
         # Shape: (num_bins, num_freqs)
@@ -571,6 +573,14 @@ class Module2KeyNetwork(nn.Module):
         # Shape: (num_bins,)
         # Initialize to 0
         self.k_bias = nn.Parameter(torch.zeros(num_bins))
+
+        # Learnable temperature for softmax (KEY side only)
+        # softplus(raw) ensures positive temperature
+        # Initialize raw value so that softplus(raw) ≈ 1.0
+        if use_key_temperature:
+            self.temperature_raw = nn.Parameter(
+                torch.tensor(math.log(math.e - 1))  # ≈ 0.541, gives softplus ≈ 1.0
+            )
 
     def forward(self, K, reference_angles):
         """
@@ -616,6 +626,11 @@ class Module2KeyNetwork(nn.Module):
 
         # Final score: s_K^(b) = P_normalized_rot_b^T * K + u_b^T * m^K + k_bias_b
         logits = dot_product_term + magnitude_term + bias
+
+        # Apply learnable temperature scaling if enabled
+        if self.use_key_temperature:
+            temperature = F.softplus(self.temperature_raw)
+            logits = logits / temperature
 
         if is_single:
             logits = logits.squeeze(0)
@@ -674,6 +689,11 @@ class Module2KeyNetwork(nn.Module):
 
         # Final score
         logits = dot_product_term + magnitude_term + bias_expanded
+
+        # Apply learnable temperature scaling if enabled
+        if self.use_key_temperature:
+            temperature = F.softplus(self.temperature_raw)
+            logits = logits / temperature
 
         # Create key mask if key_lengths provided
         key_mask = None
@@ -790,7 +810,7 @@ class Module2Network(nn.Module):
     - K bias: 128
     """
 
-    def __init__(self, num_bins=128, head_dim=128, init_probes=None, use_l2_norm=True, inv_freq=None, use_error_term=False):
+    def __init__(self, num_bins=128, head_dim=128, init_probes=None, use_l2_norm=True, inv_freq=None, use_error_term=False, use_key_temperature=False):
         """
         Args:
             num_bins: Number of bins (default: 128)
@@ -799,18 +819,20 @@ class Module2Network(nn.Module):
             use_l2_norm: If True (default), L2 normalize probes and Q vectors
             inv_freq: Optional inverse frequency tensor from model's RoPE.
             use_error_term: If True, add error vector term to Q network (default: False)
+            use_key_temperature: If True, add learnable temperature for KEY softmax scaling
         """
         super().__init__()
         self.num_bins = num_bins
         self.use_l2_norm = use_l2_norm
         self.use_error_term = use_error_term
+        self.use_key_temperature = use_key_temperature
         num_freqs = head_dim // 2
 
         # Shared probe layer (used by both K and Q networks)
         self.shared_probe_layer = SharedProbeLayer(num_bins, head_dim, init_probes=init_probes, inv_freq=inv_freq)
 
         # Key and Query networks sharing the same probe layer
-        self.key_network = Module2KeyNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm)
+        self.key_network = Module2KeyNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm, use_key_temperature=use_key_temperature)
         self.query_network = Module2QueryNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm, use_error_term=use_error_term)
 
     def forward_keys(self, K, reference_angles):
@@ -948,15 +970,21 @@ class Module2Network(nn.Module):
         q_magnitude_params = self.query_network.distance_scorer.q_magnitude_weights.numel()
         q_bias_params = self.query_network.distance_scorer.q_bias.numel()
 
-        return {
+        # Temperature parameter (if enabled)
+        k_temperature_params = 1 if self.use_key_temperature else 0
+
+        result = {
             'shared_probes': shared_probe_params,
             'k_magnitude_weights': k_magnitude_params,
             'k_bias': k_bias_params,
             'q_distance_weights': q_distance_weights_params,
             'q_magnitude_weights': q_magnitude_params,
             'q_bias': q_bias_params,
-            'total': shared_probe_params + k_magnitude_params + k_bias_params + q_distance_weights_params + q_magnitude_params + q_bias_params
+            'total': shared_probe_params + k_magnitude_params + k_bias_params + q_distance_weights_params + q_magnitude_params + q_bias_params + k_temperature_params
         }
+        if self.use_key_temperature:
+            result['k_temperature'] = k_temperature_params
+        return result
 
 
 def load_model_inv_freq(model_path, logger=None):
@@ -993,7 +1021,7 @@ def load_model_inv_freq(model_path, logger=None):
         return None
 
 
-def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None, use_error_term=False):
+def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None, use_error_term=False, use_key_temperature=False):
     """
     Factory function to create Module 2 network.
 
@@ -1008,6 +1036,7 @@ def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None, use_
         inv_freq: Optional inverse frequency tensor from model's RoPE.
                   If None, will try to load from model_path in config.
         use_error_term: If True, add error vector term to Q network (default: False)
+        use_key_temperature: If True, add learnable temperature for KEY softmax scaling
 
     Returns:
         Module2Network instance
@@ -1034,6 +1063,7 @@ def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None, use_
         init_probes=init_probes,
         use_l2_norm=use_l2_norm,
         inv_freq=inv_freq,
-        use_error_term=use_error_term
+        use_error_term=use_error_term,
+        use_key_temperature=use_key_temperature
     )
     return model

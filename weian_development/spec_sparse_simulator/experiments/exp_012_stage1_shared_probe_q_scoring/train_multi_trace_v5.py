@@ -314,6 +314,53 @@ def compute_attraction_loss(key_probs, query_bin_probs, argmax_keys, argmax_in_r
     return loss
 
 
+def compute_weighted_ce_loss(key_log_probs, query_bin_probs, argmax_keys, argmax_in_recent, eps=1e-8):
+    """
+    Compute Weighted Cross-Entropy Loss (MOE-style).
+
+    Loss = -sum_b(p_q[b] * log(p_k[argmax_key, b]))
+         = sum_b(p_q[b] * CE_b)
+
+    Key difference from attraction loss:
+    - Attraction: -log(sum_b(p_q[b] * p_k[b]))  -- log outside sum
+    - Weighted CE: -sum_b(p_q[b] * log(p_k[b])) -- log inside sum
+
+    By Jensen's inequality: weighted_ce_loss >= attraction_loss
+
+    Args:
+        key_log_probs: (num_keys, num_bins) - log softmax over keys
+        query_bin_probs: (num_queries, num_bins) - softmax over bins
+        argmax_keys: (num_queries,) - ground truth argmax key indices
+        argmax_in_recent: (num_queries,) - whether argmax is in recent keys
+
+    Returns:
+        loss: scalar tensor
+    """
+    valid_mask = ~argmax_in_recent
+    if valid_mask.sum() == 0:
+        return torch.tensor(0.0, device=key_log_probs.device, requires_grad=True)
+
+    valid_query_probs = query_bin_probs[valid_mask]  # (num_valid, num_bins)
+    valid_argmax_keys = argmax_keys[valid_mask]       # (num_valid,)
+
+    # Get log_p_k(argmax_key | b) for all bins
+    # key_log_probs: (num_keys, num_bins)
+    # valid_argmax_keys: (num_valid,)
+    # Result: (num_valid, num_bins)
+    log_p_k_target = key_log_probs[valid_argmax_keys, :]  # (num_valid, num_bins)
+
+    # CE for each bin: -log_p_k
+    ce_per_bin = -log_p_k_target  # (num_valid, num_bins)
+
+    # Weighted sum: sum_b(p_q[b] * CE_b)
+    weighted_ce = (valid_query_probs * ce_per_bin).sum(dim=1)  # (num_valid,)
+
+    # Mean over valid queries
+    loss = weighted_ce.mean()
+
+    return loss
+
+
 def compute_rank_based_loss(key_logits, query_logits, argmax_keys, argmax_in_recent, k_prime=45, lam=1.0, strategy='B'):
     """
     Compute Rank-Based Loss that aligns with inference behavior.
@@ -539,7 +586,8 @@ def train_on_trace_batched(
     init_params=None, weight_decay=0.0, round_batch_size=64,
     compute_accuracy=False, scheduler=None, scheduler_step_per_batch=False,
     focal_gamma=0.0, use_rank_loss=False, k_prime=45, rank_loss_strategy='B',
-    use_discrete_topk_loss=False, topk_threshold=50
+    use_discrete_topk_loss=False, topk_threshold=50,
+    use_weighted_ce_loss=False
 ):
     """
     Train on a single trace with round batching (V5 - batched forward).
@@ -568,6 +616,7 @@ def train_on_trace_batched(
         rank_loss_strategy: 'A' or 'B' for positive bin selection strategy
         use_discrete_topk_loss: If True, use discrete top-k loss (MOE-style)
         topk_threshold: Top-k threshold for discrete loss (default: 50)
+        use_weighted_ce_loss: If True, use weighted cross-entropy loss (MOE-style)
 
     Returns:
         trace_loss: Average loss for this trace
@@ -707,7 +756,15 @@ def train_on_trace_batched(
             argmax_in_recent_dev = argmax_in_recent.to(device) if argmax_in_recent.device != device else argmax_in_recent
 
             # Compute loss
-            if use_discrete_topk_loss:
+            if use_weighted_ce_loss:
+                # Weighted cross-entropy loss (MOE-style)
+                # key_probs_i is already softmax over keys, take log for log_probs
+                key_log_probs_i = torch.log(key_probs_i + 1e-8)  # (rs, num_bins)
+                round_loss = compute_weighted_ce_loss(
+                    key_log_probs_i, query_bin_probs_i,
+                    argmax_keys_dev, argmax_in_recent_dev
+                )
+            elif use_discrete_topk_loss:
                 # Extract logits for discrete top-k loss
                 key_logits_i = key_logits_batch[i, :rs, :]  # (rs, num_bins)
                 query_logits_i = query_logits_batch[i, :num_queries, :]  # (num_queries, num_bins)
@@ -801,7 +858,8 @@ def train_epoch_multi_trace(
     init_params=None, weight_decay=0.0, round_batch_size=64,
     compute_accuracy=False, scheduler=None, scheduler_step_per_batch=False,
     focal_gamma=0.0, use_rank_loss=False, k_prime=45, rank_loss_strategy='B',
-    use_discrete_topk_loss=False, topk_threshold=50
+    use_discrete_topk_loss=False, topk_threshold=50,
+    use_weighted_ce_loss=False
 ):
     """
     Train for one epoch over all preloaded traces.
@@ -831,7 +889,8 @@ def train_epoch_multi_trace(
             k_prime=k_prime,
             rank_loss_strategy=rank_loss_strategy,
             use_discrete_topk_loss=use_discrete_topk_loss,
-            topk_threshold=topk_threshold
+            topk_threshold=topk_threshold,
+            use_weighted_ce_loss=use_weighted_ce_loss
         )
 
         if trace_loss > 0:
@@ -1266,7 +1325,8 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
           round_batch_size=64, eval_every=2, use_tensorboard=True, optimizer_type='adam',
           lr_scheduler_type='none', use_error_term=False, focal_gamma=0.0,
           use_rank_loss=False, k_prime=45, rank_loss_strategy='B',
-          use_discrete_topk_loss=False, topk_threshold=50):
+          use_discrete_topk_loss=False, topk_threshold=50,
+          use_weighted_ce_loss=False, use_key_temperature=False):
     """
     Main training loop with optimizations.
 
@@ -1288,6 +1348,7 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         rank_loss_strategy: 'A' or 'B' for positive bin selection strategy
         use_discrete_topk_loss: If True, use discrete top-k loss (MOE-style)
         topk_threshold: Top-k threshold for discrete loss (default: 50)
+        use_weighted_ce_loss: If True, use weighted cross-entropy loss (MOE-style)
 
     Returns:
         Path to final checkpoint
@@ -1368,7 +1429,7 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         logger.info("=" * 60)
 
     # Create model
-    model = create_model(config, init_probes=init_probes, use_l2_norm=use_l2_norm, use_error_term=use_error_term)
+    model = create_model(config, init_probes=init_probes, use_l2_norm=use_l2_norm, use_error_term=use_error_term, use_key_temperature=use_key_temperature)
     model = model.to(device)
 
     # Save initial parameters for regularization
@@ -1461,7 +1522,8 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
             k_prime=k_prime,
             rank_loss_strategy=rank_loss_strategy,
             use_discrete_topk_loss=use_discrete_topk_loss,
-            topk_threshold=topk_threshold
+            topk_threshold=topk_threshold,
+            use_weighted_ce_loss=use_weighted_ce_loss
         )
 
         # Step epoch-level scheduler after each epoch
@@ -1696,6 +1758,16 @@ def main():
         default=50,
         help='Top-k threshold for discrete loss (default: 50)'
     )
+    parser.add_argument(
+        '--weighted-ce-loss',
+        action='store_true',
+        help='Use weighted cross-entropy loss (MOE-style) instead of attraction loss (default: off)'
+    )
+    parser.add_argument(
+        '--no-key-temperature',
+        action='store_true',
+        help='Disable learnable temperature for KEY softmax scaling (default: enabled)'
+    )
     args = parser.parse_args()
 
     exp_dir = Path(__file__).parent
@@ -1726,6 +1798,8 @@ def main():
     logger.info(f"Focal gamma: {args.focal_gamma}")
     logger.info(f"Rank loss: {args.rank_loss}, k_prime: {args.k_prime}, strategy: {args.rank_loss_strategy}")
     logger.info(f"Discrete top-k loss: {args.discrete_topk_loss}, topk_threshold: {args.topk_threshold}")
+    logger.info(f"Weighted CE loss: {args.weighted_ce_loss}")
+    logger.info(f"Use KEY temperature: {not args.no_key_temperature}")
 
     try:
         final_checkpoint = train(
@@ -1744,7 +1818,9 @@ def main():
             k_prime=args.k_prime,
             rank_loss_strategy=args.rank_loss_strategy,
             use_discrete_topk_loss=args.discrete_topk_loss,
-            topk_threshold=args.topk_threshold
+            topk_threshold=args.topk_threshold,
+            use_weighted_ce_loss=args.weighted_ce_loss,
+            use_key_temperature=not args.no_key_temperature
         )
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:
