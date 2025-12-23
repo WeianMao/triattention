@@ -725,7 +725,7 @@ def train_on_trace_batched(
             num_queries = len(query_indices)
             Q_batch[i, :num_queries] = Q[query_indices]
             # query_indices are the absolute sequence positions
-            query_positions[i, :num_queries] = torch.tensor(query_indices, device=device)
+            query_positions[i, :num_queries] = torch.as_tensor(query_indices, dtype=torch.long, device=device)
             query_lengths.append(num_queries)
 
         # Batched query forward
