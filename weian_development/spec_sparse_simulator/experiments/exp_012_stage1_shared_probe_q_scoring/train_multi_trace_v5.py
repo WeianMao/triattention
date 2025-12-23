@@ -1332,7 +1332,8 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
           use_rank_loss=False, k_prime=45, rank_loss_strategy='B',
           use_discrete_topk_loss=False, topk_threshold=50,
           use_weighted_ce_loss=False, use_key_temperature=False,
-          use_position_scaling=False):
+          use_position_scaling=False, adam_betas=(0.9, 0.999), adam_eps=1e-8, network_type='shared_probe',
+          use_dot_product=False):
     """
     Main training loop with optimizations.
 
@@ -1360,7 +1361,7 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         Path to final checkpoint
     """
     logger.info("Initializing Multi-Trace Module 2 training (V5 - Batched Forward)...")
-    logger.info(f"Settings: use_l2_norm={use_l2_norm}, invert_to_origin={invert_to_origin}")
+    logger.info(f"Settings: use_l2_norm={use_l2_norm}, invert_to_origin={invert_to_origin}, use_dot_product={use_dot_product}")
     logger.info(f"Optimizations: round_batch_size={round_batch_size}, eval_every={eval_every}")
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -1434,8 +1435,8 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         logger.info(f"Step 2 completed in {step2_time:.1f}s. Probe shape: {init_probes.shape}")
         logger.info("=" * 60)
 
-    # Create model
-    model = create_model(config, init_probes=init_probes, use_l2_norm=use_l2_norm, use_error_term=use_error_term, use_key_temperature=use_key_temperature, use_position_scaling=use_position_scaling)
+    # Create model with network_type
+    model = create_model(config, init_probes=init_probes, use_l2_norm=use_l2_norm, use_error_term=use_error_term, use_key_temperature=use_key_temperature, use_position_scaling=use_position_scaling, network_type=network_type, use_dot_product=use_dot_product)
     model = model.to(device)
 
     # Save initial parameters for regularization
@@ -1445,17 +1446,22 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         logger.info(f"Saved initial parameters for regularization (weight_decay={weight_decay})")
 
     param_counts = model.get_param_count()
-    logger.info(f"Model parameters: {param_counts}")
-    logger.info(f"Total parameters: {param_counts['total']:,}")
+    total_params = param_counts['total']
+    logger.info(f"Created {network_type} network with {total_params:,} parameters")
+    if network_type == 'shared_probe':
+        logger.info("  - Using learnable probe vectors")
+    elif network_type == 'von_mises_kernel':
+        logger.info("  - Using Von Mises kernel encoding")
+    logger.info(f"Model parameters breakdown: {param_counts}")
 
     # Create optimizer based on type
     lr = config['training']['learning_rate']
     if optimizer_type.lower() == 'adamw':
-        optimizer = optim.AdamW(model.parameters(), lr=lr)
-        logger.info(f"Using AdamW optimizer (lr={lr})")
+        optimizer = optim.AdamW(model.parameters(), lr=lr, betas=adam_betas, eps=adam_eps)
+        logger.info(f"Using AdamW optimizer (lr={lr}, betas={adam_betas}, eps={adam_eps})")
     else:
-        optimizer = optim.Adam(model.parameters(), lr=lr)
-        logger.info(f"Using Adam optimizer (lr={lr})")
+        optimizer = optim.Adam(model.parameters(), lr=lr, betas=adam_betas, eps=adam_eps)
+        logger.info(f"Using Adam optimizer (lr={lr}, betas={adam_betas}, eps={adam_eps})")
 
     # Create learning rate scheduler if specified
     num_epochs = config['training']['epochs']
@@ -1779,6 +1785,35 @@ def main():
         action='store_true',
         help='Disable position-dependent scaling for K and Q networks (default: enabled)'
     )
+    parser.add_argument(
+        '--use-dot-product',
+        action='store_true',
+        help='Use per-frequency dot product instead of distance in Q network (default: off)'
+    )
+    parser.add_argument(
+        '--lr',
+        type=float,
+        default=None,
+        help='Override learning rate from config'
+    )
+    parser.add_argument(
+        '--beta1',
+        type=float,
+        default=0.9,
+        help='Adam beta1 parameter (default: 0.9)'
+    )
+    parser.add_argument(
+        '--beta2',
+        type=float,
+        default=0.999,
+        help='Adam beta2 parameter (default: 0.999)'
+    )
+    parser.add_argument(
+        '--eps',
+        type=float,
+        default=1e-8,
+        help='Adam epsilon parameter (default: 1e-8)'
+    )
     args = parser.parse_args()
 
     exp_dir = Path(__file__).parent
@@ -1795,7 +1830,17 @@ def main():
     if args.num_bins is not None:
         config['model']['num_bins'] = args.num_bins
 
+    # Override learning rate if specified
+    if args.lr is not None:
+        config['training']['learning_rate'] = args.lr
+
     logger = setup_logging(config, args.exp_name)
+
+    # Read network type from config (default: shared_probe)
+    network_type = config['model'].get('network_type', 'shared_probe')
+    if network_type not in ['shared_probe', 'von_mises_kernel']:
+        raise ValueError(f"Invalid network_type: {network_type}. Must be 'shared_probe' or 'von_mises_kernel'")
+    logger.info(f"Using network architecture: {network_type}")
 
     # Fixed settings based on experiments
     use_l2_norm = True
@@ -1812,6 +1857,8 @@ def main():
     logger.info(f"Weighted CE loss: {args.weighted_ce_loss}")
     logger.info(f"Use KEY temperature: {not args.no_key_temperature}")
     logger.info(f"Use position scaling: {not args.no_position_scaling}")
+    logger.info(f"Use dot product: {args.use_dot_product}")
+    logger.info(f"Adam betas: ({args.beta1}, {args.beta2}), eps: {args.eps}")
 
     try:
         final_checkpoint = train(
@@ -1833,7 +1880,11 @@ def main():
             topk_threshold=args.topk_threshold,
             use_weighted_ce_loss=args.weighted_ce_loss,
             use_key_temperature=not args.no_key_temperature,
-            use_position_scaling=not args.no_position_scaling
+            use_position_scaling=not args.no_position_scaling,
+            adam_betas=(args.beta1, args.beta2),
+            adam_eps=args.eps,
+            network_type=network_type,
+            use_dot_product=args.use_dot_product
         )
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:

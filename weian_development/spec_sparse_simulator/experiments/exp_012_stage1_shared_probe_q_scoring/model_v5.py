@@ -33,6 +33,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# Conditional import for Von Mises Kernel architecture
+try:
+    from .model_kernel import create_model as create_kernel_model
+    HAS_KERNEL_MODEL = True
+except (ImportError, ValueError):
+    try:
+        from model_kernel import create_model as create_kernel_model
+        HAS_KERNEL_MODEL = True
+    except ImportError:
+        HAS_KERNEL_MODEL = False
+        create_kernel_model = None
+
 
 def l2_normalize(x, eps=1e-8):
     """
@@ -394,17 +406,23 @@ class DistanceBasedQueryScorer(nn.Module):
        where tilde_w_b = -softplus(w_raw_b) to ensure negative weights
        and [alpha_b^T * e_b] is optional (use_error_term=True)
 
+    Alternative mode (use_dot_product=True):
+    - Uses per-frequency dot product instead of distance:
+      dot_term_b = sum_f softplus(w_dot_raw_{b,f}) * (P_real_f * Q_real_f + P_imag_f * Q_imag_f)
+    - This is equivalent to weighted cosine similarity when both P and Q are L2 normalized
+
     Parameters (use_error_term=False): 128 * 64 + 128 * 64 + 128 = 16,512
     Parameters (use_error_term=True): 128 * 64 + 128 * 64 + 128 * 128 + 128 = 32,896
     """
 
-    def __init__(self, num_bins=128, num_freqs=64, use_l2_norm=True, use_error_term=False):
+    def __init__(self, num_bins=128, num_freqs=64, use_l2_norm=True, use_error_term=False, use_dot_product=False):
         """
         Args:
             num_bins: Number of bins (default: 128)
             num_freqs: Number of frequency components (default: 64)
             use_l2_norm: If True (default), L2 normalize Q before distance computation
             use_error_term: If True, add error vector term alpha_b^T * e_b (default: False)
+            use_dot_product: If True, use per-frequency dot product instead of distance (default: False)
         """
         super().__init__()
         self.num_bins = num_bins
@@ -413,14 +431,24 @@ class DistanceBasedQueryScorer(nn.Module):
         self.eps = 1e-8
         self.use_l2_norm = use_l2_norm
         self.use_error_term = use_error_term
+        self.use_dot_product = use_dot_product
 
-        # Raw weights for distance transformation (will be mapped via -softplus)
-        # Shape: (num_bins, num_freqs)
-        # Initialize to ln(e-1) ≈ 0.541 so that -softplus maps to -1
+        # Initialize to ln(e-1) ≈ 0.541 so that softplus maps to 1
         init_value = math.log(math.e - 1)
-        self.q_weights_raw = nn.Parameter(
-            torch.full((num_bins, num_freqs), init_value)
-        )
+
+        if use_dot_product:
+            # Dot product weights (will be mapped via softplus to ensure positive)
+            # Shape: (num_bins, num_freqs)
+            self.q_dot_weights_raw = nn.Parameter(
+                torch.full((num_bins, num_freqs), init_value)
+            )
+        else:
+            # Raw weights for distance transformation (will be mapped via -softplus)
+            # Shape: (num_bins, num_freqs)
+            # -softplus maps to -1
+            self.q_weights_raw = nn.Parameter(
+                torch.full((num_bins, num_freqs), init_value)
+            )
 
         # Q magnitude weights (Stage 2)
         # Shape: (num_bins, num_freqs)
@@ -478,49 +506,71 @@ class DistanceBasedQueryScorer(nn.Module):
         P_real = rotated_probes[:, :self.num_freqs]  # (num_bins, num_freqs)
         P_imag = rotated_probes[:, self.num_freqs:]  # (num_bins, num_freqs)
 
-        # Compute per-frequency error vectors
-        # e_{b,f} = P_rot_{b,f} - Q_f (in complex space)
-        # Broadcasting: (num_bins, num_freqs) - (num_queries, num_freqs)
-        error_real = P_real.unsqueeze(0) - Q_real.unsqueeze(1)  # (num_queries, num_bins, num_freqs)
-        error_imag = P_imag.unsqueeze(0) - Q_imag.unsqueeze(1)  # (num_queries, num_bins, num_freqs)
-
-        # Compute distance (L2 norm with numerical stability)
-        # d_{b,f} = sqrt(error_real^2 + error_imag^2 + eps)
-        distance = torch.sqrt(error_real ** 2 + error_imag ** 2 + self.eps)  # (num_queries, num_bins, num_freqs)
-
         # Compute Q magnitude features (on processed Q, normalized or not)
         # m^Q_f = sqrt(real_f^2 + imag_f^2 + eps)
         Q_magnitude = compute_magnitude_features(Q_processed, self.num_freqs, self.eps)  # (num_queries, num_freqs)
 
-        # Apply -softplus mapping to distance weights
-        # tilde_w = -softplus(w_raw) = -ln(1 + exp(w_raw))
-        effective_weights = -F.softplus(self.q_weights_raw)  # (num_bins, num_freqs)
-
         # Ensure dtype compatibility
-        effective_weights = effective_weights.to(dtype=Q.dtype)
         v_weights = self.q_magnitude_weights.to(dtype=Q.dtype)
         bias = self.q_bias.to(dtype=Q.dtype)
 
-        # Linear transformation:
-        # s_Q^(b) = tilde_w_b^T * d_b + v_b^T * m^Q + [alpha_b^T * e_b] + c_b
+        if self.use_dot_product:
+            # Per-frequency dot product mode (weighted cosine similarity)
+            # dot_{b,f} = P_real_{b,f} * Q_real_f + P_imag_{b,f} * Q_imag_f
+            # Broadcasting: (num_bins, num_freqs) * (num_queries, num_freqs)
+            # P_real: (num_bins, num_freqs) -> (1, num_bins, num_freqs)
+            # Q_real: (num_queries, num_freqs) -> (num_queries, 1, num_freqs)
+            dot_per_freq = (P_real.unsqueeze(0) * Q_real.unsqueeze(1) +
+                           P_imag.unsqueeze(0) * Q_imag.unsqueeze(1))  # (num_queries, num_bins, num_freqs)
 
-        # Distance term: (num_queries, num_bins, num_freqs) * (num_bins, num_freqs) -> (num_queries, num_bins)
-        distance_term = torch.sum(distance * effective_weights.unsqueeze(0), dim=-1)
+            # Apply softplus to get positive weights
+            effective_weights = F.softplus(self.q_dot_weights_raw)  # (num_bins, num_freqs)
+            effective_weights = effective_weights.to(dtype=Q.dtype)
 
-        # Magnitude term: (num_queries, num_freqs) @ (num_bins, num_freqs).T -> (num_queries, num_bins)
-        magnitude_term = torch.matmul(Q_magnitude, v_weights.t())
+            # Weighted sum: (num_queries, num_bins, num_freqs) * (num_bins, num_freqs) -> (num_queries, num_bins)
+            dot_term = torch.sum(dot_per_freq * effective_weights.unsqueeze(0), dim=-1)
 
-        scores = distance_term + magnitude_term + bias
+            # Magnitude term: (num_queries, num_freqs) @ (num_bins, num_freqs).T -> (num_queries, num_bins)
+            magnitude_term = torch.matmul(Q_magnitude, v_weights.t())
 
-        # Optional error vector term
-        if self.use_error_term:
-            # Concatenate error vectors to full head_dim: [error_real, error_imag]
-            # Shape: (num_queries, num_bins, head_dim)
-            error_full = torch.cat([error_real, error_imag], dim=-1)
-            error_weights = self.q_error_weights.to(dtype=error_full.dtype)
-            # einsum('qbd,bd->qb'): (num_queries, num_bins, head_dim) dot (num_bins, head_dim) -> (num_queries, num_bins)
-            error_term = torch.einsum('qbd,bd->qb', error_full, error_weights)
-            scores = scores + error_term
+            scores = dot_term + magnitude_term + bias
+        else:
+            # Original distance-based mode
+            # Compute per-frequency error vectors
+            # e_{b,f} = P_rot_{b,f} - Q_f (in complex space)
+            # Broadcasting: (num_bins, num_freqs) - (num_queries, num_freqs)
+            error_real = P_real.unsqueeze(0) - Q_real.unsqueeze(1)  # (num_queries, num_bins, num_freqs)
+            error_imag = P_imag.unsqueeze(0) - Q_imag.unsqueeze(1)  # (num_queries, num_bins, num_freqs)
+
+            # Compute distance (L2 norm with numerical stability)
+            # d_{b,f} = sqrt(error_real^2 + error_imag^2 + eps)
+            distance = torch.sqrt(error_real ** 2 + error_imag ** 2 + self.eps)  # (num_queries, num_bins, num_freqs)
+
+            # Apply -softplus mapping to distance weights
+            # tilde_w = -softplus(w_raw) = -ln(1 + exp(w_raw))
+            effective_weights = -F.softplus(self.q_weights_raw)  # (num_bins, num_freqs)
+            effective_weights = effective_weights.to(dtype=Q.dtype)
+
+            # Linear transformation:
+            # s_Q^(b) = tilde_w_b^T * d_b + v_b^T * m^Q + [alpha_b^T * e_b] + c_b
+
+            # Distance term: (num_queries, num_bins, num_freqs) * (num_bins, num_freqs) -> (num_queries, num_bins)
+            distance_term = torch.sum(distance * effective_weights.unsqueeze(0), dim=-1)
+
+            # Magnitude term: (num_queries, num_freqs) @ (num_bins, num_freqs).T -> (num_queries, num_bins)
+            magnitude_term = torch.matmul(Q_magnitude, v_weights.t())
+
+            scores = distance_term + magnitude_term + bias
+
+            # Optional error vector term (only in distance mode)
+            if self.use_error_term:
+                # Concatenate error vectors to full head_dim: [error_real, error_imag]
+                # Shape: (num_queries, num_bins, head_dim)
+                error_full = torch.cat([error_real, error_imag], dim=-1)
+                error_weights = self.q_error_weights.to(dtype=error_full.dtype)
+                # einsum('qbd,bd->qb'): (num_queries, num_bins, head_dim) dot (num_bins, head_dim) -> (num_queries, num_bins)
+                error_term = torch.einsum('qbd,bd->qb', error_full, error_weights)
+                scores = scores + error_term
 
         if is_single:
             scores = scores.squeeze(0)  # (num_bins,)
@@ -553,47 +603,69 @@ class DistanceBasedQueryScorer(nn.Module):
         P_real = rotated_probes_batch[..., :self.num_freqs]  # (batch_size, num_bins, num_freqs)
         P_imag = rotated_probes_batch[..., self.num_freqs:]  # (batch_size, num_bins, num_freqs)
 
-        # Compute per-frequency error vectors
-        # For each batch: e_{b,q,bin,f} = P[bin,f] - Q[q,f]
-        # Q_real: (batch_size, num_queries, num_freqs) -> (batch_size, num_queries, 1, num_freqs)
-        # P_real: (batch_size, num_bins, num_freqs) -> (batch_size, 1, num_bins, num_freqs)
-        error_real = P_real.unsqueeze(1) - Q_real.unsqueeze(2)  # (batch_size, num_queries, num_bins, num_freqs)
-        error_imag = P_imag.unsqueeze(1) - Q_imag.unsqueeze(2)
-
-        # Compute distance
-        distance = torch.sqrt(error_real ** 2 + error_imag ** 2 + self.eps)
-
         # Compute Q magnitude features
         Q_magnitude = compute_magnitude_features(Q_processed, self.num_freqs, self.eps)  # (batch_size, num_queries, num_freqs)
 
-        # Apply -softplus mapping to distance weights
-        effective_weights = -F.softplus(self.q_weights_raw)  # (num_bins, num_freqs)
-
         # Ensure dtype compatibility
-        effective_weights = effective_weights.to(dtype=Q_batch.dtype)
         v_weights = self.q_magnitude_weights.to(dtype=Q_batch.dtype)
         bias = self.q_bias.to(dtype=Q_batch.dtype)
 
-        # Distance term: (batch_size, num_queries, num_bins, num_freqs) * (num_bins, num_freqs)
-        # -> (batch_size, num_queries, num_bins)
-        distance_term = torch.sum(distance * effective_weights.unsqueeze(0).unsqueeze(0), dim=-1)
+        if self.use_dot_product:
+            # Per-frequency dot product mode (weighted cosine similarity)
+            # Q_real: (batch_size, num_queries, num_freqs) -> (batch_size, num_queries, 1, num_freqs)
+            # P_real: (batch_size, num_bins, num_freqs) -> (batch_size, 1, num_bins, num_freqs)
+            dot_per_freq = (P_real.unsqueeze(1) * Q_real.unsqueeze(2) +
+                           P_imag.unsqueeze(1) * Q_imag.unsqueeze(2))  # (batch_size, num_queries, num_bins, num_freqs)
 
-        # Magnitude term: (batch_size, num_queries, num_freqs) @ (num_bins, num_freqs).T
-        # -> (batch_size, num_queries, num_bins)
-        magnitude_term = torch.matmul(Q_magnitude, v_weights.t())
+            # Apply softplus to get positive weights
+            effective_weights = F.softplus(self.q_dot_weights_raw)  # (num_bins, num_freqs)
+            effective_weights = effective_weights.to(dtype=Q_batch.dtype)
 
-        scores = distance_term + magnitude_term + bias
-
-        # Optional error vector term
-        if self.use_error_term:
-            # Concatenate error vectors to full head_dim: [error_real, error_imag]
-            # Shape: (batch_size, num_queries, num_bins, head_dim)
-            error_full = torch.cat([error_real, error_imag], dim=-1)
-            error_weights = self.q_error_weights.to(dtype=error_full.dtype)
-            # einsum('bqnd,nd->bqn'): (batch_size, num_queries, num_bins, head_dim) dot (num_bins, head_dim)
+            # Weighted sum: (batch_size, num_queries, num_bins, num_freqs) * (num_bins, num_freqs)
             # -> (batch_size, num_queries, num_bins)
-            error_term = torch.einsum('bqnd,nd->bqn', error_full, error_weights)
-            scores = scores + error_term
+            dot_term = torch.sum(dot_per_freq * effective_weights.unsqueeze(0).unsqueeze(0), dim=-1)
+
+            # Magnitude term: (batch_size, num_queries, num_freqs) @ (num_bins, num_freqs).T
+            # -> (batch_size, num_queries, num_bins)
+            magnitude_term = torch.matmul(Q_magnitude, v_weights.t())
+
+            scores = dot_term + magnitude_term + bias
+        else:
+            # Original distance-based mode
+            # Compute per-frequency error vectors
+            # For each batch: e_{b,q,bin,f} = P[bin,f] - Q[q,f]
+            # Q_real: (batch_size, num_queries, num_freqs) -> (batch_size, num_queries, 1, num_freqs)
+            # P_real: (batch_size, num_bins, num_freqs) -> (batch_size, 1, num_bins, num_freqs)
+            error_real = P_real.unsqueeze(1) - Q_real.unsqueeze(2)  # (batch_size, num_queries, num_bins, num_freqs)
+            error_imag = P_imag.unsqueeze(1) - Q_imag.unsqueeze(2)
+
+            # Compute distance
+            distance = torch.sqrt(error_real ** 2 + error_imag ** 2 + self.eps)
+
+            # Apply -softplus mapping to distance weights
+            effective_weights = -F.softplus(self.q_weights_raw)  # (num_bins, num_freqs)
+            effective_weights = effective_weights.to(dtype=Q_batch.dtype)
+
+            # Distance term: (batch_size, num_queries, num_bins, num_freqs) * (num_bins, num_freqs)
+            # -> (batch_size, num_queries, num_bins)
+            distance_term = torch.sum(distance * effective_weights.unsqueeze(0).unsqueeze(0), dim=-1)
+
+            # Magnitude term: (batch_size, num_queries, num_freqs) @ (num_bins, num_freqs).T
+            # -> (batch_size, num_queries, num_bins)
+            magnitude_term = torch.matmul(Q_magnitude, v_weights.t())
+
+            scores = distance_term + magnitude_term + bias
+
+            # Optional error vector term (only in distance mode)
+            if self.use_error_term:
+                # Concatenate error vectors to full head_dim: [error_real, error_imag]
+                # Shape: (batch_size, num_queries, num_bins, head_dim)
+                error_full = torch.cat([error_real, error_imag], dim=-1)
+                error_weights = self.q_error_weights.to(dtype=error_full.dtype)
+                # einsum('bqnd,nd->bqn'): (batch_size, num_queries, num_bins, head_dim) dot (num_bins, head_dim)
+                # -> (batch_size, num_queries, num_bins)
+                error_term = torch.einsum('bqnd,nd->bqn', error_full, error_weights)
+                scores = scores + error_term
 
         return scores
 
@@ -824,7 +896,7 @@ class Module2QueryNetwork(nn.Module):
     Execution timing: Every decoding step
     """
 
-    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True, use_error_term=False, use_position_scaling=False):
+    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True, use_error_term=False, use_position_scaling=False, use_dot_product=False):
         """
         Args:
             shared_probe_layer: SharedProbeLayer instance (shared with KeyNetwork)
@@ -833,12 +905,13 @@ class Module2QueryNetwork(nn.Module):
             use_l2_norm: If True (default), L2 normalize Q and probes
             use_error_term: If True, add error vector term (default: False)
             use_position_scaling: If True, add position-dependent scaling layer
+            use_dot_product: If True, use per-frequency dot product instead of distance (default: False)
         """
         super().__init__()
         self.probe_layer = shared_probe_layer
         self.use_l2_norm = use_l2_norm
         self.use_position_scaling = use_position_scaling
-        self.distance_scorer = DistanceBasedQueryScorer(num_bins, num_freqs, use_l2_norm=use_l2_norm, use_error_term=use_error_term)
+        self.distance_scorer = DistanceBasedQueryScorer(num_bins, num_freqs, use_l2_norm=use_l2_norm, use_error_term=use_error_term, use_dot_product=use_dot_product)
 
         # Position-dependent scaling layer
         if use_position_scaling:
@@ -923,7 +996,7 @@ class Module2Network(nn.Module):
     - K bias: 128
     """
 
-    def __init__(self, num_bins=128, head_dim=128, init_probes=None, use_l2_norm=True, inv_freq=None, use_error_term=False, use_key_temperature=False, use_position_scaling=False):
+    def __init__(self, num_bins=128, head_dim=128, init_probes=None, use_l2_norm=True, inv_freq=None, use_error_term=False, use_key_temperature=False, use_position_scaling=False, use_dot_product=False):
         """
         Args:
             num_bins: Number of bins (default: 128)
@@ -934,6 +1007,7 @@ class Module2Network(nn.Module):
             use_error_term: If True, add error vector term to Q network (default: False)
             use_key_temperature: If True, add learnable temperature for KEY softmax scaling
             use_position_scaling: If True, add position-dependent scaling to both K and Q networks
+            use_dot_product: If True, use per-frequency dot product instead of distance in Q network (default: False)
         """
         super().__init__()
         self.num_bins = num_bins
@@ -941,6 +1015,7 @@ class Module2Network(nn.Module):
         self.use_error_term = use_error_term
         self.use_key_temperature = use_key_temperature
         self.use_position_scaling = use_position_scaling
+        self.use_dot_product = use_dot_product
         num_freqs = head_dim // 2
 
         # Shared probe layer (used by both K and Q networks)
@@ -948,7 +1023,7 @@ class Module2Network(nn.Module):
 
         # Key and Query networks sharing the same probe layer
         self.key_network = Module2KeyNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm, use_key_temperature=use_key_temperature, use_position_scaling=use_position_scaling)
-        self.query_network = Module2QueryNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm, use_error_term=use_error_term, use_position_scaling=use_position_scaling)
+        self.query_network = Module2QueryNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm, use_error_term=use_error_term, use_position_scaling=use_position_scaling, use_dot_product=use_dot_product)
 
     def forward_keys(self, K, reference_angles, key_positions=None):
         """
@@ -1081,7 +1156,10 @@ class Module2Network(nn.Module):
         shared_probe_params = sum(p.numel() for p in self.shared_probe_layer.parameters())
         k_magnitude_params = self.key_network.k_magnitude_weights.numel()
         k_bias_params = self.key_network.k_bias.numel()
-        q_distance_weights_params = self.query_network.distance_scorer.q_weights_raw.numel()
+        if self.query_network.distance_scorer.use_dot_product:
+            q_distance_weights_params = self.query_network.distance_scorer.q_dot_weights_raw.numel()
+        else:
+            q_distance_weights_params = self.query_network.distance_scorer.q_weights_raw.numel()
         q_magnitude_params = self.query_network.distance_scorer.q_magnitude_weights.numel()
         q_bias_params = self.query_network.distance_scorer.q_bias.numel()
 
@@ -1147,7 +1225,7 @@ def load_model_inv_freq(model_path, logger=None):
         return None
 
 
-def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None, use_error_term=False, use_key_temperature=False, use_position_scaling=False):
+def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None, use_error_term=False, use_key_temperature=False, use_position_scaling=False, network_type='shared_probe', use_dot_product=False):
     """
     Factory function to create Module 2 network.
 
@@ -1164,10 +1242,16 @@ def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None, use_
         use_error_term: If True, add error vector term to Q network (default: False)
         use_key_temperature: If True, add learnable temperature for KEY softmax scaling
         use_position_scaling: If True, add position-dependent scaling to K and Q networks
+        network_type: Architecture type - 'shared_probe' (default) or 'von_mises_kernel'
+        use_dot_product: If True, use per-frequency dot product instead of distance in Q network (default: False)
 
     Returns:
-        Module2Network instance
+        Module2Network instance (shared_probe) or Kernel network (von_mises_kernel)
     """
+    # Validate network_type parameter
+    if network_type not in ['shared_probe', 'von_mises_kernel']:
+        raise ValueError(f"Unknown network_type: {network_type}. Must be 'shared_probe' or 'von_mises_kernel'")
+
     model_cfg = config.get('model', {})
 
     # Get num_bins from config
@@ -1178,6 +1262,24 @@ def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None, use_
     num_freqs = model_cfg.get('num_freqs', 64)
     head_dim = num_freqs * 2  # 128 by default
 
+    # Get num_kernels from config (for Von Mises Kernel architecture)
+    num_kernels = model_cfg.get('num_kernels', 3)
+
+    # Branch based on network_type
+    if network_type == 'von_mises_kernel':
+        if not HAS_KERNEL_MODEL:
+            raise ValueError("model_kernel module not available. Cannot create von_mises_kernel network.")
+        # Create Von Mises Kernel network
+        model = create_kernel_model(
+            num_bins=num_bins,
+            num_kernels=num_kernels,
+            num_freqs=num_freqs,
+            head_dim=head_dim,
+            use_l2_norm=use_l2_norm
+        )
+        return model
+
+    # Default: Create SharedProbe network (network_type == 'shared_probe')
     # Load inv_freq if not provided
     if inv_freq is None:
         model_path = model_cfg.get('model_path',
@@ -1192,6 +1294,7 @@ def create_model(config, init_probes=None, use_l2_norm=True, inv_freq=None, use_
         inv_freq=inv_freq,
         use_error_term=use_error_term,
         use_key_temperature=use_key_temperature,
-        use_position_scaling=use_position_scaling
+        use_position_scaling=use_position_scaling,
+        use_dot_product=use_dot_product
     )
     return model
