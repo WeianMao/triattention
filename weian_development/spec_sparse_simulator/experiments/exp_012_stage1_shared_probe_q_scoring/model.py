@@ -75,6 +75,81 @@ def compute_magnitude_features(x, num_freqs, eps=1e-8):
     return magnitude
 
 
+class PositionScalingLayer(nn.Module):
+    """
+    Position-dependent scaling with linear interpolation.
+
+    Uses learnable anchor weights at fixed positions [1000, 10000, 100000].
+    Weights are interpolated linearly for positions between anchors.
+    """
+
+    def __init__(self, anchors=[1000, 10000, 100000]):
+        """
+        Args:
+            anchors: List of anchor positions for interpolation
+        """
+        super().__init__()
+        self.register_buffer('anchor_positions', torch.tensor(anchors, dtype=torch.float32))
+        # Initialize so softplus(x) ≈ 1.0
+        init_value = math.log(math.exp(1.0) - 1)  # ≈ 0.5413
+        self.anchor_weights_raw = nn.Parameter(
+            torch.full((len(anchors),), init_value, dtype=torch.float32)
+        )
+
+    @property
+    def anchor_weights(self):
+        """Apply softplus constraint to ensure non-negative weights."""
+        return F.softplus(self.anchor_weights_raw)
+
+    def _interpolate_weights(self, positions):
+        """
+        Linear interpolation of weights based on positions.
+
+        Args:
+            positions: Tensor of positions
+
+        Returns:
+            Interpolated weights of same shape as positions
+        """
+        positions = positions.float()
+        anchor_w = self.anchor_weights
+
+        # Initialize with first anchor weight for positions < first anchor
+        weights = torch.full_like(positions, anchor_w[0].item())
+
+        # Interpolate between anchors
+        for i in range(len(self.anchor_positions) - 1):
+            left = self.anchor_positions[i]
+            right = self.anchor_positions[i + 1]
+            w_left, w_right = anchor_w[i], anchor_w[i + 1]
+
+            in_interval = (positions >= left) & (positions < right)
+            t = (positions - left) / (right - left)
+            interpolated = w_left * (1 - t) + w_right * t
+            weights = torch.where(in_interval, interpolated, weights)
+
+        # Positions >= last anchor use last weight
+        weights = torch.where(positions >= self.anchor_positions[-1], anchor_w[-1], weights)
+        return weights
+
+    def forward(self, logits, positions):
+        """
+        Apply position-dependent scaling.
+
+        Args:
+            logits: Tensor of logits
+            positions: Tensor of positions (broadcastable to logits)
+
+        Returns:
+            Scaled logits: logits * interpolated_weights
+        """
+        pos_weights = self._interpolate_weights(positions)
+        # Expand pos_weights to match logits shape if needed
+        if pos_weights.dim() < logits.dim():
+            pos_weights = pos_weights.unsqueeze(-1)  # (num_keys,) -> (num_keys, 1)
+        return logits * pos_weights
+
+
 def rotate_half(x):
     """
     Rotate half of the hidden dims: [a, b] -> [-b, a]
@@ -379,7 +454,7 @@ class Module2KeyNetwork(nn.Module):
     Parameters: 128 * 64 (u_weights) + 128 (k_bias) = 8,320
     """
 
-    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True, use_key_temperature=False):
+    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True, use_key_temperature=False, use_position_scaling=False):
         """
         Args:
             shared_probe_layer: SharedProbeLayer instance (shared with QueryNetwork)
@@ -387,6 +462,7 @@ class Module2KeyNetwork(nn.Module):
             num_freqs: Number of frequency components (default: 64)
             use_l2_norm: If True (default), L2 normalize probes before rotation
             use_key_temperature: If True, add learnable temperature for softmax scaling
+            use_position_scaling: If True, add position-dependent scaling layer
         """
         super().__init__()
         self.probe_layer = shared_probe_layer
@@ -395,6 +471,7 @@ class Module2KeyNetwork(nn.Module):
         self.eps = 1e-8
         self.use_l2_norm = use_l2_norm
         self.use_key_temperature = use_key_temperature
+        self.use_position_scaling = use_position_scaling
 
         # K magnitude weights (Stage 2)
         # Shape: (num_bins, num_freqs)
@@ -416,7 +493,11 @@ class Module2KeyNetwork(nn.Module):
                 torch.tensor(math.log(math.e - 1))  # ≈ 0.541, gives softplus ≈ 1.0
             )
 
-    def forward(self, K, reference_angles):
+        # Position-dependent scaling layer
+        if use_position_scaling:
+            self.position_scaling = PositionScalingLayer()
+
+    def forward(self, K, reference_angles, key_positions=None):
         """
         Forward pass: K -> dot product + magnitude term + bias -> logits
 
@@ -426,6 +507,7 @@ class Module2KeyNetwork(nn.Module):
         Args:
             K: Key vectors of shape (num_keys, head_dim)
             reference_angles: Reference angles of shape (num_freqs,)
+            key_positions: Optional tensor of shape (num_keys,) for position scaling
 
         Returns:
             logits: Raw logits of shape (num_keys, num_bins)
@@ -466,6 +548,10 @@ class Module2KeyNetwork(nn.Module):
             temperature = F.softplus(self.temperature_raw)
             logits = logits / temperature
 
+        # Apply position-dependent scaling if enabled
+        if self.use_position_scaling and key_positions is not None:
+            logits = self.position_scaling(logits, key_positions)
+
         if is_single:
             logits = logits.squeeze(0)
 
@@ -496,26 +582,33 @@ class Module2QueryNetwork(nn.Module):
     Execution timing: Every decoding step
     """
 
-    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True):
+    def __init__(self, shared_probe_layer, num_bins=128, num_freqs=64, use_l2_norm=True, use_position_scaling=False):
         """
         Args:
             shared_probe_layer: SharedProbeLayer instance (shared with KeyNetwork)
             num_bins: Number of bins (default: 128)
             num_freqs: Number of frequency components (default: 64)
             use_l2_norm: If True (default), L2 normalize Q and probes
+            use_position_scaling: If True, add position-dependent scaling layer
         """
         super().__init__()
         self.probe_layer = shared_probe_layer
         self.use_l2_norm = use_l2_norm
+        self.use_position_scaling = use_position_scaling
         self.distance_scorer = DistanceBasedQueryScorer(num_bins, num_freqs, use_l2_norm=use_l2_norm)
 
-    def forward(self, Q, reference_angles):
+        # Position-dependent scaling layer
+        if use_position_scaling:
+            self.position_scaling = PositionScalingLayer()
+
+    def forward(self, Q, reference_angles, query_positions=None):
         """
         Forward pass: Q -> distance computation -> linear transform -> logits
 
         Args:
             Q: Query vector(s) of shape (head_dim,) or (num_queries, head_dim)
             reference_angles: Reference angles of shape (num_freqs,)
+            query_positions: Optional tensor of shape () or (num_queries,) for position scaling
 
         Returns:
             logits: Raw logits of shape (num_bins,) or (num_queries, num_bins)
@@ -526,6 +619,10 @@ class Module2QueryNetwork(nn.Module):
 
         # Compute distance-based scores (Q is normalized inside distance_scorer)
         logits = self.distance_scorer(Q, rotated_probes)
+
+        # Apply position-dependent scaling if enabled
+        if self.use_position_scaling and query_positions is not None:
+            logits = self.position_scaling(logits, query_positions)
 
         return logits
 
@@ -551,7 +648,7 @@ class Module2Network(nn.Module):
     - K bias: 128
     """
 
-    def __init__(self, num_bins=128, head_dim=128, init_probes=None, use_l2_norm=True, inv_freq=None, use_key_temperature=False):
+    def __init__(self, num_bins=128, head_dim=128, init_probes=None, use_l2_norm=True, inv_freq=None, use_key_temperature=False, use_position_scaling=False):
         """
         Args:
             num_bins: Number of bins (default: 128)
@@ -560,38 +657,41 @@ class Module2Network(nn.Module):
             use_l2_norm: If True (default), L2 normalize probes and Q vectors
             inv_freq: Optional inverse frequency tensor from model's RoPE.
             use_key_temperature: If True, add learnable temperature for KEY softmax scaling
+            use_position_scaling: If True, add position-dependent scaling to both K and Q networks
         """
         super().__init__()
         self.num_bins = num_bins
         self.use_l2_norm = use_l2_norm
         self.use_key_temperature = use_key_temperature
+        self.use_position_scaling = use_position_scaling
         num_freqs = head_dim // 2
 
         # Shared probe layer (used by both K and Q networks)
         self.shared_probe_layer = SharedProbeLayer(num_bins, head_dim, init_probes=init_probes, inv_freq=inv_freq)
 
         # Key and Query networks sharing the same probe layer
-        self.key_network = Module2KeyNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm, use_key_temperature=use_key_temperature)
-        self.query_network = Module2QueryNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm)
+        self.key_network = Module2KeyNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm, use_key_temperature=use_key_temperature, use_position_scaling=use_position_scaling)
+        self.query_network = Module2QueryNetwork(self.shared_probe_layer, num_bins, num_freqs, use_l2_norm=use_l2_norm, use_position_scaling=use_position_scaling)
 
-    def forward_keys(self, K, reference_angles):
+    def forward_keys(self, K, reference_angles, key_positions=None):
         """
         Process keys: K -> logits -> key_probs (softmax over keys)
 
         Args:
             K: Key vectors of shape (num_keys, head_dim)
             reference_angles: Reference angles of shape (num_freqs,)
+            key_positions: Optional tensor of shape (num_keys,) for position scaling
 
         Returns:
             key_probs: Probability distribution of shape (num_keys, num_bins)
                 Each column sums to 1 (softmax over keys)
         """
-        logits = self.key_network(K, reference_angles)
+        logits = self.key_network(K, reference_angles, key_positions=key_positions)
         # Softmax over keys (dim=0): each column represents a bin's distribution over keys
         key_probs = F.softmax(logits, dim=0)
         return key_probs
 
-    def forward_queries(self, Q, reference_angles, empty_bin_mask=None):
+    def forward_queries(self, Q, reference_angles, empty_bin_mask=None, query_positions=None):
         """
         Process queries: Q -> logits -> bin_probs (softmax over bins)
 
@@ -600,12 +700,13 @@ class Module2Network(nn.Module):
             reference_angles: Reference angles of shape (num_freqs,)
             empty_bin_mask: Optional bool tensor of shape (num_bins,)
                 True for empty bins (will be masked with -inf)
+            query_positions: Optional tensor of shape () or (num_queries,) for position scaling
 
         Returns:
             bin_probs: Probability distribution of shape (num_bins,) or (num_queries, num_bins)
                 Each row sums to 1 (softmax over bins)
         """
-        logits = self.query_network(Q, reference_angles)
+        logits = self.query_network(Q, reference_angles, query_positions=query_positions)
 
         # Mask empty bins with -inf before softmax
         if empty_bin_mask is not None:
@@ -634,6 +735,14 @@ class Module2Network(nn.Module):
         # Temperature parameter (if enabled)
         k_temperature_params = 1 if self.use_key_temperature else 0
 
+        # Position scaling parameters (if enabled): 3 anchor weights per network
+        k_position_scaling_params = 3 if self.use_position_scaling else 0
+        q_position_scaling_params = 3 if self.use_position_scaling else 0
+
+        total = (shared_probe_params + k_magnitude_params + k_bias_params +
+                 q_distance_weights_params + q_magnitude_params + q_bias_params +
+                 k_temperature_params + k_position_scaling_params + q_position_scaling_params)
+
         result = {
             'shared_probes': shared_probe_params,
             'k_magnitude_weights': k_magnitude_params,
@@ -641,10 +750,13 @@ class Module2Network(nn.Module):
             'q_distance_weights': q_distance_weights_params,
             'q_magnitude_weights': q_magnitude_params,
             'q_bias': q_bias_params,
-            'total': shared_probe_params + k_magnitude_params + k_bias_params + q_distance_weights_params + q_magnitude_params + q_bias_params + k_temperature_params
+            'total': total
         }
         if self.use_key_temperature:
             result['k_temperature'] = k_temperature_params
+        if self.use_position_scaling:
+            result['k_position_scaling'] = k_position_scaling_params
+            result['q_position_scaling'] = q_position_scaling_params
         return result
 
 

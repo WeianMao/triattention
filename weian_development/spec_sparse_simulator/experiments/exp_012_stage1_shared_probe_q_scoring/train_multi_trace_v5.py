@@ -689,13 +689,15 @@ def train_on_trace_batched(
         # Batched key forward: all rounds share K[:max_round_start]
         # Each round uses keys up to its own round_start (handled by key_lengths mask)
         K_shared = K[:max_round_start]
+        # Construct key_positions for position scaling (absolute sequence positions)
+        key_positions = torch.arange(max_round_start, device=device)
         need_logits = use_rank_loss or use_discrete_topk_loss
         if need_logits:
             key_probs_batch, key_mask, key_logits_batch = model.forward_keys_batched(
-                K_shared, ref_positions, key_lengths, return_logits=True
+                K_shared, ref_positions, key_lengths, return_logits=True, key_positions=key_positions
             )
         else:
-            key_probs_batch, key_mask = model.forward_keys_batched(K_shared, ref_positions, key_lengths)
+            key_probs_batch, key_mask = model.forward_keys_batched(K_shared, ref_positions, key_lengths, key_positions=key_positions)
             key_logits_batch = None
         # key_probs_batch: (batch_size, max_round_start, num_bins)
 
@@ -715,21 +717,24 @@ def train_on_trace_batched(
         # Each round may have different number of queries, need to pad
         max_num_queries = max(len(r['labels']['query_indices']) for r in batch_rounds)
         Q_batch = torch.zeros(actual_batch_size, max_num_queries, Q.shape[1], device=device)
+        query_positions = torch.zeros(actual_batch_size, max_num_queries, dtype=torch.long, device=device)
         query_lengths = []
 
         for i, round_info in enumerate(batch_rounds):
             query_indices = round_info['labels']['query_indices']
             num_queries = len(query_indices)
             Q_batch[i, :num_queries] = Q[query_indices]
+            # query_indices are the absolute sequence positions
+            query_positions[i, :num_queries] = torch.tensor(query_indices, device=device)
             query_lengths.append(num_queries)
 
         # Batched query forward
         if need_logits:
             bin_probs_batch, query_logits_batch = model.forward_queries_batched(
-                Q_batch, ref_positions, empty_bin_mask_batch, return_logits=True
+                Q_batch, ref_positions, empty_bin_mask_batch, return_logits=True, query_positions=query_positions
             )
         else:
-            bin_probs_batch = model.forward_queries_batched(Q_batch, ref_positions, empty_bin_mask_batch)
+            bin_probs_batch = model.forward_queries_batched(Q_batch, ref_positions, empty_bin_mask_batch, query_positions=query_positions)
             query_logits_batch = None
         # bin_probs_batch: (batch_size, max_num_queries, num_bins)
 
@@ -1326,7 +1331,8 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
           lr_scheduler_type='none', use_error_term=False, focal_gamma=0.0,
           use_rank_loss=False, k_prime=45, rank_loss_strategy='B',
           use_discrete_topk_loss=False, topk_threshold=50,
-          use_weighted_ce_loss=False, use_key_temperature=False):
+          use_weighted_ce_loss=False, use_key_temperature=False,
+          use_position_scaling=False):
     """
     Main training loop with optimizations.
 
@@ -1429,7 +1435,7 @@ def train(config, logger, exp_name, use_l2_norm=False, invert_to_origin=False, w
         logger.info("=" * 60)
 
     # Create model
-    model = create_model(config, init_probes=init_probes, use_l2_norm=use_l2_norm, use_error_term=use_error_term, use_key_temperature=use_key_temperature)
+    model = create_model(config, init_probes=init_probes, use_l2_norm=use_l2_norm, use_error_term=use_error_term, use_key_temperature=use_key_temperature, use_position_scaling=use_position_scaling)
     model = model.to(device)
 
     # Save initial parameters for regularization
@@ -1768,6 +1774,11 @@ def main():
         action='store_true',
         help='Disable learnable temperature for KEY softmax scaling (default: enabled)'
     )
+    parser.add_argument(
+        '--use-position-scaling',
+        action='store_true',
+        help='Enable position-dependent scaling for K and Q networks (default: off)'
+    )
     args = parser.parse_args()
 
     exp_dir = Path(__file__).parent
@@ -1820,7 +1831,8 @@ def main():
             use_discrete_topk_loss=args.discrete_topk_loss,
             topk_threshold=args.topk_threshold,
             use_weighted_ce_loss=args.weighted_ce_loss,
-            use_key_temperature=not args.no_key_temperature
+            use_key_temperature=not args.no_key_temperature,
+            use_position_scaling=args.use_position_scaling
         )
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:
