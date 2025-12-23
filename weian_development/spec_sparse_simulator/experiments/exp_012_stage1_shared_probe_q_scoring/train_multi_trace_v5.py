@@ -1775,9 +1775,9 @@ def main():
         help='Disable learnable temperature for KEY softmax scaling (default: enabled)'
     )
     parser.add_argument(
-        '--use-position-scaling',
+        '--no-position-scaling',
         action='store_true',
-        help='Enable position-dependent scaling for K and Q networks (default: off)'
+        help='Disable position-dependent scaling for K and Q networks (default: enabled)'
     )
     args = parser.parse_args()
 
@@ -1811,6 +1811,7 @@ def main():
     logger.info(f"Discrete top-k loss: {args.discrete_topk_loss}, topk_threshold: {args.topk_threshold}")
     logger.info(f"Weighted CE loss: {args.weighted_ce_loss}")
     logger.info(f"Use KEY temperature: {not args.no_key_temperature}")
+    logger.info(f"Use position scaling: {not args.no_position_scaling}")
 
     try:
         final_checkpoint = train(
@@ -1832,7 +1833,7 @@ def main():
             topk_threshold=args.topk_threshold,
             use_weighted_ce_loss=args.weighted_ce_loss,
             use_key_temperature=not args.no_key_temperature,
-            use_position_scaling=args.use_position_scaling
+            use_position_scaling=not args.no_position_scaling
         )
         logger.info(f"Training successful. Final checkpoint: {final_checkpoint}")
     except Exception as e:
