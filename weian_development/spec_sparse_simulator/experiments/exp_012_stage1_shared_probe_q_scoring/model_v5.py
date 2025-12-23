@@ -983,9 +983,7 @@ class Module2Network(nn.Module):
             bin_probs: Probability distribution of shape (num_bins,) or (num_queries, num_bins)
                 Each row sums to 1 (softmax over bins)
         """
-        # L2 normalize Q to unit norm as the first step
-        Q = l2_normalize(Q)
-
+        # L2 normalization is handled inside DistanceBasedQueryScorer based on use_l2_norm
         logits = self.query_network(Q, reference_angles, query_positions=query_positions)
 
         # Mask empty bins with -inf before softmax
@@ -1059,9 +1057,7 @@ class Module2Network(nn.Module):
                        Each row sums to 1 (softmax over bins)
             query_logits: (optional) Raw logits if return_logits=True
         """
-        # L2 normalize Q to unit norm as the first step
-        Q_batch = l2_normalize(Q_batch)
-
+        # L2 normalization is handled inside DistanceBasedQueryScorer based on use_l2_norm
         # Get logits: (batch_size, num_queries, num_bins)
         logits = self.query_network.forward_batched(Q_batch, ref_positions, query_positions=query_positions)
 

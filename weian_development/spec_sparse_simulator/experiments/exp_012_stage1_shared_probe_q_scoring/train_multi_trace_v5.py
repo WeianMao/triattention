@@ -1798,7 +1798,7 @@ def main():
     logger = setup_logging(config, args.exp_name)
 
     # Fixed settings based on experiments
-    use_l2_norm = False
+    use_l2_norm = True
     invert_to_origin = False
     logger.info(f"Using fixed settings: use_l2_norm={use_l2_norm}, invert_to_origin={invert_to_origin}")
     logger.info(f"Weight decay: {args.weight_decay}")
