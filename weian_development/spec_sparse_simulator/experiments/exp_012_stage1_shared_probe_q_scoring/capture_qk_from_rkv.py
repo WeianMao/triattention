@@ -2,6 +2,75 @@
 
 Adapted from weian_development/attention_qk_analysis/capture_qk_distributed.py
 for use with R-KV project outputs and DeepSeek-R1-Distill-Qwen-7B model.
+
+Usage (requires `rkv` conda environment):
+=========================================
+
+    # Activate environment with latex2sympy2 dependency
+    conda activate rkv
+
+    # Capture AIME24 QK traces (16 traces, auto GPU, reserve 2 GPUs)
+    python capture_qk_from_rkv.py \\
+        ../../../../R-KV/outputs/sample8_fullkv_aime24_official_qwen/merged/merged.jsonl \\
+        ../../../../outputs/deepseek_r1_distill_qwen_7b/qk_bf16_traces_aime24 \\
+        --gpus auto --reserve-gpus 2 --dataset-name aime24
+
+    # Capture AIME25 QK traces
+    python capture_qk_from_rkv.py \\
+        ../../../../R-KV/outputs/sample8_fullkv_aime25_official_qwen/merged/merged.jsonl \\
+        ../../../../outputs/deepseek_r1_distill_qwen_7b/qk_bf16_traces_aime25 \\
+        --gpus auto --reserve-gpus 2 --dataset-name aime25
+
+Input:
+------
+- R-KV merged JSONL file containing inference outputs with fields:
+  - prompt, output, answer, sample_idx, draw_idx, prefill_tokens, total_tokens
+
+Output Structure:
+-----------------
+    output_dir/
+    ├── sample0001_draw03/
+    │   ├── qk.pt          # Q/K tensors, mmap-compatible
+    │   └── metadata.json  # Trace metadata
+    ├── sample0007_draw05/
+    │   ├── qk.pt
+    │   └── metadata.json
+    └── ...
+
+Output Format:
+--------------
+- qk.pt: {"q": Tensor, "k": Tensor}
+  - Shape: (num_layers=28, num_heads=28, seq_len, head_dim=128)
+  - Dtype: bfloat16
+  - Q/K are captured AFTER RoPE application
+  - K is expanded via GQA (4 KV heads -> 28 attention heads)
+
+- metadata.json:
+  - sample_idx, draw_idx: Trace identifiers
+  - question, answer: Problem text and ground truth
+  - token_count: Total tokens (prompt + output)
+  - prompt_tokens: Exact prompt token count from R-KV inference
+  - sequence_length, num_layers, num_heads, head_dim, precision
+
+Loading Cached Data:
+--------------------
+    import torch
+
+    # Load with mmap for memory efficiency
+    qk = torch.load("qk.pt", mmap=True)
+    Q = qk["q"][layer, head]  # Shape: (seq_len, 128)
+    K = qk["k"][layer, head]  # Shape: (seq_len, 128)
+
+    # Load metadata
+    import json
+    meta = json.load(open("metadata.json"))
+    prompt_end = meta["prompt_tokens"]  # Index where output starts
+
+Trace Selection:
+----------------
+- Filters to correct answers only (using R-KV's extract_answer + math_equal)
+- Maximizes question diversity: round-robin selection across questions
+- Default: 16 traces per dataset
 """
 from __future__ import annotations
 
