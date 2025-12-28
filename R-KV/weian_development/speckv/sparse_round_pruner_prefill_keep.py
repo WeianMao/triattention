@@ -43,6 +43,8 @@ class SparsePruningConfig:
     sparse_similarity_mix_lambda: float = 0.1
     # Rank + Similarity combination: normalize and invert rank direction for proper combination
     use_rank_similarity_combination: bool = False
+    # Alignment: include prefill tokens in budget calculation (aligns with R-KV behavior)
+    include_prefill_in_budget: bool = False
 
 
 class SparseRoundPruner:
@@ -152,6 +154,10 @@ class SparseRoundPruner:
 
     @property
     def _dynamic_cache_size(self) -> int:
+        if self.config.include_prefill_in_budget:
+            # Align with R-KV: include prefill tokens in cache size calculation
+            return len(self.cache_positions)
+        # Original behavior: exclude prefill tokens from cache size
         return max(0, len(self.cache_positions) - self.prefix_length)
 
     def attach_initial_cache(

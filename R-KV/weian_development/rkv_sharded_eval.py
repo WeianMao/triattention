@@ -335,6 +335,23 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
         help="Optional cap on number of dataset examples for quick smoke tests.",
     )
+    # Alignment args for fair R-KV comparison
+    parser.add_argument(
+        "--include_prefill_in_budget",
+        "--include-prefill-in-budget",
+        dest="include_prefill_in_budget",
+        type=str2bool,
+        default=False,
+        help="Include prefill tokens in budget calculation (aligns with R-KV behavior).",
+    )
+    parser.add_argument(
+        "--rkv_style_compression",
+        "--rkv-style-compression",
+        dest="rkv_style_compression",
+        type=str2bool,
+        default=False,
+        help="Use R-KV style attention-layer compression instead of generate wrapper.",
+    )
     return parser.parse_args()
 
 
@@ -506,23 +523,44 @@ def main(args: argparse.Namespace) -> None:
             "dtype": normalize_dtype_name(dtype),
             "kv_budget": int(args.kv_budget),
         }
-        apply_speckv_generate_patch(
-            model,
-            stats_path=stats_path,
-            model_path=Path(args.model_path),
-            kv_budget=int(args.kv_budget),
-            round_window=round_window,
-            offset_max_length=args.sparse_offset_max_length,
-            score_aggregation=args.sparse_score_aggregation,
-            sparse_seed=args.sparse_seed,
-            head_limit=args.sparse_head_limit,
-            metadata_expectations=metadata_expectations,
-            normalize_scores=args.sparse_normalize_scores,
-            use_rank_aggregation=args.use_rank_aggregation,
-            sparse_use_similarity=args.sparse_use_similarity,
-            sparse_similarity_mix_lambda=args.sparse_similarity_mix_lambda,
-            use_rank_similarity_combination=args.use_rank_similarity_combination,
-        )
+        if args.rkv_style_compression:
+            # Use R-KV style attention-layer compression
+            from weian_development.speckv.speckv_rkv_style import apply_speckv_rkv_style_patch
+            apply_speckv_rkv_style_patch(
+                model,
+                stats_path=stats_path,
+                model_path=Path(args.model_path),
+                kv_budget=int(args.kv_budget),
+                window_size=round_window,
+                offset_max_length=args.sparse_offset_max_length,
+                score_aggregation=args.sparse_score_aggregation,
+                sparse_seed=args.sparse_seed,
+                head_limit=args.sparse_head_limit,
+                metadata_expectations=metadata_expectations,
+                normalize_scores=args.sparse_normalize_scores,
+                use_rank_aggregation=args.use_rank_aggregation,
+                include_prefill_in_budget=args.include_prefill_in_budget,
+            )
+        else:
+            # Use original generate wrapper implementation
+            apply_speckv_generate_patch(
+                model,
+                stats_path=stats_path,
+                model_path=Path(args.model_path),
+                kv_budget=int(args.kv_budget),
+                round_window=round_window,
+                offset_max_length=args.sparse_offset_max_length,
+                score_aggregation=args.sparse_score_aggregation,
+                sparse_seed=args.sparse_seed,
+                head_limit=args.sparse_head_limit,
+                metadata_expectations=metadata_expectations,
+                normalize_scores=args.sparse_normalize_scores,
+                use_rank_aggregation=args.use_rank_aggregation,
+                sparse_use_similarity=args.sparse_use_similarity,
+                sparse_similarity_mix_lambda=args.sparse_similarity_mix_lambda,
+                use_rank_similarity_combination=args.use_rank_similarity_combination,
+                include_prefill_in_budget=args.include_prefill_in_budget,
+            )
 
     for run_id in run_ids:
         artifacts = run_artifacts(output_root, args.shard_id, run_id)

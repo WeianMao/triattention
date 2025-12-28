@@ -121,6 +121,32 @@ def parse_args() -> argparse.Namespace:
         help="Override runner arg: disable rank+similarity combination.",
     )
     parser.set_defaults(use_rank_similarity_combination=None)
+    parser.add_argument(
+        "--include-prefill-in-budget",
+        dest="include_prefill_in_budget",
+        action="store_true",
+        help="Override runner arg: include prefill tokens in budget calculation (aligns with R-KV behavior).",
+    )
+    parser.add_argument(
+        "--no-include-prefill-in-budget",
+        dest="include_prefill_in_budget",
+        action="store_false",
+        help="Override runner arg: exclude prefill tokens from budget calculation.",
+    )
+    parser.set_defaults(include_prefill_in_budget=None)
+    parser.add_argument(
+        "--rkv-style-compression",
+        dest="rkv_style_compression",
+        action="store_true",
+        help="Override runner arg: use R-KV style compression instead of SpeckV default.",
+    )
+    parser.add_argument(
+        "--no-rkv-style-compression",
+        dest="rkv_style_compression",
+        action="store_false",
+        help="Override runner arg: disable R-KV style compression.",
+    )
+    parser.set_defaults(rkv_style_compression=None)
     return parser.parse_args()
 
 
@@ -489,6 +515,10 @@ def main() -> None:
         runner_args["sparse_similarity_mix_lambda"] = args.sparse_similarity_mix_lambda
     if args.use_rank_similarity_combination is not None:
         runner_args["use_rank_similarity_combination"] = args.use_rank_similarity_combination
+    if args.include_prefill_in_budget is not None:
+        runner_args["include_prefill_in_budget"] = args.include_prefill_in_budget
+    if args.rkv_style_compression is not None:
+        runner_args["rkv_style_compression"] = args.rkv_style_compression
     base_env = prepare_environment(experiment.get("env", {}))
     base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 
