@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Sharded AIME24 FullKV on DeepSeek-R1-Distill-Qwen-7B (flash_attn2 + bfloat16), 8 draws, seed=888.
+# Sharded AIME24 FullKV on DeepSeek-R1-0528-Qwen3-8B (flash_attn2 + bfloat16), 8 draws, seed=888.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../../../.." && pwd)"
@@ -12,5 +12,5 @@ export HF_HOME="${HF_HOME:-/data/rbg/users/weian/.cache/huggingface}"
 export PIP_CACHE_DIR="${PIP_CACHE_DIR:-/data/rbg/users/weian/.cache/pip}"
 
 python3 "${PROJECT_ROOT}/R-KV/weian_development/rkv_sharded_dispatch.py" \
-  --config "${PROJECT_ROOT}/R-KV/weian_script/configs/aime_sampled8_fullkv_aime24_qwen.yaml" \
+  --config "${PROJECT_ROOT}/R-KV/weian_script/configs/aime_sampled8_qwen3_fullkv_aime24.yaml" \
   "$@"

@@ -207,8 +207,8 @@ elif "qwen" in args.model_path.lower():
 #### FullKV (2个)
 | 文件 | 数据集 | 状态 |
 |------|--------|------|
-| `fullkv/aime24/run_fullkv_aime24_qwen.sh` | AIME24 | ⬜ 待修改 |
-| `fullkv/aime25/run_fullkv_aime25_qwen.sh` | AIME25 | ⬜ 待修改 |
+| `fullkv/aime24/run_fullkv_aime24_qwen.sh` | AIME24 | ✅ 已修改 |
+| `fullkv/aime25/run_fullkv_aime25_qwen.sh` | AIME25 | ✅ 已修改 |
 
 #### R-KV (2个)
 | 文件 | 数据集 | 状态 |
@@ -232,8 +232,8 @@ elif "qwen" in args.model_path.lower():
 
 | 源配置文件 | 目标配置文件 | 状态 |
 |-----------|-------------|------|
-| `aime_sampled8_fullkv_aime24_qwen.yaml` | `aime_sampled8_qwen3_fullkv_aime24.yaml` | ⬜ 待创建 |
-| `aime_sampled8_fullkv_aime25_qwen.yaml` | `aime_sampled8_qwen3_fullkv_aime25.yaml` | ⬜ 待创建 |
+| `aime_sampled8_fullkv_aime24_qwen.yaml` | `aime_sampled8_qwen3_fullkv_aime24.yaml` | ✅ 已创建 |
+| `aime_sampled8_fullkv_aime25_qwen.yaml` | `aime_sampled8_qwen3_fullkv_aime25.yaml` | ✅ 已创建 |
 | `aime_sampled8_rkv_aime24_qwen.yaml` | `aime_sampled8_qwen3_rkv_aime24.yaml` | ⬜ 待创建 |
 | `aime_sampled8_rkv_aime25_qwen.yaml` | `aime_sampled8_qwen3_rkv_aime25.yaml` | ⬜ 待创建 |
 | `aime_sampled8_speckv_aime24_qwen_norm.yaml` | `aime_sampled8_qwen3_speckv_aime24_norm.yaml` | ⬜ 待创建 |
@@ -450,12 +450,12 @@ Refs: MIGRATION_PLAN.md
 
 | ID | 任务 | 负责人 | 状态 | 完成日期 | 备注 |
 |----|------|--------|------|----------|------|
-| P2.1 | 创建 YAML: aime_sampled8_qwen3_fullkv_aime24.yaml | | ⬜ 未开始 | | |
-| P2.2 | 创建 YAML: aime_sampled8_qwen3_fullkv_aime25.yaml | | ⬜ 未开始 | | |
-| P2.3 | 修改脚本: fullkv/aime24/run_fullkv_aime24_qwen.sh → qwen3 | | ⬜ 未开始 | | |
-| P2.4 | 修改脚本: fullkv/aime25/run_fullkv_aime25_qwen.sh → qwen3 | | ⬜ 未开始 | | |
-| P2.5 | dry-run 测试 FullKV AIME24 | | ⬜ 未开始 | | |
-| P2.6 | dry-run 测试 FullKV AIME25 | | ⬜ 未开始 | | |
+| P2.1 | 创建 YAML: aime_sampled8_qwen3_fullkv_aime24.yaml | Claude | ✅ 已完成 | 2025-12-28 | |
+| P2.2 | 创建 YAML: aime_sampled8_qwen3_fullkv_aime25.yaml | Claude | ✅ 已完成 | 2025-12-28 | |
+| P2.3 | 修改脚本: fullkv/aime24/run_fullkv_aime24_qwen.sh → qwen3 | Claude | ✅ 已完成 | 2025-12-28 | |
+| P2.4 | 修改脚本: fullkv/aime25/run_fullkv_aime25_qwen.sh → qwen3 | Claude | ✅ 已完成 | 2025-12-28 | |
+| P2.5 | dry-run 测试 FullKV AIME24 | Claude | ✅ 已完成 | 2025-12-28 | 使用 rkv1 环境 |
+| P2.6 | dry-run 测试 FullKV AIME25 | Claude | ✅ 已完成 | 2025-12-28 | 使用 rkv1 环境 |
 
 ### 阶段 3: R-KV 配置与脚本
 
@@ -529,6 +529,8 @@ Refs: MIGRATION_PLAN.md
 | 2025-12-28 | Claude | 创建初始文档，完成分析和规划 |
 | 2025-12-28 | Claude | 创建 rkv1 环境 (克隆自 rkv)，升级 transformers 4.48.1 → 4.57.3 |
 | 2025-12-28 | Claude | 验证 rkv1 环境支持 Qwen2/Qwen3，更新 CLAUDE.md |
+| 2025-12-28 | Claude | 测试 Qwen3 模型加载和推理，验证环境可用 |
+| 2025-12-28 | Claude | 完成阶段 2: 创建 FullKV YAML 配置和脚本，dry-run 测试通过 |
 | | | |
 
 ---

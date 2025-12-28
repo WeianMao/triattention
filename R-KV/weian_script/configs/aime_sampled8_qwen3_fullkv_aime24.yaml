@@ -1,0 +1,28 @@
+experiment:
+  name: aime_sampled8_qwen3_fullkv_aime24
+  conda_env: rkv1
+  runner_path: R-KV/weian_development/rkv_sharded_runner.py
+  log_dir: R-KV/logs/aime_sampled8_qwen3/fullkv/aime24
+  method_output_dir: R-KV/outputs/aime_sampled8_qwen3/fullkv/aime24
+  merged_dir_name: merged
+  gpus: auto
+  auto_gpu_fallback: [0, 1, 2, 3, 4, 5, 6, 7]
+  num_shards: 8
+  gpu_memory_threshold: 5000
+  env: {}
+  runner_args:
+    output_dir: R-KV/outputs/aime_sampled8_qwen3/fullkv/aime24/shards
+    dataset_path: R-KV/HuggingFace/data/aime24.jsonl
+    model_path: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B
+    max_length: 32768
+    eval_batch_size: 1
+    seed: 888
+    method: fullkv
+    kv_budget: null
+    attn_implementation: flash_attention_2
+    load_dtype: bfloat16
+    reset_cache_each_batch: false
+    fp32_topk: false
+    num_samples: 8
+    temperature: 0.6
+    top_p: 0.95
