@@ -103,7 +103,7 @@ from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
 
 ### 3.4 环境升级方案
 
-**方案 A: 原地升级 rkv 环境** (推荐)
+**方案 A: 原地升级 rkv 环境**
 ```bash
 conda activate rkv
 pip install transformers>=4.51.0
@@ -111,16 +111,34 @@ pip install transformers>=4.51.0
 - 优点: 简单直接
 - 风险: 可能影响 Qwen2.5 实验的复现性
 
-**方案 B: 创建新环境 rkv_qwen3**
+**方案 B: 克隆 rkv 环境为 rkv1** ✅ 已采用
 ```bash
-conda create -n rkv_qwen3 python=3.10
-conda activate rkv_qwen3
-pip install transformers>=4.51.0 torch flash-attn ...
+conda create --name rkv1 --clone rkv
+conda activate rkv1
+pip install transformers>=4.51.0
 ```
-- 优点: 完全隔离
+- 优点: 完全隔离，不影响原有 rkv 环境
 - 缺点: 维护两套环境
 
-**当前决定**: (待确定)
+**当前决定**: ✅ 已采用方案 B
+
+### 3.5 环境配置结果 (2025-12-28)
+
+| 环境 | 用途 | transformers 版本 | Qwen2 支持 | Qwen3 支持 |
+|------|------|-------------------|------------|------------|
+| `rkv` | Qwen2.5 实验 (不修改) | 4.48.1 | ✅ | ❌ |
+| `rkv1` | Qwen3 实验 | 4.57.3 | ✅ | ✅ |
+
+**验证结果**:
+```bash
+# rkv1 环境验证 (2025-12-28)
+conda activate rkv1
+python -c "from transformers.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM; print('✓ Qwen2 OK')"
+python -c "from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM; print('✓ Qwen3 OK')"
+# 输出: ✓ Qwen2 OK, ✓ Qwen3 OK
+```
+
+**环境记录位置**: 已更新至项目根目录 `CLAUDE.md`
 
 ---
 
@@ -365,6 +383,7 @@ logs/aime_sampled8_qwen3/{method}/{dataset}/[variant/]
 ```yaml
 experiment:
   name: aime_sampled8_qwen3_{method}_{dataset}  # 添加 qwen3 标识
+  conda_env: rkv1                                # 使用 rkv1 环境 (非 rkv)
   log_dir: R-KV/logs/aime_sampled8_qwen3/...    # 路径包含 qwen3
   method_output_dir: R-KV/outputs/aime_sampled8_qwen3/...
   runner_args:
@@ -372,6 +391,8 @@ experiment:
     output_dir: R-KV/outputs/aime_sampled8_qwen3/.../shards
     sparse_stats_path: R-KV/outputs/repository/sample8_fullkv_{dataset}_official_qwen3/stats/...  # SpeckV only
 ```
+
+**重要**: Qwen3 实验必须使用 `conda_env: rkv1`，不能使用 `rkv`
 
 ### 8.3 测试规范
 
@@ -409,20 +430,21 @@ Refs: MIGRATION_PLAN.md
 
 | ID | 任务 | 负责人 | 状态 | 完成日期 | 备注 |
 |----|------|--------|------|----------|------|
-| P0.1 | 复制 aime_sampled8 目录到 aime_sampled8_qwen3 | - | ✅ 已完成 | 2025-12-28 | |
-| P0.2 | 创建 MIGRATION_PLAN.md 文档 | - | ✅ 已完成 | 2025-12-28 | |
-| P0.3 | 确定环境升级方案 | | ⬜ 待确定 | | 方案 A/B |
+| P0.1 | 复制 aime_sampled8 目录到 aime_sampled8_qwen3 | Claude | ✅ 已完成 | 2025-12-28 | |
+| P0.2 | 创建 MIGRATION_PLAN.md 文档 | Claude | ✅ 已完成 | 2025-12-28 | |
+| P0.3 | 确定环境升级方案 | Claude | ✅ 已完成 | 2025-12-28 | 采用方案 B: 克隆为 rkv1 |
 | P0.4 | 确定 SpeckV 处理方案 | | ⬜ 待确定 | | 先跑 FullKV |
 
 ### 阶段 1: 环境准备
 
 | ID | 任务 | 负责人 | 状态 | 完成日期 | 备注 |
 |----|------|--------|------|----------|------|
-| P1.1 | 备份当前 rkv 环境配置 | | ⬜ 未开始 | | `pip freeze > requirements_backup.txt` |
-| P1.2 | 升级 transformers 到 ≥4.51.0 | | ⬜ 未开始 | | |
-| P1.3 | 验证 Qwen2 导入正常 | | ⬜ 未开始 | | |
-| P1.4 | 验证 Qwen3 导入正常 | | ⬜ 未开始 | | |
-| P1.5 | 运行 Qwen2.5 FullKV 回归测试 | | ⬜ 未开始 | | 确保不影响旧实验 |
+| P1.1 | 克隆 rkv 环境为 rkv1 | Claude | ✅ 已完成 | 2025-12-28 | `conda create --name rkv1 --clone rkv` |
+| P1.2 | 升级 rkv1 的 transformers 到 ≥4.51.0 | Claude | ✅ 已完成 | 2025-12-28 | 4.48.1 → 4.57.3 |
+| P1.3 | 验证 Qwen2 导入正常 | Claude | ✅ 已完成 | 2025-12-28 | rkv1 环境测试通过 |
+| P1.4 | 验证 Qwen3 导入正常 | Claude | ✅ 已完成 | 2025-12-28 | rkv1 环境测试通过 |
+| P1.5 | 更新 CLAUDE.md 记录新环境 | Claude | ✅ 已完成 | 2025-12-28 | |
+| P1.6 | 运行 Qwen2.5 FullKV 回归测试 | | ⬜ 未开始 | | 可选：确保 rkv 环境不受影响 |
 
 ### 阶段 2: FullKV 配置与脚本
 
@@ -505,7 +527,8 @@ Refs: MIGRATION_PLAN.md
 | 日期 | 修改人 | 修改内容 |
 |------|--------|----------|
 | 2025-12-28 | Claude | 创建初始文档，完成分析和规划 |
-| | | |
+| 2025-12-28 | Claude | 创建 rkv1 环境 (克隆自 rkv)，升级 transformers 4.48.1 → 4.57.3 |
+| 2025-12-28 | Claude | 验证 rkv1 环境支持 Qwen2/Qwen3，更新 CLAUDE.md |
 | | | |
 
 ---

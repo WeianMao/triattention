@@ -33,7 +33,8 @@ python examples/example_analyze_online.py --output_dir ./online-dpsk/ --max_qid 
 
 - **`dc`**: Default environment for DeepConf development
 - **`lazy_evict`**: LazyEviction subproject (`conda activate lazy_evict` before running LazyEviction scripts)
-- **`rkv`**: R-KV compression experiments (Python 3.10, torch 2.3.1+cu121, flash-attn 2.5.8)
+- **`rkv`**: R-KV compression experiments for Qwen2.5 models (Python 3.10, torch 2.3.1+cu121, flash-attn 2.5.8, transformers 4.48.1)
+- **`rkv1`**: R-KV compression experiments for Qwen3 models (cloned from `rkv`, transformers 4.57.3). Created 2025-12-28 for `aime_sampled8_qwen3` experiments. See `R-KV/weian_script/aime_sampled8_qwen3/MIGRATION_PLAN.md` for details.
 
 ## Architecture
 
