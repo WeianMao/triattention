@@ -177,12 +177,10 @@ class SpeckVRKVStyle:
         key_positions = torch.tensor(self.cache_positions[:kv_cache_len], device=self.config.device, dtype=torch.long)
         scores = self._compute_scores(key_states, key_positions, layer_idx)
 
-        # Compress to (budget - 2*window_size) so next compression triggers after ~2*window_size steps
+        # Keep budget - window_size tokens + last window_size tokens
         # Clamp window_size to not exceed cache length
         effective_window = min(self.window_size, kv_cache_len)
-        compress_interval = effective_window * 2  # Every 2*window_size tokens (64 if window=32)
-        target_size = self.budget - compress_interval
-        keep_count = target_size - effective_window
+        keep_count = self.budget - effective_window
 
         # Handle edge case where window_size >= budget
         if keep_count <= 0:
@@ -479,7 +477,7 @@ def apply_speckv_rkv_style_patch(
         if not comp.config.include_prefill_in_budget:
             effective_size = max(0, seq_len - comp.prefix_length)
 
-        if effective_size > comp.budget:
+        if effective_size >= comp.budget:
             # Compress each layer
             new_pkv = []
             for layer_idx, (k, v) in enumerate(pkv_tuple):
