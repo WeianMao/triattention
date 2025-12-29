@@ -39,7 +39,6 @@ class SpeckVRKVStyleConfig:
     device: torch.device
     dtype: torch.dtype
     budget: int
-    window_size: int = 8  # For R-KV compatibility: last N tokens always retained
     offset_max_length: int = 65536
     score_aggregation: str = "mean"
     seed: int | None = None
@@ -64,7 +63,6 @@ class SpeckVRKVStyle:
     def __init__(self, config: SpeckVRKVStyleConfig) -> None:
         self.config = config
         self.budget = config.budget
-        self.window_size = config.window_size
 
         # Load model config
         model_config = AutoConfig.from_pretrained(
@@ -144,90 +142,81 @@ class SpeckVRKVStyle:
                 self.generator = torch.Generator()
             self.generator.manual_seed(int(config.seed))
 
-    def update_kv(
+    def compute_keep_indices(
         self,
-        key_states: torch.Tensor,
-        query_states: torch.Tensor,
-        value_states: torch.Tensor,
-        layer_idx: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        pkv_tuple: Tuple[Tuple[torch.Tensor, torch.Tensor], ...],
+    ) -> torch.Tensor:
         """
-        R-KV style update: compress KV cache based on frequency scores.
+        Compute keep_indices by aggregating scores from all layers.
 
-        Note: Position tracking is handled by the forward patch, not here.
+        Each layer's sampled heads contribute to the final score.
+        This matches the original SpeckV behavior where all sampled heads
+        across all layers are used to compute a single aggregated score.
 
         Args:
-            key_states: [batch, num_heads, seq_len, head_dim]
-            query_states: [batch, num_heads, seq_len, head_dim] (unused, for API compat)
-            value_states: [batch, num_heads, seq_len, head_dim]
-            layer_idx: Current layer index
+            pkv_tuple: Tuple of (key, value) for each layer
 
         Returns:
-            Compressed (key_states, value_states)
+            keep_indices: Indices of tokens to keep (sorted)
         """
-        kv_cache_len = key_states.shape[-2]
+        if not pkv_tuple:
+            return torch.arange(0, device=self.config.device)
 
-        # Ensure cache_positions is synced with key_states length
-        if len(self.cache_positions) < kv_cache_len:
-            # Add missing positions
-            missing = kv_cache_len - len(self.cache_positions)
-            new_positions = list(range(self.absolute_position, self.absolute_position + missing))
-            self.cache_positions.extend(new_positions)
-            self.absolute_position += missing
+        kv_cache_len = pkv_tuple[0][0].shape[-2]
+        key_positions = torch.tensor(
+            self.cache_positions[:kv_cache_len],
+            device=self.config.device,
+            dtype=torch.long
+        )
 
-        # Compute frequency-based scores for all positions
-        key_positions = torch.tensor(self.cache_positions[:kv_cache_len], device=self.config.device, dtype=torch.long)
-        scores = self._compute_scores(key_states, key_positions, layer_idx)
+        # Nothing to compress
+        if kv_cache_len <= self.budget:
+            return torch.arange(kv_cache_len, device=self.config.device)
 
-        # Keep budget - window_size tokens + last window_size tokens
-        # Clamp window_size to not exceed cache length
-        effective_window = min(self.window_size, kv_cache_len)
-        keep_count = self.budget - effective_window
+        # Collect scores from all layers' sampled heads
+        all_head_scores: List[torch.Tensor] = []
+        for layer_idx, (key_states, _) in enumerate(pkv_tuple):
+            layer_scores = self._compute_layer_head_scores(key_states, key_positions, layer_idx)
+            if layer_scores is not None:
+                all_head_scores.append(layer_scores)
 
-        # Handle edge case where window_size >= budget
-        if keep_count <= 0:
-            # Only keep the recent window
-            recent_start = kv_cache_len - effective_window
-            recent_indices = torch.arange(recent_start, kv_cache_len, device=self.config.device)
-            key_states = key_states.index_select(2, recent_indices)
-            value_states = value_states.index_select(2, recent_indices)
-            if layer_idx == 0:
-                self.cache_positions = [self.cache_positions[i] for i in recent_indices.tolist()]
-            return key_states, value_states
+        if not all_head_scores:
+            # No sampled heads, return first budget indices
+            return torch.arange(self.budget, device=self.config.device)
 
-        # Split into past (can be pruned) and recent (always kept)
-        past_len = kv_cache_len - effective_window
-        past_scores = scores[:past_len] if past_len > 0 else scores[:0]
+        # Stack all head scores and aggregate (same as original SpeckV)
+        head_matrix = torch.cat(all_head_scores, dim=0)  # [total_sampled_heads, seq_len]
 
-        if past_scores.numel() <= keep_count:
-            return key_states, value_states
+        if self.use_rank_aggregation:
+            ranks = torch.argsort(torch.argsort(head_matrix, dim=1, descending=True), dim=1)
+            head_matrix = ranks.float()
+            combined = -head_matrix.min(dim=0).values  # Negate for topk
+        elif self.normalize_scores:
+            mean = head_matrix.mean(dim=1, keepdim=True)
+            std = head_matrix.std(dim=1, unbiased=False, keepdim=True).clamp_min(1e-6)
+            head_matrix = (head_matrix - mean) / std
+            combined = head_matrix.max(dim=0).values
+        else:
+            combined = head_matrix.max(dim=0).values
 
-        # Select top-k indices from past tokens
-        topk_indices = torch.topk(past_scores, k=keep_count, largest=True).indices
-        topk_indices_sorted = torch.sort(topk_indices).values
+        # Select top-k indices and sort to maintain order
+        topk_indices = torch.topk(combined, k=self.budget, largest=True).indices
+        keep_indices = torch.sort(topk_indices).values
 
-        # Add recent window indices
-        recent_start = kv_cache_len - effective_window
-        recent_indices = torch.arange(recent_start, kv_cache_len, device=self.config.device)
-        keep_indices = torch.cat([topk_indices_sorted, recent_indices])
+        return keep_indices
 
-        # Slice cache
-        key_states = key_states.index_select(2, keep_indices)
-        value_states = value_states.index_select(2, keep_indices)
-
-        # Update position tracking (only on first layer to avoid redundant updates)
-        if layer_idx == 0:
-            self.cache_positions = [self.cache_positions[i] for i in keep_indices.tolist()]
-
-        return key_states, value_states
-
-    def _compute_scores(
+    def _compute_layer_head_scores(
         self,
         key_states: torch.Tensor,
         key_positions: torch.Tensor,
         layer_idx: int,
-    ) -> torch.Tensor:
-        """Compute frequency-based scores for all positions."""
+    ) -> Optional[torch.Tensor]:
+        """
+        Compute per-head frequency scores for a single layer.
+
+        Returns:
+            Tensor of shape [num_heads_in_layer, seq_len] or None if no sampled heads
+        """
         # Get rotary cos/sin for positions
         base = torch.zeros(1, key_positions.shape[0], self.head_dim,
                           device=self.config.device, dtype=self.config.dtype)
@@ -237,14 +226,13 @@ class SpeckVRKVStyle:
         # Collect scores from sampled heads in this layer
         layer_heads = [(l, h) for l, h in self.sampled_heads if l == layer_idx]
         if not layer_heads:
-            # No sampled heads for this layer, return uniform scores
-            return torch.ones(key_positions.shape[0], device=self.config.device)
+            return None
 
         per_head_scores: List[torch.Tensor] = []
         for layer, head in layer_heads:
             stats = self.head_stats[(layer, head)]
 
-            # Get key values for this head
+            # Get key values for this head (handle GQA)
             kv_head = head
             if self.num_key_value_heads and self.num_attention_heads:
                 kv_head = min(key_states.shape[1] - 1, head // max(1, self.num_key_value_groups))
@@ -273,22 +261,10 @@ class SpeckVRKVStyle:
             )
             per_head_scores.append(head_scores)
 
-        # Aggregate across heads
-        head_matrix = torch.stack(per_head_scores, dim=0)
+        if not per_head_scores:
+            return None
 
-        if self.use_rank_aggregation:
-            ranks = torch.argsort(torch.argsort(head_matrix, dim=1, descending=True), dim=1)
-            head_matrix = ranks.float()
-            combined = -head_matrix.min(dim=0).values  # Negate for topk
-        elif self.normalize_scores:
-            mean = head_matrix.mean(dim=1, keepdim=True)
-            std = head_matrix.std(dim=1, unbiased=False, keepdim=True).clamp_min(1e-6)
-            head_matrix = (head_matrix - mean) / std
-            combined = head_matrix.max(dim=0).values
-        else:
-            combined = head_matrix.max(dim=0).values
-
-        return combined
+        return torch.stack(per_head_scores, dim=0)  # [num_heads, seq_len]
 
     def reset_compression_state(self) -> None:
         """Reset state for new generation."""
@@ -303,7 +279,6 @@ def apply_speckv_rkv_style_patch(
     stats_path: Path,
     model_path: Path,
     kv_budget: int,
-    window_size: int = 8,
     offset_max_length: int = 65536,
     score_aggregation: str = "mean",
     sparse_seed: int = 0,
@@ -329,7 +304,6 @@ def apply_speckv_rkv_style_patch(
         device=device,
         dtype=dtype,
         budget=kv_budget,
-        window_size=window_size,
         offset_max_length=offset_max_length,
         score_aggregation=score_aggregation,
         seed=sparse_seed,
@@ -488,17 +462,19 @@ def apply_speckv_rkv_style_patch(
         should_compress = (comp.absolute_position % comp.divide_length == 0) if is_decode_step else False
 
         if effective_size >= comp.budget and should_compress:
-            # Compress each layer
+            # Compute keep_indices using scores from ALL layers' sampled heads
+            keep_indices = comp.compute_keep_indices(pkv_tuple)
+
+            # Apply same indices to all layers
             new_pkv = []
-            for layer_idx, (k, v) in enumerate(pkv_tuple):
-                k_new, v_new = comp.update_kv(k, None, v, layer_idx)
+            for k, v in pkv_tuple:
+                k_new = k.index_select(2, keep_indices)
+                v_new = v.index_select(2, keep_indices)
                 new_pkv.append((k_new, v_new))
             pkv_tuple = tuple(new_pkv)
 
-            # Sync cache_positions with new length
-            new_len = pkv_tuple[0][0].shape[2]
-            if len(comp.cache_positions) > new_len:
-                comp.cache_positions = comp.cache_positions[:new_len]
+            # Update cache_positions
+            comp.cache_positions = [comp.cache_positions[i] for i in keep_indices.tolist()]
 
         # Convert back to original cache type
         if isinstance(outputs.past_key_values, Cache):
@@ -517,6 +493,6 @@ def apply_speckv_rkv_style_patch(
 
     model.forward = MethodType(speckv_rkv_forward, model)
 
-    print(f"[SpeckV-RKV] Applied R-KV style compression (budget={kv_budget}, window={window_size}, "
+    print(f"[SpeckV-RKV] Applied R-KV style compression (budget={kv_budget}, "
           f"divide_length={divide_length}, normalize_scores={normalize_scores}, "
           f"use_rank_aggregation={use_rank_aggregation})")

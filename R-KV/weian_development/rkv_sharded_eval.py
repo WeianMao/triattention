@@ -532,7 +532,6 @@ def main(args: argparse.Namespace) -> None:
                 stats_path=stats_path,
                 model_path=Path(args.model_path),
                 kv_budget=int(args.kv_budget),
-                window_size=round_window,
                 offset_max_length=args.sparse_offset_max_length,
                 score_aggregation=args.sparse_score_aggregation,
                 sparse_seed=args.sparse_seed,
