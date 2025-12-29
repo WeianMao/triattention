@@ -381,13 +381,11 @@ def apply_speckv_rkv_style_patch(
                 current_cache_len = int(past_key_values[0][0].shape[2])
 
             if current_cache_len is not None:
-                rel_positions = torch.arange(
+                # cache_position should be 1D tensor [step], not 2D
+                cache_position_override = torch.arange(
                     current_cache_len, current_cache_len + step,
                     device=input_ids.device, dtype=torch.long,
-                ).unsqueeze(0)
-                if bsz > 1:
-                    rel_positions = rel_positions.expand(bsz, -1)
-                cache_position_override = rel_positions
+                )
 
             attention_mask_override = None
         else:
