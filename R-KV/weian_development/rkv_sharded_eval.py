@@ -352,14 +352,7 @@ def parse_arguments() -> argparse.Namespace:
         default=False,
         help="Use R-KV style attention-layer compression instead of generate wrapper.",
     )
-    parser.add_argument(
-        "--divide_length",
-        "--divide-length",
-        dest="divide_length",
-        type=int,
-        default=128,
-        help="Compress every N decode steps (like R-KV's divide_length). Default=128.",
-    )
+    # Note: --divide_length is already defined above (line 238) for R-KV, reused for SpeckV alignment
     return parser.parse_args()
 
 
