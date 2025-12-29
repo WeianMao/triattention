@@ -145,6 +145,7 @@ class SpeckVRKVStyle:
     def compute_keep_indices(
         self,
         pkv_tuple: Tuple[Tuple[torch.Tensor, torch.Tensor], ...],
+        prefix_length: int = 0,
     ) -> torch.Tensor:
         """
         Compute keep_indices by aggregating scores from all layers.
@@ -153,8 +154,12 @@ class SpeckVRKVStyle:
         This matches the original SpeckV behavior where all sampled heads
         across all layers are used to compute a single aggregated score.
 
+        Prefill tokens (first prefix_length) are always preserved.
+        Only decode tokens compete for the remaining budget.
+
         Args:
             pkv_tuple: Tuple of (key, value) for each layer
+            prefix_length: Number of prefill tokens to always preserve
 
         Returns:
             keep_indices: Indices of tokens to keep (sorted)
@@ -199,9 +204,27 @@ class SpeckVRKVStyle:
         else:
             combined = head_matrix.max(dim=0).values
 
-        # Select top-k indices and sort to maintain order
-        topk_indices = torch.topk(combined, k=self.budget, largest=True).indices
-        keep_indices = torch.sort(topk_indices).values
+        # Prefill tokens are always preserved, only decode tokens compete
+        if prefix_length > 0 and prefix_length < kv_cache_len:
+            # Budget for decode tokens (prefill is counted in total budget)
+            decode_budget = self.budget - prefix_length
+            if decode_budget > 0:
+                # Select top-k from decode portion only
+                decode_scores = combined[prefix_length:]
+                k = min(decode_budget, decode_scores.shape[0])
+                decode_topk = torch.topk(decode_scores, k=k, largest=True).indices
+                decode_keep = decode_topk + prefix_length  # offset to original indices
+                # Combine prefill (always kept) + selected decode tokens
+                prefill_keep = torch.arange(prefix_length, device=self.config.device)
+                keep_indices = torch.cat([prefill_keep, decode_keep])
+                keep_indices = torch.sort(keep_indices).values
+            else:
+                # Budget <= prefix_length, keep only prefill (truncated if needed)
+                keep_indices = torch.arange(min(self.budget, prefix_length), device=self.config.device)
+        else:
+            # No prefix protection, use original logic
+            topk_indices = torch.topk(combined, k=self.budget, largest=True).indices
+            keep_indices = torch.sort(topk_indices).values
 
         return keep_indices
 
@@ -461,7 +484,8 @@ def apply_speckv_rkv_style_patch(
 
         if effective_size >= comp.budget and should_compress:
             # Compute keep_indices using scores from ALL layers' sampled heads
-            keep_indices = comp.compute_keep_indices(pkv_tuple)
+            # Prefill tokens are always preserved, only decode tokens are compressed
+            keep_indices = comp.compute_keep_indices(pkv_tuple, prefix_length=comp.prefix_length)
 
             # Apply same indices to all layers
             new_pkv = []
