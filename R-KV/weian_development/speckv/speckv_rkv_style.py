@@ -178,10 +178,24 @@ class SpeckVRKVStyle:
         scores = self._compute_scores(key_states, key_positions, layer_idx)
 
         # Keep budget - window_size tokens + last window_size tokens
-        keep_count = self.budget - self.window_size
+        # Clamp window_size to not exceed cache length
+        effective_window = min(self.window_size, kv_cache_len)
+        keep_count = self.budget - effective_window
+
+        # Handle edge case where window_size >= budget
+        if keep_count <= 0:
+            # Only keep the recent window
+            recent_start = kv_cache_len - effective_window
+            recent_indices = torch.arange(recent_start, kv_cache_len, device=self.config.device)
+            key_states = key_states.index_select(2, recent_indices)
+            value_states = value_states.index_select(2, recent_indices)
+            if layer_idx == 0:
+                self.cache_positions = [self.cache_positions[i] for i in recent_indices.tolist()]
+            return key_states, value_states
 
         # Split into past (can be pruned) and recent (always kept)
-        past_scores = scores[:-self.window_size] if self.window_size > 0 else scores
+        past_len = kv_cache_len - effective_window
+        past_scores = scores[:past_len] if past_len > 0 else scores[:0]
 
         if past_scores.numel() <= keep_count:
             return key_states, value_states
@@ -191,7 +205,7 @@ class SpeckVRKVStyle:
         topk_indices_sorted = torch.sort(topk_indices).values
 
         # Add recent window indices
-        recent_start = kv_cache_len - self.window_size
+        recent_start = kv_cache_len - effective_window
         recent_indices = torch.arange(recent_start, kv_cache_len, device=self.config.device)
         keep_indices = torch.cat([topk_indices_sorted, recent_indices])
 
