@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import MethodType
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
 from transformers import AutoConfig
+from transformers.cache_utils import Cache, DynamicCache
+from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from weian_development.speckv.round_pruning_utils import (
     HeadFrequencyStats,
@@ -147,11 +150,13 @@ class SpeckVRKVStyle:
         layer_idx: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        R-KV style update: compress when cache >= budget.
+        R-KV style update: compress KV cache based on frequency scores.
+
+        Note: Position tracking is handled by the forward patch, not here.
 
         Args:
             key_states: [batch, num_heads, seq_len, head_dim]
-            query_states: [batch, num_heads, seq_len, head_dim]
+            query_states: [batch, num_heads, seq_len, head_dim] (unused, for API compat)
             value_states: [batch, num_heads, seq_len, head_dim]
             layer_idx: Current layer index
 
@@ -160,23 +165,8 @@ class SpeckVRKVStyle:
         """
         kv_cache_len = key_states.shape[-2]
 
-        # Update position tracking
-        if len(self.cache_positions) < kv_cache_len:
-            added = kv_cache_len - len(self.cache_positions)
-            new_positions = list(range(self.absolute_position, self.absolute_position + added))
-            self.cache_positions.extend(new_positions)
-            self.absolute_position += added
-
-        # Check if compression needed (R-KV style: compress when >= budget)
-        effective_cache_size = kv_cache_len
-        if not self.config.include_prefill_in_budget:
-            effective_cache_size = max(0, kv_cache_len - self.prefix_length)
-
-        if effective_cache_size < self.budget:
-            return key_states, value_states
-
         # Compute frequency-based scores for all positions
-        key_positions = torch.tensor(self.cache_positions, device=self.config.device, dtype=torch.long)
+        key_positions = torch.tensor(self.cache_positions[:kv_cache_len], device=self.config.device, dtype=torch.long)
         scores = self._compute_scores(key_states, key_positions, layer_idx)
 
         # Keep budget - window_size tokens + last window_size tokens
@@ -198,12 +188,12 @@ class SpeckVRKVStyle:
         keep_indices = torch.cat([topk_indices_sorted, recent_indices])
 
         # Slice cache
-        head_dim = key_states.shape[-1]
         key_states = key_states.index_select(2, keep_indices)
         value_states = value_states.index_select(2, keep_indices)
 
-        # Update position tracking
-        self.cache_positions = [self.cache_positions[i] for i in keep_indices.tolist()]
+        # Update position tracking (only on first layer to avoid redundant updates)
+        if layer_idx == 0:
+            self.cache_positions = [self.cache_positions[i] for i in keep_indices.tolist()]
 
         return key_states, value_states
 
@@ -346,6 +336,154 @@ def apply_speckv_rkv_style_patch(
 
     # Store compressor on model for access during forward
     model._speckv_rkv_compressor = compressor
+
+    # Patch model.forward to apply compression after each forward pass
+    orig_forward = model.forward
+
+    def speckv_rkv_forward(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[Cache] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        cache_position: Optional[torch.LongTensor] = None,
+        **kwargs,
+    ):
+        comp = self._speckv_rkv_compressor
+        cache_position_override = cache_position
+        position_ids_override = position_ids
+        attention_mask_override = attention_mask
+
+        if past_key_values is not None and input_ids is not None:
+            bsz, step = input_ids.shape
+
+            # Absolute positions for rotary
+            start_pos = comp.absolute_position
+            abs_positions = torch.arange(
+                start_pos, start_pos + step,
+                device=input_ids.device, dtype=torch.long,
+            ).unsqueeze(0)
+            if bsz > 1:
+                abs_positions = abs_positions.expand(bsz, -1)
+            position_ids_override = abs_positions
+
+            # Relative positions for cache placement
+            current_cache_len = None
+            if isinstance(past_key_values, Cache) and hasattr(past_key_values, "get_seq_length"):
+                current_cache_len = int(past_key_values.get_seq_length())
+            elif isinstance(past_key_values, (tuple, list)) and past_key_values:
+                current_cache_len = int(past_key_values[0][0].shape[2])
+
+            if current_cache_len is not None:
+                rel_positions = torch.arange(
+                    current_cache_len, current_cache_len + step,
+                    device=input_ids.device, dtype=torch.long,
+                ).unsqueeze(0)
+                if bsz > 1:
+                    rel_positions = rel_positions.expand(bsz, -1)
+                cache_position_override = rel_positions
+
+            attention_mask_override = None
+        else:
+            cache_position_override = None
+
+        outputs = orig_forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask_override,
+            position_ids=position_ids_override,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            labels=labels,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+            cache_position=cache_position_override,
+            **kwargs,
+        )
+
+        if getattr(outputs, "past_key_values", None) is None:
+            return outputs
+
+        # Reset compressor state if starting a new generation
+        is_empty_cache = True
+        if past_key_values is not None:
+            if isinstance(past_key_values, Cache):
+                if past_key_values.get_seq_length() > 0:
+                    is_empty_cache = False
+            elif isinstance(past_key_values, (tuple, list)):
+                if len(past_key_values) > 0 and past_key_values[0][0].shape[2] > 0:
+                    is_empty_cache = False
+
+        if is_empty_cache:
+            comp.reset_compression_state()
+
+        # Convert cache to tuple for manipulation
+        pkv = outputs.past_key_values
+        if isinstance(pkv, Cache):
+            pkv_tuple = pkv.to_legacy_cache()
+        else:
+            pkv_tuple = tuple(pkv) if pkv else ()
+
+        if not pkv_tuple:
+            return outputs
+
+        # Track positions and apply compression
+        seq_len = pkv_tuple[0][0].shape[2]
+        cached_len = len(comp.cache_positions)
+
+        if cached_len == 0:
+            # First forward (prefill)
+            comp.cache_positions = list(range(seq_len))
+            comp.absolute_position = seq_len
+            comp.prefix_length = seq_len
+        elif cached_len < seq_len:
+            # Decode step: add new positions
+            added = seq_len - cached_len
+            new_positions = list(range(comp.absolute_position, comp.absolute_position + added))
+            comp.cache_positions.extend(new_positions)
+            comp.absolute_position += added
+
+        # Apply compression when cache exceeds budget
+        effective_size = seq_len
+        if not comp.config.include_prefill_in_budget:
+            effective_size = max(0, seq_len - comp.prefix_length)
+
+        if effective_size >= comp.budget:
+            # Compress each layer
+            new_pkv = []
+            for layer_idx, (k, v) in enumerate(pkv_tuple):
+                k_new, v_new = comp.update_kv(k, None, v, layer_idx)
+                new_pkv.append((k_new, v_new))
+            pkv_tuple = tuple(new_pkv)
+
+            # Sync cache_positions with new length
+            new_len = pkv_tuple[0][0].shape[2]
+            if len(comp.cache_positions) > new_len:
+                comp.cache_positions = comp.cache_positions[:new_len]
+
+        # Convert back to original cache type
+        if isinstance(outputs.past_key_values, Cache):
+            new_cache = DynamicCache.from_legacy_cache(pkv_tuple)
+        else:
+            new_cache = pkv_tuple
+
+        outputs = CausalLMOutputWithPast(
+            loss=getattr(outputs, "loss", None),
+            logits=outputs.logits,
+            past_key_values=new_cache,
+            hidden_states=getattr(outputs, "hidden_states", None),
+            attentions=getattr(outputs, "attentions", None),
+        )
+        return outputs
+
+    model.forward = MethodType(speckv_rkv_forward, model)
 
     print(f"[SpeckV-RKV] Applied R-KV style compression (budget={kv_budget}, window={window_size}, "
           f"normalize_scores={normalize_scores}, use_rank_aggregation={use_rank_aggregation})")
