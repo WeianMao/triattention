@@ -130,7 +130,6 @@ class SpeckVRKVStyle:
         self.cache_positions: List[int] = []
         self.absolute_position: int = 0
         self.prefix_length: int = 0
-        self.decode_step_count: int = 0  # Count decode steps for divide_length control
         self.divide_length = config.divide_length
         self.score_aggregation = config.score_aggregation
         self.normalize_scores = config.normalize_scores
@@ -296,7 +295,6 @@ class SpeckVRKVStyle:
         self.cache_positions = []
         self.absolute_position = 0
         self.prefix_length = 0
-        self.decode_step_count = 0
 
 
 def apply_speckv_rkv_style_patch(
@@ -479,7 +477,6 @@ def apply_speckv_rkv_style_patch(
             new_positions = list(range(comp.absolute_position, comp.absolute_position + added))
             comp.cache_positions.extend(new_positions)
             comp.absolute_position += added
-            comp.decode_step_count += added
 
         # Apply compression when cache exceeds budget AND at divide_length interval
         effective_size = seq_len
@@ -487,7 +484,8 @@ def apply_speckv_rkv_style_patch(
             effective_size = max(0, seq_len - comp.prefix_length)
 
         # Only compress every divide_length steps (like R-KV)
-        should_compress = (comp.decode_step_count % comp.divide_length == 0) if is_decode_step else False
+        # Use absolute_position (total tokens including prefill) to match R-KV's length-based check
+        should_compress = (comp.absolute_position % comp.divide_length == 0) if is_decode_step else False
 
         if effective_size >= comp.budget and should_compress:
             # Compress each layer
