@@ -352,6 +352,14 @@ def parse_arguments() -> argparse.Namespace:
         default=False,
         help="Use R-KV style attention-layer compression instead of generate wrapper.",
     )
+    parser.add_argument(
+        "--divide_length",
+        "--divide-length",
+        dest="divide_length",
+        type=int,
+        default=128,
+        help="Compress every N decode steps (like R-KV's divide_length). Default=128.",
+    )
     return parser.parse_args()
 
 
@@ -540,6 +548,7 @@ def main(args: argparse.Namespace) -> None:
                 normalize_scores=args.sparse_normalize_scores,
                 use_rank_aggregation=args.use_rank_aggregation,
                 include_prefill_in_budget=args.include_prefill_in_budget,
+                divide_length=args.divide_length,
             )
         else:
             # Use original generate wrapper implementation

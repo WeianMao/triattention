@@ -147,6 +147,13 @@ def parse_args() -> argparse.Namespace:
         help="Override runner arg: disable R-KV style compression.",
     )
     parser.set_defaults(rkv_style_compression=None)
+    parser.add_argument(
+        "--divide-length",
+        dest="divide_length",
+        type=int,
+        default=None,
+        help="Override runner arg: compress every N decode steps (like R-KV's divide_length).",
+    )
     return parser.parse_args()
 
 
@@ -519,6 +526,8 @@ def main() -> None:
         runner_args["include_prefill_in_budget"] = args.include_prefill_in_budget
     if args.rkv_style_compression is not None:
         runner_args["rkv_style_compression"] = args.rkv_style_compression
+    if args.divide_length is not None:
+        runner_args["divide_length"] = args.divide_length
     base_env = prepare_environment(experiment.get("env", {}))
     base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 
