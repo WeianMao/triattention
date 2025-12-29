@@ -165,6 +165,14 @@ class SpeckVRKVStyle:
         """
         kv_cache_len = key_states.shape[-2]
 
+        # Ensure cache_positions is synced with key_states length
+        if len(self.cache_positions) < kv_cache_len:
+            # Add missing positions
+            missing = kv_cache_len - len(self.cache_positions)
+            new_positions = list(range(self.absolute_position, self.absolute_position + missing))
+            self.cache_positions.extend(new_positions)
+            self.absolute_position += missing
+
         # Compute frequency-based scores for all positions
         key_positions = torch.tensor(self.cache_positions[:kv_cache_len], device=self.config.device, dtype=torch.long)
         scores = self._compute_scores(key_states, key_positions, layer_idx)
