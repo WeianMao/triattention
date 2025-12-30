@@ -154,7 +154,11 @@ class SparseRoundPruner:
         # R-KV aligned budget: compress to exact budget instead of budget - round_window
         self.rkv_aligned_budget = bool(getattr(config, "rkv_aligned_budget", False))
         # R-KV divide_length: compression interval (cache fluctuates in [budget, budget + divide_length])
-        self.divide_length = int(getattr(config, "divide_length", 128))
+        raw_divide_length = getattr(config, "divide_length", 128)
+        validated_divide_length = 128 if raw_divide_length is None else int(raw_divide_length)
+        if validated_divide_length <= 0:
+            raise ValueError(f"divide_length must be positive; got {validated_divide_length}")
+        self.divide_length = validated_divide_length
         self.generator: torch.Generator | None = None
         self.prefix_length: int = 0
         if config.seed is not None:

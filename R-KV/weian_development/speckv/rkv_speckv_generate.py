@@ -71,6 +71,11 @@ def apply_speckv_generate_patch(
     device = next(model.parameters()).device
     dtype = torch.float32
 
+    # Guard against non-positive divide_length to avoid per-token compression.
+    validated_divide_length = divide_length if divide_length is not None else 128
+    if validated_divide_length <= 0:
+        raise ValueError(f"divide_length must be positive; got {validated_divide_length}")
+
     pruner_cfg = SparsePruningConfig(
         stats_path=stats_path,
         model_path=model_path,
@@ -91,7 +96,7 @@ def apply_speckv_generate_patch(
         include_prefill_in_budget=include_prefill_in_budget,
         use_per_head_pruning=per_head_pruning,
         rkv_aligned_budget=rkv_aligned_budget,
-        divide_length=divide_length,
+        divide_length=validated_divide_length,
     )
     state = _SpeckVState(pruner=SparseRoundPruner(pruner_cfg), config=pruner_cfg)
 
@@ -256,7 +261,7 @@ def apply_speckv_generate_patch(
         trigger_threshold = (state.pruner.max_keys + state.pruner.divide_length
                              if state.pruner.rkv_aligned_budget
                              else state.pruner.max_keys)
-        if state.pruner._dynamic_cache_size > trigger_threshold:
+        if state.pruner._dynamic_cache_size >= trigger_threshold:
             pkv_tuple = state.pruner.ensure_capacity(pkv_tuple)
 
         outputs = CausalLMOutputWithPast(
