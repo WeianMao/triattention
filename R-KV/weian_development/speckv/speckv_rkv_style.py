@@ -383,7 +383,21 @@ def apply_speckv_rkv_style_patch(
         position_ids_override = position_ids
         attention_mask_override = attention_mask
 
-        if past_key_values is not None and input_ids is not None:
+        # Check if this is a new generation (empty cache) BEFORE computing positions
+        # This fixes a bug where comp.absolute_position was stale from previous generation
+        is_empty_cache = True
+        if past_key_values is not None:
+            if isinstance(past_key_values, Cache):
+                if past_key_values.get_seq_length() > 0:
+                    is_empty_cache = False
+            elif isinstance(past_key_values, (tuple, list)):
+                if len(past_key_values) > 0 and past_key_values[0][0].shape[2] > 0:
+                    is_empty_cache = False
+
+        if is_empty_cache:
+            comp.reset_compression_state()
+
+        if past_key_values is not None and input_ids is not None and not is_empty_cache:
             bsz, step = input_ids.shape
 
             # Absolute positions for rotary
@@ -432,18 +446,8 @@ def apply_speckv_rkv_style_patch(
         if getattr(outputs, "past_key_values", None) is None:
             return outputs
 
-        # Reset compressor state if starting a new generation
-        is_empty_cache = True
-        if past_key_values is not None:
-            if isinstance(past_key_values, Cache):
-                if past_key_values.get_seq_length() > 0:
-                    is_empty_cache = False
-            elif isinstance(past_key_values, (tuple, list)):
-                if len(past_key_values) > 0 and past_key_values[0][0].shape[2] > 0:
-                    is_empty_cache = False
-
-        if is_empty_cache:
-            comp.reset_compression_state()
+        # Note: reset_compression_state() is now called BEFORE forward (at the top)
+        # to ensure correct position_ids computation
 
         # Convert cache to tuple for manipulation
         pkv = outputs.past_key_values
