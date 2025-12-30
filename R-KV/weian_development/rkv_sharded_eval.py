@@ -318,7 +318,7 @@ def parse_arguments() -> argparse.Namespace:
         help="Optional head limit for sparse stats (None keeps all sampled heads).",
     )
     parser.add_argument(
-        "--per-head-pruning",
+        "--per_head_pruning",
         type=str2bool,
         default=False,
         help="Enable per-KV-head independent pruning (each head selects tokens independently). Default: False",
