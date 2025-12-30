@@ -63,6 +63,9 @@ def apply_speckv_generate_patch(
     sparse_similarity_mix_lambda: float = 0.1,
     use_rank_similarity_combination: bool = False,
     include_prefill_in_budget: bool = False,
+    per_head_pruning: bool = False,
+    rkv_aligned_budget: bool = False,
+    divide_length: int = 128,
 ) -> None:
     """Attach SparseRoundPruner to a CausalLM model so HF generate can be used."""
     device = next(model.parameters()).device
@@ -86,6 +89,9 @@ def apply_speckv_generate_patch(
         sparse_similarity_mix_lambda=sparse_similarity_mix_lambda,
         use_rank_similarity_combination=use_rank_similarity_combination,
         include_prefill_in_budget=include_prefill_in_budget,
+        use_per_head_pruning=per_head_pruning,
+        rkv_aligned_budget=rkv_aligned_budget,
+        divide_length=divide_length,
     )
     state = _SpeckVState(pruner=SparseRoundPruner(pruner_cfg), config=pruner_cfg)
 
@@ -240,11 +246,17 @@ def apply_speckv_generate_patch(
             if state.pruner.prefix_length == 0 and state.initial_prefix_length:
                 state.pruner.prefix_length = state.initial_prefix_length
 
-            while state.pruner.should_start_next_round():
-                pkv_tuple = state.pruner.start_next_round(pkv_tuple)
+            # Skip round-based pruning when using R-KV aligned budget mode
+            if not state.pruner.rkv_aligned_budget:
+                while state.pruner.should_start_next_round():
+                    pkv_tuple = state.pruner.start_next_round(pkv_tuple)
 
-        # Align with R-KV budget-based compression: only prune when exceeding budget.
-        if state.pruner._dynamic_cache_size > state.pruner.max_keys:
+        # R-KV aligned: trigger at budget + divide_length, compress to budget
+        # This gives cache fluctuation in [budget, budget + divide_length]
+        trigger_threshold = (state.pruner.max_keys + state.pruner.divide_length
+                             if state.pruner.rkv_aligned_budget
+                             else state.pruner.max_keys)
+        if state.pruner._dynamic_cache_size > trigger_threshold:
             pkv_tuple = state.pruner.ensure_capacity(pkv_tuple)
 
         outputs = CausalLMOutputWithPast(

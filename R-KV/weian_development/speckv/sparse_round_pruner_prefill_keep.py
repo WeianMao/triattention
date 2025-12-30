@@ -45,6 +45,12 @@ class SparsePruningConfig:
     use_rank_similarity_combination: bool = False
     # Alignment: include prefill tokens in budget calculation (aligns with R-KV behavior)
     include_prefill_in_budget: bool = False
+    # Alignment: compress to exact budget instead of budget - round_window (aligns with R-KV behavior)
+    rkv_aligned_budget: bool = False
+    # Alignment: divide_length for R-KV style compression interval (cache fluctuates in [budget, budget + divide_length])
+    divide_length: int = 128
+    # Per-head pruning: enable independent per-head pruning mode
+    use_per_head_pruning: bool = False
 
 
 class SparseRoundPruner:
@@ -143,6 +149,12 @@ class SparseRoundPruner:
         self.similarity_mix_lambda = float(getattr(config, "sparse_similarity_mix_lambda", 0.1))
         # Rank + Similarity combination mode
         self.use_rank_similarity_combination = bool(getattr(config, "use_rank_similarity_combination", False))
+        # Per-head pruning mode
+        self.use_per_head_pruning = bool(getattr(config, "use_per_head_pruning", False))
+        # R-KV aligned budget: compress to exact budget instead of budget - round_window
+        self.rkv_aligned_budget = bool(getattr(config, "rkv_aligned_budget", False))
+        # R-KV divide_length: compression interval (cache fluctuates in [budget, budget + divide_length])
+        self.divide_length = int(getattr(config, "divide_length", 128))
         self.generator: torch.Generator | None = None
         self.prefix_length: int = 0
         if config.seed is not None:
@@ -187,11 +199,13 @@ class SparseRoundPruner:
         return pruned
 
     def ensure_capacity(self, past_key_values: Sequence[Tuple[torch.Tensor, torch.Tensor]]):
-        keep_capacity = max(0, self.max_keys - self.round_window)
+        keep_capacity = self.max_keys if self.rkv_aligned_budget else max(0, self.max_keys - self.round_window)
         if self._dynamic_cache_size <= keep_capacity:
             return past_key_values
+        # Convert to dynamic target: when prefill is in budget, subtract prefix from total target
+        prune_target = max(0, keep_capacity - self.prefix_length) if self.config.include_prefill_in_budget else keep_capacity
         pruned = self._prune_to_size(
-            past_key_values, keep_capacity, dynamic_only=True
+            past_key_values, prune_target, dynamic_only=True
         )
         self.tokens_in_round = 0
         return pruned
@@ -207,9 +221,11 @@ class SparseRoundPruner:
     def start_next_round(
         self, past_key_values: Sequence[Tuple[torch.Tensor, torch.Tensor]]
     ):
-        keep_capacity = max(0, self.max_keys - self.round_window)
+        keep_capacity = self.max_keys if self.rkv_aligned_budget else max(0, self.max_keys - self.round_window)
+        # Convert to dynamic target: when prefill is in budget, subtract prefix from total target
+        prune_target = max(0, keep_capacity - self.prefix_length) if self.config.include_prefill_in_budget else keep_capacity
         pruned = self._prune_to_size(
-            past_key_values, keep_capacity, dynamic_only=True
+            past_key_values, prune_target, dynamic_only=True
         )
         self.tokens_in_round = 0
         return pruned
@@ -262,9 +278,21 @@ class SparseRoundPruner:
                     start_index=prefix_count,
                 )
                 dynamic_keep = dynamic_keep_rel + prefix_count
-                keep_tensor = torch.cat([prefix_indices, dynamic_keep])
+                if dynamic_keep_rel.dim() == 2:
+                    # Per-head mode: broadcast prefix to all heads, then concat along dim=1
+                    num_kv_heads = dynamic_keep_rel.size(0)
+                    prefix_broadcast = prefix_indices.unsqueeze(0).expand(num_kv_heads, -1)
+                    keep_tensor = torch.cat([prefix_broadcast, dynamic_keep], dim=1)
+                else:
+                    keep_tensor = torch.cat([prefix_indices, dynamic_keep])
 
-        self.cache_positions = [self.cache_positions[idx] for idx in keep_tensor.tolist()]
+        if keep_tensor.dim() == 2:
+            # Per-head mode: use head 0's indices as representative for cache_positions
+            # This ensures correct length for _dynamic_cache_size calculations
+            head0_indices = keep_tensor[0].tolist()
+            self.cache_positions = [self.cache_positions[idx] for idx in head0_indices]
+        else:
+            self.cache_positions = [self.cache_positions[idx] for idx in keep_tensor.tolist()]
         return self._slice_cache(past_key_values, keep_tensor)
 
     def _select_keep_indices(
@@ -274,6 +302,10 @@ class SparseRoundPruner:
         keep_count: int,
         start_index: int = 0,
     ) -> torch.Tensor:
+        # Block rank aggregation when per-head pruning enabled
+        assert not (self.use_per_head_pruning and self.use_rank_aggregation), \
+            "Per-head pruning only supports norm aggregation, not rank aggregation"
+
         per_head_scores = self._compute_head_scores(
             past_key_values, key_positions, start_index=start_index
         )
@@ -351,6 +383,36 @@ class SparseRoundPruner:
             else:
                 combined = per_head_scores.max(dim=0).values
 
+        # Per-head independent pruning mode: select tokens independently for each KV head
+        if self.use_per_head_pruning:
+            # Group sampled attention heads by KV head
+            kv_head_groups = {}  # kv_head_idx -> [sampled_head_indices]
+            for i, (layer, attn_head) in enumerate(self.sampled_heads):
+                kv_head = attn_head // max(1, self.num_key_value_groups)
+                if kv_head not in kv_head_groups:
+                    kv_head_groups[kv_head] = []
+                kv_head_groups[kv_head].append(i)
+
+            # For each KV head, aggregate scores and perform independent top-k selection
+            keep_indices_list = []
+            for kv_head_idx in range(self.num_key_value_heads):
+                if kv_head_idx in kv_head_groups:
+                    indices = kv_head_groups[kv_head_idx]
+                    group_scores = per_head_scores[indices]  # [num_heads_in_group, seq_len]
+                    aggregated = group_scores.max(dim=0).values  # [seq_len] - same as existing norm aggregation
+                else:
+                    # Fallback for KV heads without sampled heads: use mean of all scores
+                    aggregated = per_head_scores.mean(dim=0)
+
+                # Independent top-k selection for this KV head
+                keep_indices_for_head = aggregated.topk(keep_count, largest=True).indices
+                keep_indices_list.append(keep_indices_for_head)
+
+            # Stack into 2D tensor: [num_kv_heads, budget]
+            keep_indices = torch.stack(keep_indices_list, dim=0)
+            return keep_indices
+
+        # Global unified pruning mode (existing behavior)
         candidate_count = combined.shape[0]
         if candidate_count <= keep_count:
             return torch.arange(candidate_count, device=combined.device, dtype=torch.long)
@@ -485,8 +547,28 @@ class SparseRoundPruner:
         new_cache = []
         for key_tensor, value_tensor in past_key_values:
             local_keep = keep_indices.to(device=key_tensor.device, dtype=torch.long)
-            key_slice = key_tensor.index_select(2, local_keep)
-            value_slice = value_tensor.index_select(2, local_keep)
+
+            if local_keep.dim() == 2:
+                # Per-head mode: keep_indices shape [num_kv_heads, budget]
+                # key_tensor/value_tensor shape: [batch, num_kv_heads, seq_len, head_dim]
+                batch_size = key_tensor.size(0)
+                num_kv_heads = key_tensor.size(1)
+                budget = local_keep.size(1)
+                head_dim = key_tensor.size(3)
+
+                # Expand indices for gather: [batch, num_kv_heads, budget, head_dim]
+                expanded_indices = local_keep.unsqueeze(0).unsqueeze(-1).expand(
+                    batch_size, num_kv_heads, budget, head_dim
+                )
+
+                # Gather along sequence dimension (dim=2)
+                key_slice = key_tensor.gather(dim=2, index=expanded_indices)
+                value_slice = value_tensor.gather(dim=2, index=expanded_indices)
+            else:
+                # Global mode: keep_indices shape [budget]
+                key_slice = key_tensor.index_select(2, local_keep)
+                value_slice = value_tensor.index_select(2, local_keep)
+
             new_cache.append((key_slice.contiguous(), value_slice.contiguous()))
 
         if hasattr(past_key_values, "layers"):

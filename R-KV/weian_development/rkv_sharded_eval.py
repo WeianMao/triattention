@@ -318,6 +318,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Optional head limit for sparse stats (None keeps all sampled heads).",
     )
     parser.add_argument(
+        "--per-head-pruning",
+        type=str2bool,
+        default=False,
+        help="Enable per-KV-head independent pruning (each head selects tokens independently). Default: False",
+    )
+    parser.add_argument(
         "--use_chat_template",
         type=str2bool,
         default=False,
@@ -351,6 +357,14 @@ def parse_arguments() -> argparse.Namespace:
         type=str2bool,
         default=False,
         help="Use R-KV style attention-layer compression instead of generate wrapper.",
+    )
+    parser.add_argument(
+        "--rkv_aligned_budget",
+        "--rkv-aligned-budget",
+        dest="rkv_aligned_budget",
+        type=str2bool,
+        default=False,
+        help="Align budget calculation with R-KV: compress to exact budget instead of budget - round_window.",
     )
     # Note: --divide_length is already defined above (line 238) for R-KV, reused for SpeckV alignment
     return parser.parse_args()
@@ -561,6 +575,9 @@ def main(args: argparse.Namespace) -> None:
                 sparse_similarity_mix_lambda=args.sparse_similarity_mix_lambda,
                 use_rank_similarity_combination=args.use_rank_similarity_combination,
                 include_prefill_in_budget=args.include_prefill_in_budget,
+                per_head_pruning=args.per_head_pruning,
+                rkv_aligned_budget=args.rkv_aligned_budget,
+                divide_length=args.divide_length,
             )
 
     for run_id in run_ids:

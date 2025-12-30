@@ -148,12 +148,39 @@ def parse_args() -> argparse.Namespace:
     )
     parser.set_defaults(rkv_style_compression=None)
     parser.add_argument(
+        "--rkv-aligned-budget",
+        dest="rkv_aligned_budget",
+        action="store_true",
+        help="Override runner arg: align budget calculation with R-KV (compress to exact budget).",
+    )
+    parser.add_argument(
+        "--no-rkv-aligned-budget",
+        dest="rkv_aligned_budget",
+        action="store_false",
+        help="Override runner arg: use original budget calculation (compress to budget - round_window).",
+    )
+    parser.set_defaults(rkv_aligned_budget=None)
+    parser.add_argument(
         "--divide-length",
         dest="divide_length",
         type=int,
         default=None,
         help="Override runner arg: compress every N decode steps (like R-KV's divide_length).",
     )
+    per_head_group = parser.add_mutually_exclusive_group()
+    per_head_group.add_argument(
+        "--per-head-pruning",
+        dest="per_head_pruning",
+        action="store_true",
+        help="Enable per-KV-head independent pruning.",
+    )
+    per_head_group.add_argument(
+        "--no-per-head-pruning",
+        dest="per_head_pruning",
+        action="store_false",
+        help="Disable per-KV-head independent pruning.",
+    )
+    parser.set_defaults(per_head_pruning=None)
     return parser.parse_args()
 
 
@@ -526,8 +553,12 @@ def main() -> None:
         runner_args["include_prefill_in_budget"] = args.include_prefill_in_budget
     if args.rkv_style_compression is not None:
         runner_args["rkv_style_compression"] = args.rkv_style_compression
+    if args.rkv_aligned_budget is not None:
+        runner_args["rkv_aligned_budget"] = args.rkv_aligned_budget
     if args.divide_length is not None:
         runner_args["divide_length"] = args.divide_length
+    if args.per_head_pruning is not None:
+        runner_args["per_head_pruning"] = args.per_head_pruning
     base_env = prepare_environment(experiment.get("env", {}))
     base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 
