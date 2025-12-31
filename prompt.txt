@@ -57,10 +57,243 @@ weian_development/spec_sparse_simulator/experiments/exp_012_stage1_shared_probe_
 
 大部分没问题，但是我需要你把新的脚本的输出文件夹也改成和新实验脚本文件夹类似的结构方便归档。SpeckV 脚本的随机种子也要改动，请你改成 888 吧。run_speckv_aime24_official_sampled8_qwen.sh是配置有问题的，你的理解是对的。aime_sampled8 可以。子目录结构是否符合我的预期。你对对 Norm/Rank 互斥且必选其一的理解是对的。请你开始执行任务
 
-R-KV/weian_script/aime_sampled8/rkv/aime25/run_rkv_aime25_qwen.sh 和R-KV/weian_script/aime_sampled8/rkv/aime24/run_rkv_aime24_qwen.sh， 这两个脚本是RKV官方所给的官方实验setting所对应的脚本。R-KV/weian_script/aime_sampled8/speckv 这个路径里面的脚本是我自己的算法在这个库上实现的版本。 但是按道理,我自己的实验脚本所用的setting和benchmark应该和RKV官方的实验对齐。 但是我知道我有一些东西其实应该是没对齐的。 比如说KVCache的统计的时候,我不确定RKV有没有把问题,也就是 prefill的部分纳入统计。 但是我知道在这点上应该我的实验的脚本所对应的代码和RKV在这些公平性的细节上面是不对齐的。 所以请你帮我看一下整体的代码,然后尤其是注意这些benchmark是否公平的这些细节。 然后写一个MD文档,放在R-KV/weian_script/aime_sampled8这个文件夹下,告诉我有哪些东西是不对齐,为了实现公平的对比应该去修正的内容。 你不要去改动代码,只是先看一下有哪些地方是有问题的。请把RKV官方实现的细节作为参考。 之后的改动,如果有没对齐的地方, 那都是我自己的算法实现上面有问题, 我要把我自己的算法对齐它。 当然你不要执行,还是那句话, 你需要去先看有哪些地方是没对齐的, 然后再决定后续怎么办。 我还想起来有个地方是有问题的,就是我自己的算法需要用到一个统计结果的文件,应该是某个pt文件。 这个pt文件按道理不能在当前测试的这个数据集上进行统计,比如说我benchmark测的是AIME25的数据的话,那我应该在24上面去统计,不能在25上面去统计。 请你记录一下,然后你看的时候请你注意检查这些是不是站在写论文的角度来看的话是有问题的细节,类似于我之前提到的都算是。
+R-KV/weian_script/aime_sampled8/rkv/aime25/run_rkv_aime25_qwen.sh 和R-KV/weian_script/aime_sampled8/rkv/aime24/run_rkv_aime24_qwen.sh， 这两个脚本是RKV官方所给的官方实验setting所对应的脚本。R-KV/weian_script/aime_sampled8/speckv 这个路径里面的脚本是我自己的算法在这个库上实现的版本。 但是按道理,我自己的实验脚本所用的setting和benchmark应该和RKV官方的实验对齐。 但是我知道我有一些东西其实应该是没对齐的。 比如说kv cache的统计的时候,我不确定RKV有没有把问题,也就是 prefill的部分纳入统计。 但是我知道在这点上应该我的实验的脚本所对应的代码和RKV在这些公平性的细节上面是不对齐的。 所以请你帮我看一下整体的代码,然后尤其是注意这些benchmark是否公平的这些细节。 然后写一个MD文档,放在R-KV/weian_script/aime_sampled8这个文件夹下,告诉我有哪些东西是不对齐,为了实现公平的对比应该去修正的内容。 你不要去改动代码,只是先看一下有哪些地方是有问题的。请把RKV官方实现的细节作为参考。 之后的改动,如果有没对齐的地方, 那都是我自己的算法实现上面有问题, 我要把我自己的算法对齐它。 当然你不要执行,还是那句话, 你需要去先看有哪些地方是没对齐的, 然后再决定后续怎么办。 我还想起来有个地方是有问题的,就是我自己的算法需要用到一个统计结果的文件,应该是某个pt文件。 这个pt文件按道理不能在当前测试的这个数据集上进行统计,比如说我benchmark测的是AIME25的数据的话,那我应该在24上面去统计,不能在25上面去统计。 请你记录一下,然后你看的时候请你注意检查这些是不是站在写论文的角度来看的话是有问题的细节,类似于我之前提到的都算是。
 
 接下来我要跟你讲我想解决这些问题的方案,请你不要执行,先更新你的MD文档并跟我确认细节之后再讲。 我们分开讨论 首先 对于所有的问题 如果没有特别的声明的话 那么原则就是 每个问题设置一个新的argument 然后这个argument默认是关闭的 并且在关闭状态下 就是之前有问题的那些默认做法 当你把对应的arg激活之后 这个arg就会去修复对应的那个问题 你注意如果这地方有四个问题的话 你就对应四个arg 然后最后面我需要得到的脚本不会对每个问题单独做消融实验 但是会把这四个arg全部打开并激活 。 也就是,我想得到的这个脚本是把这四个arg全部打开激活,并且对应的实验是不会有这些不公平的问题。 然后最后面我需要你得到四个脚本,其实就对应着R-KV/weian_script/aime_sampled8/speckv这个文件夹底下那四个脚本（不要改动原有脚本 而是生成新的脚本）。 你在构建新脚本的时候要用一模一样的方式,只是把这些arg打开,然后把一些该适配的适配,包括但不限于输出目录是需要适配的。 名字也需要做對應的調整,方便我辨認這些腳本和輸出目錄是幹啥的。 前面的问题一跟问题二,你的修复方案是没问题的,你就照你这样执行就好了。 关于你说的问题三的话, 我觉得这里先暂时做一个粗糙的对齐,就是原来我自己的算法specKV是每128个token压缩一次, 请你帮我改小一点,改到32或者64,改成32吧, 这样子的话就缩小了两者之间的gap,就会相对来说更公平一点,我也不追求完美对齐。 关于你说的问题四的话,虽然说我们现在已经知道了,这个问题其实不是一个问题,它俩是等价的,只不过是不同的实现方法, 但是为了更加严谨的对比,我还是希望你在激活这个问题对应arg的时候, 需要切换到另外一个implementation,这个新的implementation是跟 RKV实现是相同方式的,确保绝对的安全。 你要在開發的時候注意代碼隔離和代碼安全問題, 也就是說你實現新的代碼的時候, 你不能修改過去代碼的功能以及邏輯, 你需要用arg把新實現的這些改動給隔離開來,不要影响已有代码的逻辑。
 
 R-KV/weian_script/aime_sampled8这个文件夹里面的脚本是我之前的实验所用的model都是qwen2.5的模型 接下来我需要你帮我做的任务是 你帮我把这个文件夹拷贝出一个副本来并重新命名 然后把这些脚本里面所用的模型统一改成qwen3 我指的是这个weian_development/attention_qk_analysis/capture_qk_distributed.py脚本里面用的默认模型,以/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B这个为准,是deepseek蒸馏的版本 副本中所有的脚本都要执行这个更改,全部使用新模型 但除了模型以及必要的适配工作以外都不要改。需要适配的东西包括但是不限于 输出目录可能需要更改 以及需要确认目前的实现是否直接换模型就行 还是说要对对应的代码执行对应的适配工作需要你自己确认 请你先不要执行工作,先确认有哪些东西是需要修改的,然后你的计划是什么样,确认你对这个工作的理解是啥,告诉我,我决定后你再执行。我还想到就是说 我们的环境里面它有一些库 我不确定环境里面的这些库是否支持新的qwen3模型 你需要去确认。 然后其实这个修改可能会有点复杂,因为我还有一些flag,这些flag你需要帮我确认一下（比如有些脚本名字中的 rank 和 norm 的功能）,如果你直接改的话,它是否能直接支持,如果不能简单修改支持的话,那应该做哪些修改,你需要把这些细节都搞清楚。
 
-首先你要做的第一件事情是先把我的脚本目录拷贝一个副本出来 然后你在这个副本文件夹里面写一个MD文件 MD文件里面就装着你刚刚写的这些区别以及要做的计划 写的详细点 然后你还要再补充我的一个要求 就是之后的所有开发要实现代码隔离 也就是说你在实现千问三的版本的时候 不能影响2.5的代码
+首先你要做的第一件事情是先把我的脚本目录拷贝一个副本出来 然后你在这个副本文件夹里面写一个MD文件 MD文件里面就装着你刚刚写的这些区别以及要做的计划 写的详细点 然后你还要再补充我的一个要求 就是之后的所有开发要实现代码隔离 也就是说你在实现qwen3的版本的时候 不能影响2.5的代码.因为我理解接下来的修改可能会比较复杂,又要修改环境,又要先跑完fullKV,然后还要再得到统计文件才能执行后续的实验, 所以你需要仔细思考一下,做一个to-do list出来,方便后面的同事追踪哪些实现了,哪些还没有实现, 以及有哪些东西实现了,这样子方便不同人看到这个MD文件都知道发生了啥,你还要把我的要求,以及一些开发规范都要写清楚,尽可能写详细。
+
+R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned.sh 这个脚本是我之前用来跑实验的一个脚本,它会压缩LLM的KV Cache,但是之前由于某些bug导致这个里面的compressor实际上并没有能被成功激活,按照我的理解,这个有 bug 的版本应该等价于一个用fullKV执行的LLM的结果。 它的实验输出在R-KV/outputs/aime_sampled8/speckv/aime24/norm_aligned_backup/eval/aime_sampled8_speckv_aime24_qwen_norm_aligned/aime24/default-default_math_multi_eval_cot_metrics.json这里,你可以查看,但是我发现它的实验结果和fullKV的结果（）不一样,会低一些,这个就很奇怪,是不是有什么setting我没有设置对,导致即使在KV Cache压缩功能没有激活的时候,它的性能还不如fullKV,有这样的情况吗,请你帮我检查。
+
+我记得之前有个Aligned的脚本,那个脚本里面是会激活和RKV一样的实现, 就是激活这个arg会切换到另外一种实现, 你在那个实现里面去实现两者的对齐（rkv 和 speckv 在实际 cache 用量上的对齐）,并且不要修改当不激活这个arg时候的代码和实现, 就实现代码隔离的开发。 请你先不要执行任务,你先写个MD文档,在这个脚本文件夹里面, 写清楚我的要求是啥,你的理解和计划是啥,然后你先让我确认之后再讲。
+
+R-KV/weian_script/aime_sampled8/speckv/CODE_REVIEW_REQUEST.md这个文件里面包含了一份代码审查的要求,你需要执行这份代码审查的要求,但是你不能单纯只follow它的要求,因为它有可能有些问题没有想到,你要根据这份文档的内容,根据你的理解去想想还有没有可能有其他的这个代码审查文件没想到的问题, 你都要去做一份充分详细的检查,然后最终的目标就是R-KV/weian_script/aime_sampled8/speckv/aligned.sh这个SH脚本里面的对应的所有的实验都跟RKV对齐R-KV/weian_script/aime_sampled8/rkv。
+
+我刚刚对你的同事说 “prefix这部分本来就应该不参与压缩 强制保留的呀 所以 prefix_length 不更新应该没问题呀？难道他不是这么做的？所以你后面说的问题我都跟不上 按道理实际 cache 用量应该是在[budget, budget+divide_length]之间波动，然后prefix这部分本来就应该不参与压缩，但是会计入实际的cache 用量。“，然后同事对我说
+“理解你的期望：压缩时缓存长度应该在 [budget, budget+divide_length] 间波动，同时 prefill 永远保留（但计入用量），只压缩 decode 部分。
+
+  当前实现的关键问题：prefill 根本没有被保护，第一次压缩时就和 decode token 一起参加 top‑k 竞争，可能被大量裁掉。这会在第一次压缩发生的那一刻就丢失上下文，导致前 100 个 token 内就出现严重退化。
+
+  具体原因：
+
+  - 触发点：should_compress 在 absolute_position % divide_length == 0 时为真，absolute_position 包含 prefill。举例：prefill=150，divide_length=128，则第一次压缩在 absolute_position=256 触发，也就是 decode 了 106
+    个 token 左右就压缩。
+  - 压缩动作：compute_keep_indices 对整段 cache（prefill+decode）算分数，直接选前 budget 个，完全没有 “prefill 强制保留” 的逻辑。
+  - 结果：一旦触发压缩，prefill 可能被裁掉，后续生成的 token 失去了关键上下文，输出立刻恶化。之后虽有 [budget, budget+divide_length] 的节奏，但前提上下文已损坏。
+
+  这与预期“prefill 永远保留，压缩只作用于 decode 部分”不符，是当前最可能导致早期输出崩掉的恶性 bug。需要在压缩时强制保留 prefill（或者仅对 decode 部分做 top‑k），否则第一次压缩就会破坏上下文。“
+他讲的是对的吗？是存在这个问题吗？请你不要修改代码，先让我了解情况
+
+
+
+我之前讓一個同事對齊了兩種實驗的setting,然後他執行完成了任務。 你要做的事情是檢查他是否正確對齊,有沒有引入什麼bug,然後邏輯是否對得上,是否符合我的目標。 如果有问题不确定的话,你需要写一个MD文档告诉我那些不确定的事情。 最早的時候我給他的命令如下
+“R-KV/weian_script/aime_sampled8/rkv/aime25/run_rkv_aime25_qwen.sh 和R-KV/weian_script/aime_sampled8/rkv/aime24/run_rkv_aime24_qwen.sh， 这两个脚本是RKV官方所给的官方实验setting所对应的脚本。R-KV/weian_script/aime_sampled8/speckv 这个路径里面的脚本是我自己的算法在这个库上实现的版本。 但是按道理,我自己的实验脚本所用的setting和benchmark应该和RKV官方的实验对齐。 但是我知道我有一些东西其实应该是没对齐的。 比如说kv cache的统计的时候,我不确定RKV有没有把问题,也就是 prefill的部分纳入统计。 但是我知道在这点上应该我的实验的脚本所对应的代码和RKV在这些公平性的细节上面是不对齐的。 所以请你帮我看一下整体的代码,然后尤其是注意这些benchmark是否公平的这些细节。 然后写一个MD文档,放在R-KV/weian_script/aime_sampled8这个文件夹下,告诉我有哪些东西是不对齐,为了实现公平的对比应该去修正的内容。 你不要去改动代码,只是先看一下有哪些地方是有问题的。请把RKV官方实现的细节作为参考。 之后的改动,如果有没对齐的地方, 那都是我自己的算法实现上面有问题, 我要把我自己的算法对齐它。 当然你不要执行,还是那句话, 你需要去先看有哪些地方是没对齐的, 然后再决定后续怎么办。 我还想起来有个地方是有问题的,就是我自己的算法需要用到一个统计结果的文件,应该是某个pt文件。 这个pt文件按道理不能在当前测试的这个数据集上进行统计,比如说我benchmark测的是AIME25的数据的话,那我应该在24上面去统计,不能在25上面去统计。 请你记录一下,然后你看的时候请你注意检查这些是不是站在写论文的角度来看的话是有问题的细节,类似于我之前提到的都算是。
+
+接下来我要跟你讲我想解决这些问题的方案,请你不要执行,先更新你的MD文档并跟我确认细节之后再讲。 我们分开讨论 首先 对于所有的问题 如果没有特别的声明的话 那么原则就是 每个问题设置一个新的argument 然后这个argument默认是关闭的 并且在关闭状态下 就是之前有问题的那些默认做法 当你把对应的arg激活之后 这个arg就会去修复对应的那个问题 你注意如果这地方有四个问题的话 你就对应四个arg 然后最后面我需要得到的脚本不会对每个问题单独做消融实验 但是会把这四个arg全部打开并激活 。 也就是,我想得到的这个脚本是把这四个arg全部打开激活,并且对应的实验是不会有这些不公平的问题。 然后最后面我需要你得到四个脚本,其实就对应着R-KV/weian_script/aime_sampled8/speckv这个文件夹底下那四个脚本（不要改动原有脚本 而是生成新的脚本）。 你在构建新脚本的时候要用一模一样的方式,只是把这些arg打开,然后把一些该适配的适配,包括但不限于输出目录是需要适配的。 名字也需要做對應的調整,方便我辨認這些腳本和輸出目錄是幹啥的。 前面的问题一跟问题二,你的修复方案是没问题的,你就照你这样执行就好了。 关于你说的问题三的话, 我觉得这里先暂时做一个粗糙的对齐,就是原来我自己的算法specKV是每128个token压缩一次, 请你帮我改小一点,改到32或者64,改成32吧, 这样子的话就缩小了两者之间的gap,就会相对来说更公平一点,我也不追求完美对齐。 关于你说的问题四的话,虽然说我们现在已经知道了,这个问题其实不是一个问题,它俩是等价的,只不过是不同的实现方法, 但是为了更加严谨的对比,我还是希望你在激活这个问题对应arg的时候, 需要切换到另外一个implementation,这个新的implementation是跟 RKV实现是相同方式的,确保绝对的安全。 你要在開發的時候注意代碼隔離和代碼安全問題, 也就是說你實現新的代碼的時候, 你不能修改過去代碼的功能以及邏輯, 你需要用arg把新實現的這些改動給隔離開來,不要影响已有代码的逻辑。
+“
+他在執行這些任務的時候已經做了很多修改,你可以通過看Git Commit來看過去相關的改動。 當然最近的改動不是所有都是對這個任務的,但是很多都是。 除了Git之外,他還寫了一個額外的文檔R-KV/weian_script/aime_sampled8/SPECKV_RKV_ALIGNMENT_ANALYSIS.md記錄了他的一些想法。你要端到端的检查它的改动,从它发现问题到对文件的修改,以及它提出的四个问题是否是正确的,是否涵盖了所有没有对齐的地方,以及它对这四个问题解决的方法是不是对的。 那么我还有一些其他的原则,第一个原则,所有的对齐改动不能影响已有的实验代码和脚本,也就是说我在运行原来的实验的脚本还要能够成功复现,因此新的改动不能影响之前的结果。 第二个原则,当它在做这些对齐的时候,新的对齐的实验脚本运行的时候,新的实验除了这些没有对齐的地方需要对齐之外,其他的东西都要跟原来一样,也就是说我只改有问题的地方,但凡没有问题的地方都不要去碰,只有在没有对齐的地方是要改的。 这里给你一个额外的信息,就是我知道有些东西它没有办法完全对齐,就比如说可能因为两种算法特有的一些性质导致它这个地方可能是允许一些细微的差别。 关于这些细微差别,如果不是很严重的话,你就把警告写在一个MD文件里面来警告我就行了,我会一个个去看,这些部分是我来负责,但是你负责告诉我问题,如果有很严重的问题你是需要直接讲明白,这个就是一个问题。 还有第三个原则,就是他在做某个这个MD文档中的某个问题的时候,忘记是哪个了,很有可能是第四个问题,就是RKV的算法的实现方式和我之前specKV实现方式是有区别的,因此是需要我把specKV的实现方法按照RKV的方式重新去实现一遍。 换句话说就是重构一遍,但是这个重构的工作很复杂,之前的同事搞错了很多错误,这个地方是你要重点审查的,那么我想说的这个地方的最关键的原则就是,我只是把它重构,但是按道理重构前后的两个版本,它应该是要完全等价的,压缩的KV是应该不变的。 你现在要做的两个事情,第一是需要去把里面的所有细节,包括prefix是否压缩,整个压缩的逻辑都去详细的过一遍,每个细节都不要放过,要确保重构前后的代码理论上应该是行为是一致的。 第二个的话是你可以想办法写一个简单的一些测试,去对比两种不同的实现方法,最后面实现出来的行为是一致的,但是你要避免使用大量计算的一些测试,就比如说你要把东西搬上GPU进行一个详细推理,通过这样子的方式去验证的话,计算开销太大了,你需要用一些比较低成本开销的办法来验证两者行为是高度等价的。 如果有细微不等价的地方,你也需要警告。关于最后这个原则,我补充说明一点。 首先,它改动的时候是同时修改了四个东西。 如果你直接去测试修改后对不上的话,肯定是对不上的。 因此,我的需求是,假设前面几个问题都一致的情况下,重构的代码是否能对得上。 你可能需要想一想,怎么样去分解问题,才能正确地测试。 你可以写额外的测试脚本在硬盘里面 但是不能修改已有的代码文件 你只能在不影响已有代码功能的情况下 新增一些测试的接口 这个是允许的 还有就是不要跑大规模的实验 你可以比如说挑一个问题出来 跑那么一两千个token 这种情况是允许你做的 但原则就是这些 你不能破坏已有的代码的功能 但是你可以往里面加内容 这个是允许的
+
+
+接下来我想让同事来修复这个问题 所以请你帮我写一个Prompt 来表达我的意图 你写的要专业一些 我的想法是这样子的 因为我们现在其实有两个版本 一个是原始的SPEC-KV 一个是和RKV对齐的SPEC-KV 那么我想让这个同事是在原始的SPEC-KV上面 去把每个KV HEAD 变成独立裁剪的版本去尝试一下 然后有两个关键的信息 第一个关键的信息是 它对原始版本SPEC-KV的修改 不能影响已有的代码 需要新增一个Argument 这个Argument默认是关闭的 也就是会走原始SPEC-KV的路线 但是一旦激活之后 就会让每个KV HEAD变成独立的 然后它修改前后 也就是在默认关闭的时候 它的行为必须和原始的SPEC-KV一致 不能有任何的变动 另外一个需要注意的信息就是 现在的模型通常是一个KV HEAD 会对应着多个KV HEAD 那么假设我们现在有一个KV HEAD 对应着一定数量的 query HEAD 那这种情况下 对于这些query HEAD它们的 kv删减是同步的 因为你这几个query HEAD 它是Share同一个KV HEAD 所以在对于单个的KV HEAD来讲 因为你最小的粒度就是KV HEAD 所以你在删减一个KV HEAD上面的KV CACHE的时候 那对应所有的Query 其实都会被影响 因此在删减KV CACHE的时候 要删掉哪些KV 是由多个HEAD的打分来决定的 至于Share同一个KV HEAD的Query HEAD如何同步 就是按照之前的方法 默认方式来同步就行。同时在修改好代码之后,也要按照之前的那些脚本的位置给我写新的SH脚本。 那些新写的脚本默认就是激活这些改动的。 然后两种数据集都要跑,就是24、25数据集都要跑。 还有就是 norm的,直跑norm的 aggregation的方法。 同事不要運行實驗,只要檢查過代碼沒問題,給我腳本就行了,我來跑。
+
+目标概述
+
+在当前仓库的 SpeckV 原始实现（非 R-KV 对齐模式）上，新增一个可选参数：开启后按 “KV head 独立裁剪” 的方式运行；默认关闭时行为必须与现有原始 SpeckV 完全一致、不变。修改完成后，在 R-KV/weian_script/aime_sampled8/speckv/ 目录下，为AIME24/AIME25 的 norm 评测新增脚本，默认开启该新参数。无需运行实验，只需提交代码和脚本。
+
+代码位置与现状
+
+- 原始 SpeckV 实现：R-KV/weian_development/speckv/ 目录下的原始路径（非 speckv_rkv_style.py，后者是 R-KV 对齐版）。当前原始 SpeckV 的裁剪是“全局统一裁剪”：跨所有被采样的头（跨所有层）聚合分数，生成一组 keep_indices，对所有层的 KV 一
+  次性裁剪。
+- R-KV 对齐的 SpeckV 在 weian_development/speckv/speckv_rkv_style.py，本需求不改这一条线。
+- 运行脚本目录：R-KV/weian_script/aime_sampled8/speckv/ 下有 aime24/、aime25/ 子目录，里面已有 norm/rank 的脚本（名字中不带有_aligned，_aligned代表的是R-KV 对齐版）。此次只需要为 AIME24、AIME25 的 norm 评测新增脚本，默认开启新参数。rank 版本不用管
+
+新需求（按 KV head 独立裁剪的实验模式）
+
+1. 新增一个 CLI/配置参数（默认 False）。
+    - 默认 False 时：行为必须与当前原始 SpeckV 完全一致（全局统一裁剪，不改变任何现有逻辑）。
+    - 当 True 时：进入“KV head 独立裁剪”模式。
+2. “KV head 独立裁剪”模式的行为：
+    - 分数计算：每个 KV head 仍然用当前的频率打分逻辑，但不再把所有头的分数合成一个全局 top-k；而是每个 KV head 自己决定保留/删除哪些 token。
+    - 裁剪粒度：以 KV head 为最小粒度。一个 KV head 可能被多个 query head 共享（GQA 情形），删除该 KV head 的某个 token 时，所有共享该 KV head 的 query heads 都会同步受影响，沿用原有“按 KV head 粒度裁剪、影响所有共享 query heads”的同步方式。
+    - 前缀保护：prefill（prefix）永远保留且计入预算，只有 decode 部分参与裁剪；原有的 include_prefill_in_budget、divide_length 等控制流保持一致。
+    - 预算分配：总预算仍为 kv_budget；prefill 占用多少就剩余多少给 decode；每个 KV head 独立在自身的 decode 部分内选 top-k（可参考当前全局做法拆分为 per-head top-k）。
+3. 兼容性/隔离要求：
+    - 不修改默认路径的行为；关闭新参数时行为 bitwise 等价现状。
+    - 不改 speckv_rkv_style.py（R-KV 对齐版），只在原始 SpeckV 路径增加分支/参数。
+    - 对 GQA：按当前头映射方式定位 KV head（head//groups），在 per-head 裁剪时保持这一映射。
+    - 打分逻辑（频率统计、rank/zscore 归一化）沿用现有实现；仅改变“如何聚合/应用裁剪索引”的粒度。
+4. 参数贯通：
+    - 在解析/调用链中增加新参数（默认 False），在生成 SpeckV pruner/patch 时传递。
+    - 关闭时不影响现有参数链路、默认值与行为。
+
+脚本产出要求
+
+- 位置：R-KV/weian_script/aime_sampled8/speckv/aime24/ 和 .../aime25/。
+- 新增脚本：AIME24 norm、AIME25 norm，各一个；命名可沿用现有风格（例如 _headwise.sh 或 _independent_heads.sh，自行斟酌但要与现有命名一致性）。
+- 脚本应默认开启新参数，其余参数、输出目录、日志目录风格与现有 norm 脚本一致，并与对应的 YAML（如已有 aligned/原始 YAML）保持一致路径约定。若需新 YAML，可放在 R-KV/weian_script/configs/，命名沿用现有模式。
+- 不需要 rank 版本，不需要运行实验，只需代码 + 脚本即可。
+
+验证要点（自查）
+
+- 新参数默认关闭时：输出/行为与当前原始 SpeckV 完全一致。
+- 开启新参数时：
+    - 裁剪索引按 KV head 独立生成并应用，不再用单一全局 keep_indices。
+    - prefix 永久保留（并计入预算）；decode 部分在 per-head 内裁剪。
+    - GQA 共享 KV head 的 query heads 同步受影响，无需额外逻辑，只要以 KV head 为粒度裁剪即可。
+    - divide_length/包含前缀预算等流程与现有 SpeckV 保持一致。
+- 不改 R-KV 对齐的 SpeckV 路径。
+
+交付物
+
+- 代码改动（含新参数、分支实现）。
+- 新增脚本（AIME24/AIME25 norm，默认开启新参数），必要时附对应 YAML。
+- 不运行实验。
+
+
+这里我有一个理解,不知道对不对,如果我讲的不对,请你纠正我。 就是你这里提到一句话是这样子”无法让 head 0 保留 token [1,5,10]，head 1 保留 token [2,7,15]（seq_len 不一致）“。 首先我的理解是这样,就是说,你讲的对的部分是,如果序列长度不一样的话,那不同head确实不能并行计算,这个是有可行性上的问题,这个没错。 但我的问题是,如果对于同一层中的不同head,如果我保留的kv cache的数量是一样的,也就是对于每个head来讲,它的长度是一样的情况下,即便每个head保留是不同位置的kv,那也不会导致可行性问题。 就是说,它的根本的限制是在于你同一层中的不同head,它的矩阵形状得一样,这样你才能拼接在一起并行计算,但是如果你同一层中不同的head保留的kv cache的对应的token id是不一样的话,这个不影响,只要把形状保持是一样就行。 但是我理解,目前我们是能够满足形状一致的这个要求的,因为我们不同head,哪怕是不同层的head,它保留的kv cache的数量也是一致的,打个比方,就是那个budget,对吧,所以我不知道我理解有没有问题,如果有问题请你纠正我。请你先不要执行 和我去人任务细节先。还有另外一个问题是，目前你打算如何聚合同一个 kv head 所对应的不同 query head 的分数呢？有办法复用之前的做法吗
+
+我说了：R-KV/weian_script/aime_sampled8/SPECKV_RKV_ALIGNMENT_ANALYSIS.md里面记录了 4 个问题分别是 统计文件数据泄露 KV Budget 语义差异 压缩频率差异 
+压缩实现方式差异。R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned.sh这个脚本修复了这几个问题，其中压缩实现方式差异是由重构代码的方式来修复的。但是我发现重构的代码有可能会引入很多难以发现的 
+bug，以及压缩实现方式差异本身即使不对齐也不太可能会引入啥问题。所以我在想 是不是把run_speckv_aime24_qwen_norm_aligned.sh拷贝出一个副本，然后把启用重构代码的 arg 关掉就能达到我对齐，但是避免引入 bug 的目的？请你帮我看看相关的代码 
+先不要做任何的修改  只是 review 一下代码，看看这样是否可行 以及如果把重构代码的 arg 关掉，把其他对齐的 arg 打开，其余的问题能不能被正确的对齐，比如统计文件数据泄露之类前面提到的问题，然后这样做会不会导致啥问题。 
+你回答了：
+问题2 的重要差异（Budget 计算逻辑不同）
+
+这是我之前在 review 中发现的问题。原实现和 RKV-style 实现的 budget 语义有本质区别：
+
+原实现 (sparse_round_pruner_prefill_keep.py):
+最终 cache 大小 = prefix_length + min(budget - round_window, decode_count)
+
+RKV-style 实现 (speckv_rkv_style.py):
+最终 cache 大小 = budget（精确控制）
+解码 budget = budget - prefix_length
+
+具体例子（aligned 配置参数）：
+- budget = 2048, round_window = 32, 典型 prefix_length = 150
+
+| 实现      | 最终 cache 大小   |
+|-----------|-------------------|
+| 原实现    | 150 + 2016 = 2166 |
+| RKV-style | 2048              |
+
+差异: 原实现会比 RKV-style 多保留约 118 个 token（= prefix_length - round_window = 150 - 32）。
+
+Budget 波动区间分析
+
+R-KV 的逻辑 (r1_kv.py)
+
+# Line 48-49: 不压缩条件
+if kv_cache_len < self.budget:
+    return key_states, value_states
+
+# Line 85: 压缩时保留的 token 数
+indices = score_for_topk.topk(self.budget - self.window_size, dim=-1).indices
+# 最终保留: (budget - window_size) + window_size 最近的 = budget
+
+压缩触发点 (modeling.py line 623):
+is_newline = self.length % self.config.divide_length == 0
+
+R-KV 的波动范围:
+- 压缩后：budget
+- 压缩前（刚好触发时）：budget + divide_length
+- 范围: [budget, budget + divide_length] ✅ 你说的对
+
+---
+SpeckV 原实现的逻辑
+
+# Line 194: 压缩到的目标大小
+keep_capacity = max(0, self.max_keys - self.round_window)
+
+# Line 208-209: 触发条件
+def should_start_next_round(self) -> bool:
+    return self.tokens_in_round >= self.round_window
+
+SpeckV 的波动范围:
+- 压缩后：prefix + (budget - round_window)
+- 压缩前：prefix + budget
+- 范围: [prefix + budget - round_window, prefix + budget]
+
+如果忽略 prefix 的额外开销，等效于 [budget - round_window, budget] ✅ 你说的对
+
+---
+两个差异总结
+
+| 差异       | R-KV                        | SpeckV 原实现                    |
+|------------|-----------------------------|----------------------------------|
+| 压缩后大小 | budget                      | prefix + (budget - round_window) |
+| 压缩前大小 | budget + divide_length      | prefix + budget                  |
+| 波动方向   | 向上波动 [budget, budget+N] | 向下波动 [budget-N, budget]      |
+
+---
+我对任务的理解
+
+你希望我：
+
+1. 保持使用原实现（不用 --rkv-style-compression）
+2. 新增一个 arg 来修复以下两个差异：
+  - 差异A: Budget 计算（让原实现也能精确压缩到 budget 而非 prefix + budget - round_window）
+  - 差异B: 波动区间方向（从 [budget-N, budget] 改为 [budget, budget+N]）
+
+具体来说：
+- 压缩后大小应该是 budget（而非 prefix + budget - round_window）
+- 波动区间应该是 [budget, budget + round_window]（向上波动，而非向下）
+
+这意味着需要修改的逻辑：
+1. 压缩触发条件：从 tokens_in_round >= round_window 改为类似 R-KV 的 length % round_window == 0
+2. 压缩后大小：从 keep_capacity = budget - round_window 改为 keep_count = budget - prefix_length（decode 部分）
+
+---
+请确认：
+1. 我对任务的理解是否正确？
+2. 新 arg 的名字建议叫 --rkv-aligned-budget 或 --align-budget-behavior，你有偏好吗？
+3. 是否需要在文档（SPECKV_RKV_ALIGNMENT_ANALYSIS.md）中记录这个新问题？
+
+
+● Code Review Request: SpeckV --rkv-aligned-budget 实现
+
+  背景
+
+  SPECKV_RKV_ALIGNMENT_ANALYSIS.md 记录了 SpeckV 与 R-KV 对比实验中的 4 个公平性问题：
+
+  1. 统计文件数据泄露 - 通过 yaml 配置交叉使用统计文件解决
+  2. KV Budget 语义差异 - 通过 --include-prefill-in-budget 解决
+  3. 压缩频率差异 - 通过 yaml 配置 sparse_round_window=32 解决
+  4. 压缩实现方式差异 - 通过 --rkv-style-compression 使用重构代码解决
+
+  现有的 run_speckv_*_aligned.sh 脚本开启了所有对齐选项，包括 --rkv-style-compression。
+
+  问题
+
+  用户发现重构代码（speckv_rkv_style.py）可能引入难以发现的 bug。同时，"压缩实现方式差异"本身即使不对齐也不太可能影响实验结论。
+
+  因此用户希望：关闭 --rkv-style-compression（不使用重构代码），只保留其他 3 个对齐选项，在原实现上实现对齐
+  以下的内容是同事发现的内容，以下讲的所有东西都要检查，包括同事是否有遗漏没有发现的东西 以及他发现的东西是不是对的1
+发现的新问题
+
+  Review 代码后发现：关闭 --rkv-style-compression 回到原实现后，存在 budget 计算方式差异（记录为问题 2.5）：
+
+  - R-KV 压缩到精确的 budget
+  - 原实现压缩到 budget - round_window
+
+  且 --include-prefill-in-budget 在原实现中未能正确生效：只影响了压缩触发判断，未正确调整实际裁剪目标。
+
+  本次修改
+
+  1. 新增 --rkv-aligned-budget 参数：修复 budget 计算方式差异
+  2. 修复 --include-prefill-in-budget：让其在原实现中正确生效
+  3. 创建 4 个新脚本 *_aligned_budget.sh：使用原实现 + 对齐参数，不使用重构代码
+
+  修改的文件
+
+  | 文件                                | 修改类型             |
+  |-------------------------------------|----------------------|
+  | sparse_round_pruner_prefill_keep.py | 核心逻辑             |
+  | rkv_speckv_generate.py              | 参数传递             |
+  | rkv_sharded_eval.py                 | CLI 参数             |
+  | SPECKV_RKV_ALIGNMENT_ANALYSIS.md    | 文档（新增问题 2.5） |
+  | run_speckv_*_aligned_budget.sh      | 新脚本 (×4)          |
+
+
+我发现你写的R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_budget.sh这个脚本 相较于之前的脚本（R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm.sh）运行速度非常慢 根据我的经验 这个地方很有可能在触发压缩的逻辑上有问题 就比如说新的脚本 每一步都在触发压缩 或者是你造成了一些别的意想不到的 这样子的关于推理性能的问题 请你检查

@@ -8,6 +8,7 @@
 |------|----------|----------|------|
 | 统计文件数据泄露 | **严重** | yaml 配置 (cross-dataset stats) | ✅ 已实现 |
 | KV Budget 语义差异 | **严重** | `--include-prefill-in-budget` | ✅ 已实现 |
+| **Budget 计算方式差异** | **严重** | `--rkv-aligned-budget` | ✅ 已实现 |
 | 压缩频率差异 | **中等** | yaml 配置 (sparse_round_window=32) | ✅ 已实现 |
 | 压缩实现方式差异 | **低**（等价但为严谨） | `--rkv-style-compression` | ✅ 已实现 |
 
@@ -131,6 +132,80 @@ def _dynamic_cache_size(self) -> int:
         return len(self.cache_positions)  # 含 prefill
     return max(0, len(self.cache_positions) - self.prefix_length)  # 原有逻辑
 ```
+
+---
+
+## 问题 2.5：Budget 计算方式差异
+
+### 问题描述
+
+即使启用 `--include-prefill-in-budget`，SpeckV 和 R-KV 在 budget 计算上仍存在两个差异：
+
+**差异 A：压缩目标**
+
+| 方法 | 压缩后保留数量 | 说明 |
+|------|----------------|------|
+| R-KV | `budget` | 精确压缩到 budget（选择 budget - window_size 个旧 token，加上 window_size 个新 token = budget） |
+| SpeckV | `budget - round_window` | 压缩到 budget - round_window，然后生成新 token 直到达到 budget |
+
+**差异 B：缓存波动方向**
+
+| 方法 | 缓存大小波动范围 | 说明 |
+|------|------------------|------|
+| R-KV | `[budget, budget + window_size]` → 压缩回 `budget` | 先增加再压缩 |
+| SpeckV | `[budget - round_window, budget]` | 先压缩再增加 |
+
+### 解决方案
+
+| Arg | `--rkv-aligned-budget` |
+|-----|------------------------|
+| 默认值 | `False`（SpeckV 原有行为：压缩到 budget - round_window） |
+| 激活后 | `True`（对齐 R-KV：压缩到 budget 精确值） |
+
+**激活后的行为：**
+- `keep_capacity = budget`（而非 `budget - round_window`）
+- 缓存大小波动范围变为 `[budget, budget]`（与 R-KV 一致）
+
+### 参数传递路径
+
+```
+脚本 --rkv-aligned-budget
+    ↓
+rkv_sharded_eval.py (argparse 解析)
+    ↓
+apply_speckv_generate_patch(rkv_aligned_budget=args.rkv_aligned_budget)
+    ↓
+SparsePruningConfig(rkv_aligned_budget=...)  # dataclass 新增字段
+    ↓
+SparseRoundPruner(config)  # 通过 self.rkv_aligned_budget 访问
+    ↓
+ensure_capacity() / start_next_round()  # 条件逻辑
+```
+
+### 实现方式
+
+在 `sparse_round_pruner_prefill_keep.py` 的两个方法中添加条件逻辑：
+
+```python
+def ensure_capacity(self, past_key_values):
+    # 原有逻辑: keep_capacity = max(0, self.max_keys - self.round_window)
+    # 新逻辑: 根据 rkv_aligned_budget 选择
+    keep_capacity = self.max_keys if self.rkv_aligned_budget else max(0, self.max_keys - self.round_window)
+    ...
+
+def start_next_round(self, past_key_values):
+    # 同上
+    keep_capacity = self.max_keys if self.rkv_aligned_budget else max(0, self.max_keys - self.round_window)
+    ...
+```
+
+### 测试用例
+
+| 测试用例 | 配置 | 预期行为 |
+|----------|------|----------|
+| 默认行为 | `rkv_aligned_budget=False`, `include_prefill_in_budget=False` | 缓存大小 ∈ [budget - round_window, budget]，prefill 不计入 budget |
+| 仅 Budget 对齐 | `rkv_aligned_budget=True`, `include_prefill_in_budget=False` | 缓存大小 = budget 精确值（部分对齐） |
+| 完全对齐 | `rkv_aligned_budget=True`, `include_prefill_in_budget=True` | 缓存大小 = budget 精确值，prefill 计入 budget（完全对齐 R-KV） |
 
 ---
 
