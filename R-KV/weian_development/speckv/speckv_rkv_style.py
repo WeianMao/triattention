@@ -148,11 +148,13 @@ class SpeckVRKVStyle:
         prefix_length: int = 0,
     ) -> torch.Tensor:
         """
-        Compute keep_indices by aggregating scores from all layers.
+        Compute keep_indices using union-based selection (aligned with SparseRoundPruner).
 
-        Each layer's sampled heads contribute to the final score.
-        This matches the original SpeckV behavior where all sampled heads
-        across all layers are used to compute a single aggregated score.
+        Algorithm:
+        1. Compute scores only for decode tokens (not prefill)
+        2. Apply normalization only on decode tokens
+        3. Add noise for tie-breaking
+        4. Union-based selection: each head selects top-k, then select from union
 
         Prefill tokens (first prefix_length) are always preserved.
         Only decode tokens compete for the remaining budget.
@@ -168,74 +170,163 @@ class SpeckVRKVStyle:
             return torch.arange(0, device=self.config.device)
 
         kv_cache_len = pkv_tuple[0][0].shape[-2]
-        key_positions = torch.tensor(
-            self.cache_positions[:kv_cache_len],
-            device=self.config.device,
-            dtype=torch.long
-        )
 
         # Nothing to compress
         if kv_cache_len <= self.budget:
             return torch.arange(kv_cache_len, device=self.config.device)
 
-        # Collect scores from all layers' sampled heads
+        # Determine decode range
+        decode_start = min(prefix_length, kv_cache_len)
+        decode_count = max(0, kv_cache_len - decode_start)
+
+        if decode_count == 0:
+            # Only prefill tokens, keep as many as budget allows
+            return torch.arange(min(self.budget, kv_cache_len), device=self.config.device)
+
+        # Budget for decode tokens
+        decode_budget = max(0, self.budget - decode_start)
+        if decode_budget == 0:
+            # Budget exhausted by prefill
+            return torch.arange(min(self.budget, decode_start), device=self.config.device)
+
+        # Get positions for decode tokens only (aligned with SparseRoundPruner)
+        decode_positions = torch.tensor(
+            self.cache_positions[decode_start:kv_cache_len],
+            device=self.config.device,
+            dtype=torch.long
+        )
+
+        # Collect scores from all layers' sampled heads (decode tokens only)
         all_head_scores: List[torch.Tensor] = []
         for layer_idx, (key_states, _) in enumerate(pkv_tuple):
-            layer_scores = self._compute_layer_head_scores(key_states, key_positions, layer_idx)
+            layer_scores = self._compute_layer_head_scores(
+                key_states, decode_positions, layer_idx, start_index=decode_start
+            )
             if layer_scores is not None:
                 all_head_scores.append(layer_scores)
 
         if not all_head_scores:
             # No sampled heads, return first budget indices
-            return torch.arange(self.budget, device=self.config.device)
+            prefill_indices = torch.arange(decode_start, device=self.config.device)
+            decode_indices = torch.arange(decode_start, min(decode_start + decode_budget, kv_cache_len), device=self.config.device)
+            return torch.cat([prefill_indices, decode_indices])
 
-        # Stack all head scores and aggregate (same as original SpeckV)
-        head_matrix = torch.cat(all_head_scores, dim=0)  # [total_sampled_heads, seq_len]
+        # Stack all head scores: [total_sampled_heads, decode_seq_len]
+        head_matrix = torch.cat(all_head_scores, dim=0)
 
+        # Apply normalization (only on decode tokens, aligned with SparseRoundPruner)
         if self.use_rank_aggregation:
             ranks = torch.argsort(torch.argsort(head_matrix, dim=1, descending=True), dim=1)
             head_matrix = ranks.float()
-            combined = -head_matrix.min(dim=0).values  # Negate for topk
-        elif self.normalize_scores:
+        elif self.normalize_scores and head_matrix.numel() > 0:
             mean = head_matrix.mean(dim=1, keepdim=True)
             std = head_matrix.std(dim=1, unbiased=False, keepdim=True).clamp_min(1e-6)
             head_matrix = (head_matrix - mean) / std
-            combined = head_matrix.max(dim=0).values
+
+        # Add noise for tie-breaking (aligned with SparseRoundPruner)
+        if self.generator is not None and head_matrix.numel() > 0:
+            noise = torch.rand(
+                head_matrix.shape,
+                device=head_matrix.device,
+                generator=self.generator,
+            ) * 1e-6
+            head_matrix = head_matrix + noise
+
+        # Compute combined scores for union-based selection
+        if self.use_rank_aggregation:
+            combined = -head_matrix.min(dim=0).values  # Negate for topk
         else:
             combined = head_matrix.max(dim=0).values
 
-        # Prefill tokens are always preserved, only decode tokens compete
-        if prefix_length > 0 and prefix_length < kv_cache_len:
-            # Budget for decode tokens (prefill is counted in total budget)
-            decode_budget = self.budget - prefix_length
-            if decode_budget > 0:
-                # Select top-k from decode portion only
-                decode_scores = combined[prefix_length:]
-                k = min(decode_budget, decode_scores.shape[0])
-                decode_topk = torch.topk(decode_scores, k=k, largest=True).indices
-                decode_keep = decode_topk + prefix_length  # offset to original indices
-                # Combine prefill (always kept) + selected decode tokens
-                prefill_keep = torch.arange(prefix_length, device=self.config.device)
-                keep_indices = torch.cat([prefill_keep, decode_keep])
-                keep_indices = torch.sort(keep_indices).values
-            else:
-                # Budget <= prefix_length, keep only prefill (truncated if needed)
-                keep_indices = torch.arange(min(self.budget, prefix_length), device=self.config.device)
-        else:
-            # No prefix protection, use original logic
-            topk_indices = torch.topk(combined, k=self.budget, largest=True).indices
-            keep_indices = torch.sort(topk_indices).values
+        # Union-based selection (aligned with SparseRoundPruner)
+        keep_count = min(decode_budget, decode_count)
+        decode_keep_indices = self._select_union_based(head_matrix, combined, keep_count)
+
+        # Combine prefill (always kept) + selected decode tokens
+        prefill_indices = torch.arange(decode_start, device=self.config.device)
+        decode_keep_absolute = decode_keep_indices + decode_start
+        keep_indices = torch.cat([prefill_indices, decode_keep_absolute])
+        keep_indices = torch.sort(keep_indices).values
 
         return keep_indices
+
+    def _select_union_based(
+        self,
+        per_head_scores: torch.Tensor,
+        combined: torch.Tensor,
+        keep_count: int,
+    ) -> torch.Tensor:
+        """
+        Union-based token selection (aligned with SparseRoundPruner).
+
+        Algorithm:
+        1. Each head independently selects top-k tokens
+        2. Take union of all heads' selections
+        3. From union, select top-k by combined score
+        4. If union < k, fill from remaining tokens
+
+        Args:
+            per_head_scores: [num_heads, seq_len] scores per head
+            combined: [seq_len] aggregated scores
+            keep_count: number of tokens to keep
+
+        Returns:
+            keep_indices: indices of tokens to keep (relative to decode start)
+        """
+        candidate_count = combined.shape[0]
+
+        if candidate_count <= keep_count:
+            return torch.arange(candidate_count, device=combined.device, dtype=torch.long)
+
+        # Step 1: Each head selects top-k
+        per_head_quota = min(keep_count, candidate_count)
+        union_mask = torch.zeros(candidate_count, device=combined.device, dtype=torch.bool)
+
+        for head_scores in per_head_scores:
+            head_k = min(per_head_quota, head_scores.numel())
+            if head_k == 0:
+                continue
+            top_idx = torch.topk(head_scores, k=head_k, largest=True).indices
+            union_mask[top_idx] = True
+
+        # Step 2: Get union indices
+        union_indices = torch.nonzero(union_mask, as_tuple=False).view(-1)
+        if union_indices.numel() == 0:
+            union_indices = torch.arange(0, 0, device=combined.device, dtype=torch.long)
+
+        # Step 3: Select from union by combined score
+        if union_indices.numel() >= keep_count:
+            subset_scores = combined.index_select(0, union_indices)
+            top_subset = torch.topk(subset_scores, k=keep_count, largest=True).indices
+            return union_indices.index_select(0, torch.sort(top_subset).values)
+
+        # Step 4: Fill from remaining if union is too small
+        remaining = keep_count - union_indices.numel()
+        available = candidate_count - union_indices.numel()
+        if remaining > 0 and available > 0:
+            residual_scores = combined.clone()
+            residual_scores[union_mask] = float("-inf")
+            extra_k = min(remaining, available)
+            extra_indices = torch.topk(residual_scores, k=extra_k, largest=True).indices
+            union_indices = torch.cat([union_indices, extra_indices])
+
+        return torch.sort(union_indices).values
 
     def _compute_layer_head_scores(
         self,
         key_states: torch.Tensor,
         key_positions: torch.Tensor,
         layer_idx: int,
+        start_index: int = 0,
     ) -> Optional[torch.Tensor]:
         """
         Compute per-head frequency scores for a single layer.
+
+        Args:
+            key_states: Key tensor from the cache [batch, num_heads, seq_len, head_dim]
+            key_positions: Absolute positions of the tokens to score
+            layer_idx: Which layer this is
+            start_index: Starting index in key_states to gather from (for decode-only scoring)
 
         Returns:
             Tensor of shape [num_heads_in_layer, seq_len] or None if no sampled heads
@@ -251,6 +342,10 @@ class SpeckVRKVStyle:
         if not layer_heads:
             return None
 
+        # Build gather indices for extracting keys from cache
+        seq_len = key_positions.shape[0]
+        gather_indices = torch.arange(seq_len, device=self.config.device, dtype=torch.long) + start_index
+
         per_head_scores: List[torch.Tensor] = []
         for layer, head in layer_heads:
             stats = self.head_stats[(layer, head)]
@@ -260,7 +355,9 @@ class SpeckVRKVStyle:
             if self.num_key_value_heads and self.num_attention_heads:
                 kv_head = min(key_states.shape[1] - 1, head // max(1, self.num_key_value_groups))
 
-            k_values = key_states[0, kv_head].to(device=self.config.device, dtype=self.config.dtype)
+            # Gather keys at specified indices (aligned with SparseRoundPruner)
+            k_values = key_states[0, kv_head].index_select(0, gather_indices)
+            k_values = k_values.to(device=self.config.device, dtype=self.config.dtype)
 
             # Invert RoPE
             k_unrot = invert_rope(k_values, cos_table, sin_table, self.attention_scale, style=self.rope_style)
