@@ -20,5 +20,6 @@ python3 "${PROJECT_ROOT}/R-KV/weian_development/rkv_sharded_dispatch.py" \
   --sparse-normalize-scores \
   --include-prefill-in-budget \
   --rkv-style-compression \
+  --rkv-style-slack-trigger \
   --divide-length 128 \
   "$@"

@@ -359,6 +359,14 @@ def parse_arguments() -> argparse.Namespace:
         help="Use R-KV style attention-layer compression instead of generate wrapper.",
     )
     parser.add_argument(
+        "--rkv_style_slack_trigger",
+        "--rkv-style-slack-trigger",
+        dest="rkv_style_slack_trigger",
+        type=str2bool,
+        default=False,
+        help="For R-KV style compression, trigger pruning at budget + divide_length (like generate wrapper).",
+    )
+    parser.add_argument(
         "--rkv_aligned_budget",
         "--rkv-aligned-budget",
         dest="rkv_aligned_budget",
@@ -555,6 +563,7 @@ def main(args: argparse.Namespace) -> None:
                 use_rank_aggregation=args.use_rank_aggregation,
                 include_prefill_in_budget=args.include_prefill_in_budget,
                 divide_length=args.divide_length,
+                use_slack_trigger=args.rkv_style_slack_trigger,
             )
         else:
             # Use original generate wrapper implementation

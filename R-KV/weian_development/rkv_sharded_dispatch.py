@@ -148,6 +148,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.set_defaults(rkv_style_compression=None)
     parser.add_argument(
+        "--rkv-style-slack-trigger",
+        dest="rkv_style_slack_trigger",
+        action="store_true",
+        help="Override runner arg: for R-KV style, trigger at budget + divide_length before pruning.",
+    )
+    parser.add_argument(
+        "--no-rkv-style-slack-trigger",
+        dest="rkv_style_slack_trigger",
+        action="store_false",
+        help="Override runner arg: for R-KV style, trigger at budget only (default).",
+    )
+    parser.set_defaults(rkv_style_slack_trigger=None)
+    parser.add_argument(
         "--rkv-aligned-budget",
         dest="rkv_aligned_budget",
         action="store_true",
@@ -553,6 +566,8 @@ def main() -> None:
         runner_args["include_prefill_in_budget"] = args.include_prefill_in_budget
     if args.rkv_style_compression is not None:
         runner_args["rkv_style_compression"] = args.rkv_style_compression
+    if args.rkv_style_slack_trigger is not None:
+        runner_args["rkv_style_slack_trigger"] = args.rkv_style_slack_trigger
     if args.rkv_aligned_budget is not None:
         runner_args["rkv_aligned_budget"] = args.rkv_aligned_budget
     if args.divide_length is not None:

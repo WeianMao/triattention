@@ -48,6 +48,7 @@ class SpeckVRKVStyleConfig:
     use_rank_aggregation: bool = False
     include_prefill_in_budget: bool = False
     divide_length: int = 128  # Compress every N steps (like R-KV's divide_length)
+    use_slack_trigger: bool = False  # If True, trigger at budget + divide_length (like generate wrapper)
 
 
 class SpeckVRKVStyle:
@@ -132,6 +133,7 @@ class SpeckVRKVStyle:
         self.score_aggregation = config.score_aggregation
         self.normalize_scores = config.normalize_scores
         self.use_rank_aggregation = config.use_rank_aggregation
+        self.use_slack_trigger = config.use_slack_trigger
 
         # Random generator
         self.generator: torch.Generator | None = None
@@ -417,6 +419,7 @@ def apply_speckv_rkv_style_patch(
     use_rank_aggregation: bool = False,
     include_prefill_in_budget: bool = False,
     divide_length: int = 128,
+    use_slack_trigger: bool = False,
 ) -> None:
     """
     Apply SpeckV with R-KV style compression triggering.
@@ -442,6 +445,7 @@ def apply_speckv_rkv_style_patch(
         use_rank_aggregation=use_rank_aggregation,
         include_prefill_in_budget=include_prefill_in_budget,
         divide_length=divide_length,
+        use_slack_trigger=use_slack_trigger,
     )
 
     compressor = SpeckVRKVStyle(config)
@@ -583,16 +587,25 @@ def apply_speckv_rkv_style_patch(
             comp.cache_positions.extend(new_positions)
             comp.absolute_position += added
 
-        # Apply compression when cache exceeds budget AND at divide_length interval
+        # Apply compression based on trigger mode
         effective_size = seq_len
         if not comp.config.include_prefill_in_budget:
             effective_size = max(0, seq_len - comp.prefix_length)
 
-        # Only compress every divide_length steps (like R-KV)
-        # Use absolute_position (total tokens including prefill) to match R-KV's length-based check
-        should_compress = (comp.absolute_position % comp.divide_length == 0) if is_decode_step else False
+        if comp.use_slack_trigger:
+            # Mimic generate-wrapper behavior: allow cache to grow to budget + divide_length, then prune
+            trigger_threshold = comp.budget + comp.divide_length
+            should_compress = is_decode_step and effective_size >= trigger_threshold
+        else:
+            # Original R-KV style: compress when cache hits budget, gated by divide_length interval
+            trigger_threshold = comp.budget
+            should_compress = (
+                is_decode_step
+                and effective_size >= trigger_threshold
+                and (comp.absolute_position % comp.divide_length == 0)
+            )
 
-        if effective_size >= comp.budget and should_compress:
+        if should_compress:
             # Compute keep_indices using scores from ALL layers' sampled heads
             # Prefill tokens are always preserved, only decode tokens are compressed
             keep_indices = comp.compute_keep_indices(pkv_tuple, prefix_length=comp.prefix_length)
