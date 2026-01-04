@@ -387,10 +387,19 @@ class SpeckVRKVStyle:
         return torch.stack(per_head_scores, dim=0)  # [num_heads, seq_len]
 
     def reset_compression_state(self) -> None:
-        """Reset state for new generation."""
+        """Reset state for new generation (aligned with SparseRoundPruner recreation)."""
         self.cache_positions = []
         self.absolute_position = 0
         self.prefix_length = 0
+        # Reset generator to initial seed (aligned with rkv_speckv_generate.py
+        # which recreates the entire SparseRoundPruner for each generation)
+        if self.config.seed is not None:
+            if self.generator is None:
+                if self.config.device.type == "cuda":
+                    self.generator = torch.Generator(device=self.config.device)
+                else:
+                    self.generator = torch.Generator()
+            self.generator.manual_seed(int(self.config.seed))
 
 
 def apply_speckv_rkv_style_patch(
