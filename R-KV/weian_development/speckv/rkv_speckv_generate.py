@@ -149,6 +149,22 @@ def apply_speckv_generate_patch(
         position_ids_override = position_ids
         attention_mask_override = attention_mask
 
+        # Reset pruner state if starting a new generation (empty cache).
+        # transformers.generate() may pass None or an empty DynamicCache.
+        is_empty_cache = True
+        if past_key_values is not None:
+            if isinstance(past_key_values, Cache):
+                if past_key_values.get_seq_length() > 0:
+                    is_empty_cache = False
+            elif isinstance(past_key_values, (tuple, list)):
+                if len(past_key_values) > 0 and past_key_values[0][0].shape[2] > 0:
+                    is_empty_cache = False
+        
+        if is_empty_cache and state.attached:
+            state.pruner = SparseRoundPruner(state.config)
+            state.attached = False
+            state.initial_prefix_length = None
+
         if past_key_values is not None and input_ids is not None:
             # Keep RoPE absolute (matches stats), but write new keys/values into a compact cache
             # so pruned tokens are not reintroduced as zero-filled holes.
@@ -224,22 +240,6 @@ def apply_speckv_generate_patch(
 
         if getattr(outputs, "past_key_values", None) is None:
             return outputs
-
-        # Reset pruner state if starting a new generation (empty cache).
-        # transformers.generate() may pass None or an empty DynamicCache.
-        is_empty_cache = True
-        if past_key_values is not None:
-            if isinstance(past_key_values, Cache):
-                if past_key_values.get_seq_length() > 0:
-                    is_empty_cache = False
-            elif isinstance(past_key_values, (tuple, list)):
-                if len(past_key_values) > 0 and past_key_values[0][0].shape[2] > 0:
-                    is_empty_cache = False
-        
-        if is_empty_cache and state.attached:
-            state.pruner = SparseRoundPruner(state.config)
-            state.attached = False
-            state.initial_prefix_length = None
 
         pkv_tuple = _cache_to_tuple(outputs.past_key_values)
 
