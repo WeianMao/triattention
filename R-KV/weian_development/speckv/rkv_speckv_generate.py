@@ -193,6 +193,12 @@ def apply_speckv_generate_patch(
             attention_mask_override = None
         else:
             cache_position_override = None
+            
+        # print current sequence for debugging
+        if input_ids is not None:
+            current_seq = input_ids[0].cpu().numpy().tolist()
+            import sys
+            sys.stderr.write(f"[SpeckV] Current sequence: {current_seq}\n")     
 
         outputs = orig_forward(
             input_ids=input_ids,
@@ -208,6 +214,13 @@ def apply_speckv_generate_patch(
             cache_position=cache_position_override,
             **kwargs,
         )
+        
+        # print top5 logits for debugging
+        if hasattr(outputs, "logits") and outputs.logits is not None:
+            top5_logits = outputs.logits.topk(5, dim=-1).values
+            import sys
+            sys.stderr.write(f"[SpecKV] Top 5 logits: {top5_logits}\n")
+
 
         if getattr(outputs, "past_key_values", None) is None:
             return outputs
@@ -230,6 +243,9 @@ def apply_speckv_generate_patch(
 
         pkv_tuple = _cache_to_tuple(outputs.past_key_values)
 
+        import sys
+        sys.stderr.write(f"[SpecKV] Current KV Size: {pkv_tuple[0][0].shape[2]}\n")
+        
         if not state.attached:
             state.pruner.attach_initial_cache(pkv_tuple)
             state.initial_prefix_length = state.pruner.prefix_length
@@ -263,6 +279,7 @@ def apply_speckv_generate_patch(
                              else state.pruner.max_keys)
         if state.pruner._dynamic_cache_size >= trigger_threshold:
             pkv_tuple = state.pruner.ensure_capacity(pkv_tuple)
+            sys.stderr.write(f"[SpecKV] Compressed cache size: {pkv_tuple[0][0].shape[2]}\n")
 
         outputs = CausalLMOutputWithPast(
             loss=getattr(outputs, "loss", None),

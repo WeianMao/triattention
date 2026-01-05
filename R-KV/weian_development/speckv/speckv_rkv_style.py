@@ -538,6 +538,12 @@ def apply_speckv_rkv_style_patch(
         else:
             cache_position_override = None
 
+        # print current sequence for debugging
+        if input_ids is not None:
+            current_seq = input_ids[0].cpu().numpy().tolist()
+            import sys
+            sys.stderr.write(f"[SpeckV] Current sequence: {current_seq}\n")    
+
         outputs = orig_forward(
             input_ids=input_ids,
             attention_mask=attention_mask_override,
@@ -552,6 +558,13 @@ def apply_speckv_rkv_style_patch(
             cache_position=cache_position_override,
             **kwargs,
         )
+
+        # print top5 logits for debugging
+        if hasattr(outputs, "logits") and outputs.logits is not None:
+            top5_logits = outputs.logits.topk(5, dim=-1).values
+            import sys
+            sys.stderr.write(f"[SpeckV-RKV] Top 5 logits: {top5_logits}\n")
+        
 
         if getattr(outputs, "past_key_values", None) is None:
             return outputs
@@ -605,11 +618,14 @@ def apply_speckv_rkv_style_patch(
                 and (comp.absolute_position % comp.divide_length == 0)
             )
 
+        import sys
+        sys.stderr.write(f"[SpecKV-RKV] Effective size: {effective_size}, Should compress: {should_compress}\n")
+
         if should_compress:
             # Compute keep_indices using scores from ALL layers' sampled heads
             # Prefill tokens are always preserved, only decode tokens are compressed
             keep_indices = comp.compute_keep_indices(pkv_tuple, prefix_length=comp.prefix_length)
-
+            sys.stderr.write(f"[SpeckV-RKV] Compressed size: {len(keep_indices)}\n")
             # Apply same indices to all layers
             new_pkv = []
             for k, v in pkv_tuple:
