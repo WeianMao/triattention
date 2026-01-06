@@ -181,6 +181,13 @@ def parse_args() -> argparse.Namespace:
         help="Override runner arg: compress every N decode steps (like R-KV's divide_length).",
     )
     parser.add_argument(
+        "--sparse-offset-max-length",
+        dest="sparse_offset_max_length",
+        type=int,
+        default=None,
+        help="Override runner arg: maximum offset length for sparse pruning frequency scoring.",
+    )
+    parser.add_argument(
         "--allow-prefill-compression",
         dest="allow_prefill_compression",
         action="store_true",
@@ -585,6 +592,8 @@ def main() -> None:
         runner_args["rkv_aligned_budget"] = args.rkv_aligned_budget
     if args.divide_length is not None:
         runner_args["divide_length"] = args.divide_length
+    if args.sparse_offset_max_length is not None:
+        runner_args["sparse_offset_max_length"] = args.sparse_offset_max_length
     if args.per_head_pruning is not None:
         runner_args["per_head_pruning"] = args.per_head_pruning
     if args.allow_prefill_compression is not None:
