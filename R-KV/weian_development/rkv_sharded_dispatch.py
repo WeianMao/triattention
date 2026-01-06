@@ -180,6 +180,19 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override runner arg: compress every N decode steps (like R-KV's divide_length).",
     )
+    parser.add_argument(
+        "--allow-prefill-compression",
+        dest="allow_prefill_compression",
+        action="store_true",
+        help="Override runner arg: allow prefill tokens to be compressed (R-KV style).",
+    )
+    parser.add_argument(
+        "--no-allow-prefill-compression",
+        dest="allow_prefill_compression",
+        action="store_false",
+        help="Override runner arg: always preserve prefill tokens (default SpeckV behavior).",
+    )
+    parser.set_defaults(allow_prefill_compression=None)
     per_head_group = parser.add_mutually_exclusive_group()
     per_head_group.add_argument(
         "--per-head-pruning",
@@ -574,6 +587,8 @@ def main() -> None:
         runner_args["divide_length"] = args.divide_length
     if args.per_head_pruning is not None:
         runner_args["per_head_pruning"] = args.per_head_pruning
+    if args.allow_prefill_compression is not None:
+        runner_args["allow_prefill_compression"] = args.allow_prefill_compression
     base_env = prepare_environment(experiment.get("env", {}))
     base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 

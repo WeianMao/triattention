@@ -66,6 +66,7 @@ def apply_speckv_generate_patch(
     per_head_pruning: bool = False,
     rkv_aligned_budget: bool = False,
     divide_length: int = 128,
+    allow_prefill_compression: bool = False,
 ) -> None:
     """Attach SparseRoundPruner to a CausalLM model so HF generate can be used."""
     device = next(model.parameters()).device
@@ -97,6 +98,7 @@ def apply_speckv_generate_patch(
         use_per_head_pruning=per_head_pruning,
         rkv_aligned_budget=rkv_aligned_budget,
         divide_length=validated_divide_length,
+        allow_prefill_compression=allow_prefill_compression,
     )
     state = _SpeckVState(pruner=SparseRoundPruner(pruner_cfg), config=pruner_cfg)
 

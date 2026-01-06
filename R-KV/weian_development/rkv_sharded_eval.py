@@ -374,6 +374,14 @@ def parse_arguments() -> argparse.Namespace:
         default=False,
         help="Align budget calculation with R-KV: compress to exact budget instead of budget - round_window.",
     )
+    parser.add_argument(
+        "--allow_prefill_compression",
+        "--allow-prefill-compression",
+        dest="allow_prefill_compression",
+        type=str2bool,
+        default=False,
+        help="Allow prefill tokens to be compressed (R-KV style). When False, prefill is always preserved.",
+    )
     # Note: --divide_length is already defined above (line 238) for R-KV, reused for SpeckV alignment
     return parser.parse_args()
 
@@ -587,6 +595,7 @@ def main(args: argparse.Namespace) -> None:
                 per_head_pruning=args.per_head_pruning,
                 rkv_aligned_budget=args.rkv_aligned_budget,
                 divide_length=args.divide_length,
+                allow_prefill_compression=args.allow_prefill_compression,
             )
 
     for run_id in run_ids:

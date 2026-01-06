@@ -51,6 +51,10 @@ class SparsePruningConfig:
     divide_length: int = 128
     # Per-head pruning: enable independent per-head pruning mode
     use_per_head_pruning: bool = False
+    # R-KV alignment: allow prefill tokens to be compressed (like R-KV behavior)
+    # When False (default): prefill tokens are always preserved
+    # When True: prefill tokens compete with decode tokens for budget (R-KV style)
+    allow_prefill_compression: bool = False
 
 
 class SparseRoundPruner:
@@ -159,6 +163,8 @@ class SparseRoundPruner:
         if validated_divide_length <= 0:
             raise ValueError(f"divide_length must be positive; got {validated_divide_length}")
         self.divide_length = validated_divide_length
+        # R-KV alignment: allow prefill tokens to be compressed
+        self.allow_prefill_compression = bool(getattr(config, "allow_prefill_compression", False))
         self.generator: torch.Generator | None = None
         self.prefix_length: int = 0
         if config.seed is not None:
@@ -206,8 +212,14 @@ class SparseRoundPruner:
         keep_capacity = self.max_keys if self.rkv_aligned_budget else max(0, self.max_keys - self.round_window)
         if self._dynamic_cache_size <= keep_capacity:
             return past_key_values
-        # Convert to dynamic target: when prefill is in budget, subtract prefix from total target
-        prune_target = max(0, keep_capacity - self.prefix_length) if self.config.include_prefill_in_budget else keep_capacity
+        # When allow_prefill_compression=True: use keep_capacity directly (all tokens compete)
+        # Otherwise: subtract prefix from total target (prefill is preserved)
+        if self.allow_prefill_compression:
+            prune_target = keep_capacity
+        elif self.config.include_prefill_in_budget:
+            prune_target = max(0, keep_capacity - self.prefix_length)
+        else:
+            prune_target = keep_capacity
         pruned = self._prune_to_size(
             past_key_values, prune_target, dynamic_only=True
         )
@@ -226,8 +238,14 @@ class SparseRoundPruner:
         self, past_key_values: Sequence[Tuple[torch.Tensor, torch.Tensor]]
     ):
         keep_capacity = self.max_keys if self.rkv_aligned_budget else max(0, self.max_keys - self.round_window)
-        # Convert to dynamic target: when prefill is in budget, subtract prefix from total target
-        prune_target = max(0, keep_capacity - self.prefix_length) if self.config.include_prefill_in_budget else keep_capacity
+        # When allow_prefill_compression=True: use keep_capacity directly (all tokens compete)
+        # Otherwise: subtract prefix from total target (prefill is preserved)
+        if self.allow_prefill_compression:
+            prune_target = keep_capacity
+        elif self.config.include_prefill_in_budget:
+            prune_target = max(0, keep_capacity - self.prefix_length)
+        else:
+            prune_target = keep_capacity
         pruned = self._prune_to_size(
             past_key_values, prune_target, dynamic_only=True
         )
@@ -265,30 +283,41 @@ class SparseRoundPruner:
                 past_key_values, key_positions, keep_count
             )
         else:
-            prefix_count = min(self.prefix_length, candidate_count)
-            dynamic_count = max(0, candidate_count - prefix_count)
-            keep_count = max(0, min(keep_count, dynamic_count))
-            prefix_indices = candidate_indices[:prefix_count]
-            if dynamic_count == 0:
-                keep_tensor = prefix_indices
-            elif dynamic_count <= keep_count:
-                keep_tensor = candidate_indices
-            else:
-                dynamic_positions = key_positions[prefix_count:]
-                dynamic_keep_rel = self._select_keep_indices(
-                    past_key_values,
-                    dynamic_positions,
-                    keep_count,
-                    start_index=prefix_count,
-                )
-                dynamic_keep = dynamic_keep_rel + prefix_count
-                if dynamic_keep_rel.dim() == 2:
-                    # Per-head mode: broadcast prefix to all heads, then concat along dim=1
-                    num_kv_heads = dynamic_keep_rel.size(0)
-                    prefix_broadcast = prefix_indices.unsqueeze(0).expand(num_kv_heads, -1)
-                    keep_tensor = torch.cat([prefix_broadcast, dynamic_keep], dim=1)
+            # R-KV alignment mode: allow prefill tokens to be compressed
+            if self.allow_prefill_compression:
+                # All tokens (including prefill) compete for budget
+                if candidate_count <= keep_count:
+                    keep_tensor = candidate_indices
                 else:
-                    keep_tensor = torch.cat([prefix_indices, dynamic_keep])
+                    keep_tensor = self._select_keep_indices(
+                        past_key_values, key_positions, keep_count
+                    )
+            else:
+                # Original behavior: prefill tokens are always preserved
+                prefix_count = min(self.prefix_length, candidate_count)
+                dynamic_count = max(0, candidate_count - prefix_count)
+                keep_count = max(0, min(keep_count, dynamic_count))
+                prefix_indices = candidate_indices[:prefix_count]
+                if dynamic_count == 0:
+                    keep_tensor = prefix_indices
+                elif dynamic_count <= keep_count:
+                    keep_tensor = candidate_indices
+                else:
+                    dynamic_positions = key_positions[prefix_count:]
+                    dynamic_keep_rel = self._select_keep_indices(
+                        past_key_values,
+                        dynamic_positions,
+                        keep_count,
+                        start_index=prefix_count,
+                    )
+                    dynamic_keep = dynamic_keep_rel + prefix_count
+                    if dynamic_keep_rel.dim() == 2:
+                        # Per-head mode: broadcast prefix to all heads, then concat along dim=1
+                        num_kv_heads = dynamic_keep_rel.size(0)
+                        prefix_broadcast = prefix_indices.unsqueeze(0).expand(num_kv_heads, -1)
+                        keep_tensor = torch.cat([prefix_broadcast, dynamic_keep], dim=1)
+                    else:
+                        keep_tensor = torch.cat([prefix_indices, dynamic_keep])
 
         if keep_tensor.dim() == 2:
             # Per-head mode: use head 0's indices as representative for cache_positions
