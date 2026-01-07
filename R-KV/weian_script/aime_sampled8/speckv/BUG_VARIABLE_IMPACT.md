@@ -1072,3 +1072,111 @@ Decode 阶段（生成 2000 tokens，假设 budget=1024）：
 4. 最终 `score_keys_for_round` 的打分基本是**随机的**
 
 模型推理本身不受影响（RoPE 相对位置正确），但 SpeckV 的 token 选择变成了随机选择。
+
+---
+
+## ⚠️ 重要更正：Attention 位置编码错误
+
+**之前的结论"模型推理本身不受影响"是错误的！**
+
+经过更仔细的代码分析，发现 Bug 会导致严重的 **Attention 位置编码错误**，这是一个比 SpeckV 打分错误更严重的问题。
+
+### Bug 的根本原因
+
+通过分析 commit `896cbca6`（标题为 "fix(align budget): refresh pruner states before prefilling"），发现：
+
+**Bug 版本（fix 之前）**：`is_empty_cache` 检查和重置逻辑在 `orig_forward` **之后**
+
+```python
+# Bug 版本的代码顺序：
+if past_key_values is not None and input_ids is not None:
+    start_pos = state.pruner.absolute_position  # ← 使用累积值！
+    position_ids_override = torch.arange(start_pos, start_pos + step, ...)
+
+outputs = orig_forward(..., position_ids=position_ids_override, ...)  # ← forward 执行
+
+# 检查在 forward 之后，此时 cache 已被修改，永远不为空！
+is_empty_cache = True
+if past_key_values is not None:
+    if past_key_values.get_seq_length() > 0:  # ← 已经有内容了！
+        is_empty_cache = False
+
+if is_empty_cache and state.attached:  # ← 永远不会执行！
+    state.pruner = SparseRoundPruner(state.config)  # 重置
+```
+
+**Fix 版本（当前代码）**：`is_empty_cache` 检查和重置逻辑在 `orig_forward` **之前**
+
+### Decode "看到未来" 的问题
+
+Bug 版本中，第2题的 position_ids 使用累积值，导致 **decode 的 RoPE 位置编码严重错误**：
+
+```
+第2题 Prefill:
+  - KV cache 用位置 [2500, 2501, ..., 2899] 编码（假设 prefill_len=400）
+  - absolute_position 没有在 prefill 后更新，还是 2500
+
+第2题 Decode step 1:
+  - position_ids = [2500]（使用累积的 absolute_position）
+  - 但 prefill 已经用了 [2500, ..., 2899]！
+
+Attention 相对位置计算：
+  Decode Q (pos=2500)
+       ↓
+  [K₀    K₁    K₂   ...  K₃₉₉]
+  pos   pos   pos       pos
+  2500  2501  2502     2899
+
+  相对位置 = Q_pos - K_pos:
+  [0,   -1,   -2,  ..., -399]
+   ↑     ↑     ↑         ↑
+  同位  "未来" "未来"    "未来"
+```
+
+**Decode 的第一个 token 认为 prefill 的大部分内容都在它的"未来"！**
+
+### 为什么这可能反而提点？
+
+1. **打破正常的位置衰减**：
+   - 正常情况：距离越远，attention 权重越低
+   - Bug 情况：prefill 的相对位置被人为缩小了 prefill_len
+
+2. **对于长生成**（如 AIME 数学推理，可能生成几千到上万个 token）：
+   ```
+   假设生成了 10000 个 decode token 后：
+
+   正常情况: prefill 第一个 token 和最后一个 decode 的距离 = 10000 + prefill_len ≈ 10150
+   Bug 情况: prefill 第一个 token 和最后一个 decode 的距离 = 10000
+
+   差距 ≈ 150 个位置
+   ```
+
+3. **增强对问题的关注**：
+   - Prefill（问题内容）在 attention 中始终比正常情况"近" prefill_len 个位置
+   - 对于数学推理任务（需要持续参考原问题），这可能意外地有帮助
+
+### 这是"作弊"行为
+
+虽然这个 bug 可能提升了性能，但它实际上是一种"作弊"：
+
+1. **违反 RoPE 的设计语义**：负的相对位置意味着"看到未来"，这在 causal LM 中是不应该发生的
+2. **改变了 attention 计算**：模型训练时从未见过这种位置分布
+3. **不公平的比较**：相当于给 prefill 内容一个"特殊待遇"
+
+### 修正后的总结表
+
+| 影响类型 | 描述 | 严重程度 |
+|---------|------|---------|
+| **Attention 位置编码** | Decode 认为 prefill 在"未来"，相对位置为负 | ⚠️ **严重** |
+| **SpeckV 打分** | 高频 phase 被随机化，低频基本正确 | ⚠️ 中等 |
+| **额外 token 保护** | 约 30 个早期 decode token 被永久保护 | ⚠️ 中等 |
+
+### 验证方法
+
+如果想验证 "attention 位置编码让 prefill 更近" 是否是提点的原因，可以设计受控实验：
+
+1. 使用 fix 后的代码（状态正确重置）
+2. 故意在 decode 阶段把 prefill 的相对位置减少 prefill_len（模拟 bug 的 attention 效果）
+3. 比较性能
+
+如果这个实验也能提点，就确认了 "prefill 距离更近" 是提点的原因。这也意味着可以设计一个正式的 "positional bias" 技术来增强对问题的关注度。
