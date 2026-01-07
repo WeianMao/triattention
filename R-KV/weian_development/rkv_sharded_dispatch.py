@@ -195,6 +195,13 @@ def parse_args() -> argparse.Namespace:
         help="Override runner arg: disable top-n high-frequency components in position-dependent scoring.",
     )
     parser.add_argument(
+        "--simulate-bug-phase-offset",
+        dest="simulate_bug_phase_offset",
+        type=int,
+        default=None,
+        help="Override runner arg: simulate bug 896cbca6 phase offset by subtracting N×ω from phase (typical Δ≈156).",
+    )
+    parser.add_argument(
         "--allow-prefill-compression",
         dest="allow_prefill_compression",
         action="store_true",
@@ -603,6 +610,8 @@ def main() -> None:
         runner_args["sparse_offset_max_length"] = args.sparse_offset_max_length
     if args.disable_top_n_high_freq is not None:
         runner_args["disable_top_n_high_freq"] = args.disable_top_n_high_freq
+    if args.simulate_bug_phase_offset is not None:
+        runner_args["simulate_bug_phase_offset"] = args.simulate_bug_phase_offset
     if args.per_head_pruning is not None:
         runner_args["per_head_pruning"] = args.per_head_pruning
     if args.allow_prefill_compression is not None:

@@ -281,6 +281,7 @@ def score_keys_for_round(
     aggregation: str,
     freq_scale_sq: torch.Tensor,
     disable_top_n_high_freq: int = 0,
+    simulate_bug_phase_offset: int = 0,
 ) -> torch.Tensor:
     if key_indices.numel() == 0:
         return torch.empty(0, device=amp.device, dtype=torch.float32)
@@ -290,6 +291,12 @@ def score_keys_for_round(
 
     freq_scale_sq = freq_scale_sq.to(device=amp.device, dtype=torch.float32)
     phase = delta_grid.unsqueeze(2) * omega.view(1, 1, -1) + phi.unsqueeze(1)
+
+    # Simulate bug 896cbca6 phase offset: bug caused phi to be offset by -Δ×ω
+    if simulate_bug_phase_offset > 0:
+        phase_offset = float(simulate_bug_phase_offset) * omega.view(1, 1, -1)
+        phase = phase - phase_offset
+
     cos_phase = torch.cos(phase)
 
     # High-frequency ablation: mask top-n high-frequency components in position-dependent term only

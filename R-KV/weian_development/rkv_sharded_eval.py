@@ -275,6 +275,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Disable top-n high-frequency components in position-dependent scoring (0=disabled).",
     )
     parser.add_argument(
+        "--simulate_bug_phase_offset",
+        type=int,
+        default=0,
+        help="Simulate bug 896cbca6 phase offset: subtract N×ω from phase (0=disabled, typical Δ≈156).",
+    )
+    parser.add_argument(
         "--sparse_score_aggregation",
         type=str,
         default="mean",
@@ -604,6 +610,7 @@ def main(args: argparse.Namespace) -> None:
                 divide_length=args.divide_length,
                 allow_prefill_compression=args.allow_prefill_compression,
                 disable_top_n_high_freq=args.disable_top_n_high_freq,
+                simulate_bug_phase_offset=args.simulate_bug_phase_offset,
             )
 
     for run_id in run_ids:
