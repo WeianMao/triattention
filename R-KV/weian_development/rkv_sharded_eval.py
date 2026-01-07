@@ -281,6 +281,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Simulate bug 896cbca6 phase offset: subtract N×ω from phase (0=disabled, typical Δ≈156).",
     )
     parser.add_argument(
+        "--simulate_attention_position_offset",
+        type=int,
+        default=0,
+        help="Simulate bug 896cbca6 attention position offset: add offset to RoPE position_ids (0=disabled, typical Δ≈156).",
+    )
+    parser.add_argument(
         "--sparse_score_aggregation",
         type=str,
         default="mean",
@@ -611,6 +617,7 @@ def main(args: argparse.Namespace) -> None:
                 allow_prefill_compression=args.allow_prefill_compression,
                 disable_top_n_high_freq=args.disable_top_n_high_freq,
                 simulate_bug_phase_offset=args.simulate_bug_phase_offset,
+                simulate_attention_position_offset=args.simulate_attention_position_offset,
             )
 
     for run_id in run_ids:

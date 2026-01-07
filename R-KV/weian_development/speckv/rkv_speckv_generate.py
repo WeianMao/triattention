@@ -69,6 +69,7 @@ def apply_speckv_generate_patch(
     allow_prefill_compression: bool = False,
     disable_top_n_high_freq: int = 0,
     simulate_bug_phase_offset: int = 0,
+    simulate_attention_position_offset: int = 0,
 ) -> None:
     """Attach SparseRoundPruner to a CausalLM model so HF generate can be used."""
     device = next(model.parameters()).device
@@ -177,7 +178,18 @@ def apply_speckv_generate_patch(
             bsz, step = input_ids.shape
 
             # Absolute positions for rotary.
-            start_pos = state.pruner.absolute_position
+            # simulate_attention_position_offset: simulate bug 896cbca6 attention position offset
+            # Bug effect: Prefill and Decode both started from same accumulated position X, so:
+            #   - Prefill K positions: [X, X+1, ..., X+P-1]
+            #   - Decode Q positions: [X, X+1, ...]  (NOT [X+P, ...])
+            #   - Relative positions: Q_pos - K_pos = -k (instead of P-k)
+            # To simulate: subtract prefill_len from decode positions, making relative pos = -k
+            # This makes decode "see" prefill tokens as if they were at the same position (closer).
+            position_offset = 0
+            if simulate_attention_position_offset > 0 and not is_empty_cache and state.initial_prefix_length:
+                # Decode phase: subtract prefill_len to simulate bug
+                position_offset = -state.initial_prefix_length
+            start_pos = state.pruner.absolute_position + position_offset
             abs_positions = torch.arange(
                 start_pos,
                 start_pos + step,

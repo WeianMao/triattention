@@ -202,6 +202,13 @@ def parse_args() -> argparse.Namespace:
         help="Override runner arg: simulate bug 896cbca6 phase offset by subtracting N×ω from phase (typical Δ≈156).",
     )
     parser.add_argument(
+        "--simulate-attention-position-offset",
+        dest="simulate_attention_position_offset",
+        type=int,
+        default=None,
+        help="Override runner arg: simulate bug 896cbca6 attention position offset by adding offset to RoPE position_ids (typical Δ≈156).",
+    )
+    parser.add_argument(
         "--allow-prefill-compression",
         dest="allow_prefill_compression",
         action="store_true",
@@ -612,6 +619,8 @@ def main() -> None:
         runner_args["disable_top_n_high_freq"] = args.disable_top_n_high_freq
     if args.simulate_bug_phase_offset is not None:
         runner_args["simulate_bug_phase_offset"] = args.simulate_bug_phase_offset
+    if args.simulate_attention_position_offset is not None:
+        runner_args["simulate_attention_position_offset"] = args.simulate_attention_position_offset
     if args.per_head_pruning is not None:
         runner_args["per_head_pruning"] = args.per_head_pruning
     if args.allow_prefill_compression is not None:
