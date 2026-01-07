@@ -546,6 +546,11 @@ def main(args: argparse.Namespace) -> None:
         if not patched:
             sys.stderr.write("[qk_capture] failed to patch LlamaAttention for capture; proceeding without QK dumps.\n")
 
+    # Apply position offset patch for fullkv if enabled (simulates Bug 896cbca6 attention position effect)
+    if method_lower == "fullkv" and args.simulate_attention_position_offset > 0:
+        from weian_development.position_offset_patch import apply_position_offset_patch
+        apply_position_offset_patch(model)
+
     if method_name and method_name not in {"fullkv", "speckv"}:
         model.newline_token_ids = [
             tokenizer.encode("\n")[-1],
