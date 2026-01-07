@@ -55,6 +55,10 @@ class SparsePruningConfig:
     # When False (default): prefill tokens are always preserved
     # When True: prefill tokens compete with decode tokens for budget (R-KV style)
     allow_prefill_compression: bool = False
+    # High-frequency ablation: disable top-n high-frequency components in position-dependent scoring
+    # When 0 (default): all frequency components are used
+    # When > 0: omega[0:n] (highest frequencies) are masked in base_scores, but additive term is unaffected
+    disable_top_n_high_freq: int = 0
 
 
 class SparseRoundPruner:
@@ -165,6 +169,8 @@ class SparseRoundPruner:
         self.divide_length = validated_divide_length
         # R-KV alignment: allow prefill tokens to be compressed
         self.allow_prefill_compression = bool(getattr(config, "allow_prefill_compression", False))
+        # High-frequency ablation: disable top-n high-frequency components in position-dependent scoring
+        self.disable_top_n_high_freq = int(getattr(config, "disable_top_n_high_freq", 0))
         self.generator: torch.Generator | None = None
         self.prefix_length: int = 0
         if config.seed is not None:
@@ -537,6 +543,7 @@ class SparseRoundPruner:
                 offsets=self.offsets,
                 aggregation=self.score_aggregation,
                 freq_scale_sq=self.freq_scale_sq,
+                disable_top_n_high_freq=self.disable_top_n_high_freq,
             )
             per_head_scores.append(head_scores)
 

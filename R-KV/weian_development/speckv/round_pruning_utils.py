@@ -280,6 +280,7 @@ def score_keys_for_round(
     offsets: torch.Tensor,
     aggregation: str,
     freq_scale_sq: torch.Tensor,
+    disable_top_n_high_freq: int = 0,
 ) -> torch.Tensor:
     if key_indices.numel() == 0:
         return torch.empty(0, device=amp.device, dtype=torch.float32)
@@ -290,8 +291,17 @@ def score_keys_for_round(
     freq_scale_sq = freq_scale_sq.to(device=amp.device, dtype=torch.float32)
     phase = delta_grid.unsqueeze(2) * omega.view(1, 1, -1) + phi.unsqueeze(1)
     cos_phase = torch.cos(phase)
-    scale = freq_scale_sq.view(1, 1, -1)
+
+    # High-frequency ablation: mask top-n high-frequency components in position-dependent term only
+    if disable_top_n_high_freq > 0:
+        position_scale = freq_scale_sq.clone()
+        position_scale[:disable_top_n_high_freq] = 0  # mask highest frequencies (omega[0:n])
+        scale = position_scale.view(1, 1, -1)
+    else:
+        scale = freq_scale_sq.view(1, 1, -1)
+
     base_scores = (amp.unsqueeze(1) * scale * cos_phase).sum(dim=2)
+    # additive term uses original freq_scale_sq (not affected by high-freq masking)
     additive = (extra * freq_scale_sq.view(1, -1)).sum(dim=1, keepdim=True)
     combined = base_scores + additive
 

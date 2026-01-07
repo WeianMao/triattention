@@ -269,6 +269,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Maximum offset length for sparse pruning frequency scoring.",
     )
     parser.add_argument(
+        "--disable_top_n_high_freq",
+        type=int,
+        default=0,
+        help="Disable top-n high-frequency components in position-dependent scoring (0=disabled).",
+    )
+    parser.add_argument(
         "--sparse_score_aggregation",
         type=str,
         default="mean",
@@ -448,6 +454,7 @@ def main(args: argparse.Namespace) -> None:
             "sparse_stats_path": args.sparse_stats_path,
             "sparse_round_window": args.sparse_round_window or args.window_size,
             "sparse_offset_max_length": args.sparse_offset_max_length,
+            "disable_top_n_high_freq": args.disable_top_n_high_freq,
             "sparse_score_aggregation": args.sparse_score_aggregation,
             "sparse_head_limit": args.sparse_head_limit,
             "sparse_seed": args.sparse_seed,
@@ -596,6 +603,7 @@ def main(args: argparse.Namespace) -> None:
                 rkv_aligned_budget=args.rkv_aligned_budget,
                 divide_length=args.divide_length,
                 allow_prefill_compression=args.allow_prefill_compression,
+                disable_top_n_high_freq=args.disable_top_n_high_freq,
             )
 
     for run_id in run_ids:
