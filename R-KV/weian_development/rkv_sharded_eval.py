@@ -596,6 +596,7 @@ def main(args: argparse.Namespace) -> None:
                 include_prefill_in_budget=args.include_prefill_in_budget,
                 divide_length=args.divide_length,
                 use_slack_trigger=args.rkv_style_slack_trigger,
+                per_head_pruning=args.per_head_pruning,
             )
         else:
             # Use original generate wrapper implementation

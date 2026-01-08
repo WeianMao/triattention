@@ -49,6 +49,7 @@ class SpeckVRKVStyleConfig:
     include_prefill_in_budget: bool = False
     divide_length: int = 128  # Compress every N steps (like R-KV's divide_length)
     use_slack_trigger: bool = False  # If True, trigger at budget + divide_length (like generate wrapper)
+    per_head_pruning: bool = False  # If True, each KV head selects tokens independently
 
 
 class SpeckVRKVStyle:
@@ -134,6 +135,7 @@ class SpeckVRKVStyle:
         self.normalize_scores = config.normalize_scores
         self.use_rank_aggregation = config.use_rank_aggregation
         self.use_slack_trigger = config.use_slack_trigger
+        self.per_head_pruning = config.per_head_pruning
 
         # Random generator
         self.generator: torch.Generator | None = None
@@ -234,6 +236,15 @@ class SpeckVRKVStyle:
             ) * 1e-6
             head_matrix = head_matrix + noise
 
+        # Per-head independent pruning mode: each KV head selects tokens independently
+        # Returns 2D tensor [num_kv_heads, budget] instead of 1D [budget]
+        # Matches sparse_round_pruner_prefill_keep.py:432-458
+        if self.per_head_pruning:
+            keep_count = min(decode_budget, decode_count)
+            return self._select_per_head_independent(
+                head_matrix, keep_count, decode_start
+            )
+
         # Compute combined scores for union-based selection
         if self.use_rank_aggregation:
             combined = -head_matrix.min(dim=0).values  # Negate for topk
@@ -313,6 +324,66 @@ class SpeckVRKVStyle:
             union_indices = torch.cat([union_indices, extra_indices])
 
         return torch.sort(union_indices).values
+
+    def _select_per_head_independent(
+        self,
+        head_matrix: torch.Tensor,
+        keep_count: int,
+        decode_start: int,
+    ) -> torch.Tensor:
+        """
+        Per-head independent token selection (matches sparse_round_pruner_prefill_keep.py:432-458).
+
+        Each KV head independently selects top-k tokens based on aggregated scores
+        from sampled attention heads that map to that KV head.
+
+        Args:
+            head_matrix: [num_sampled_heads, decode_seq_len] scores per sampled head
+            keep_count: Number of decode tokens to keep per KV head
+            decode_start: Index where decode tokens start (for prefill expansion)
+
+        Returns:
+            keep_indices: 2D tensor [num_kv_heads, decode_start + keep_count] (absolute indices)
+        """
+        # Group sampled attention heads by KV head (matches reference implementation)
+        kv_head_groups: Dict[int, List[int]] = {}
+        for i, (layer, attn_head) in enumerate(self.sampled_heads):
+            kv_head = attn_head // max(1, self.num_key_value_groups)
+            if kv_head not in kv_head_groups:
+                kv_head_groups[kv_head] = []
+            kv_head_groups[kv_head].append(i)
+
+        # For each KV head, aggregate scores and perform independent top-k selection
+        decode_keep_list: List[torch.Tensor] = []
+        for kv_head_idx in range(self.num_key_value_heads):
+            if kv_head_idx in kv_head_groups:
+                indices = kv_head_groups[kv_head_idx]
+                group_scores = head_matrix[indices]  # [num_heads_in_group, seq_len]
+                aggregated = group_scores.max(dim=0).values  # [seq_len] - same as existing norm aggregation
+            else:
+                # Fallback for KV heads without sampled heads: use mean of all scores
+                aggregated = head_matrix.mean(dim=0)
+
+            # Independent top-k selection for this KV head
+            actual_keep = min(keep_count, aggregated.numel())
+            if actual_keep > 0:
+                keep_indices_for_head = aggregated.topk(actual_keep, largest=True).indices
+            else:
+                keep_indices_for_head = torch.empty(0, device=head_matrix.device, dtype=torch.long)
+            decode_keep_list.append(keep_indices_for_head)
+
+        # Stack into 2D tensor: [num_kv_heads, keep_count] (relative to decode_start)
+        decode_keep_indices = torch.stack(decode_keep_list, dim=0)
+
+        # Expand prefill indices to 2D: [num_kv_heads, decode_start]
+        prefill_indices = torch.arange(decode_start, device=self.config.device, dtype=torch.long)
+        prefill_broadcast = prefill_indices.unsqueeze(0).expand(self.num_key_value_heads, -1)
+
+        # Convert decode indices to absolute and concatenate with prefill
+        decode_keep_absolute = decode_keep_indices + decode_start
+        keep_indices = torch.cat([prefill_broadcast, decode_keep_absolute], dim=1)
+
+        return keep_indices
 
     def _compute_layer_head_scores(
         self,
@@ -420,6 +491,7 @@ def apply_speckv_rkv_style_patch(
     include_prefill_in_budget: bool = False,
     divide_length: int = 128,
     use_slack_trigger: bool = False,
+    per_head_pruning: bool = False,
 ) -> None:
     """
     Apply SpeckV with R-KV style compression triggering.
@@ -446,6 +518,7 @@ def apply_speckv_rkv_style_patch(
         include_prefill_in_budget=include_prefill_in_budget,
         divide_length=divide_length,
         use_slack_trigger=use_slack_trigger,
+        per_head_pruning=per_head_pruning,
     )
 
     compressor = SpeckVRKVStyle(config)
@@ -625,17 +698,48 @@ def apply_speckv_rkv_style_patch(
             # Compute keep_indices using scores from ALL layers' sampled heads
             # Prefill tokens are always preserved, only decode tokens are compressed
             keep_indices = comp.compute_keep_indices(pkv_tuple, prefix_length=comp.prefix_length)
-            sys.stderr.write(f"[SpeckV-RKV] Compressed size: {len(keep_indices)}\n")
-            # Apply same indices to all layers
-            new_pkv = []
-            for k, v in pkv_tuple:
-                k_new = k.index_select(2, keep_indices)
-                v_new = v.index_select(2, keep_indices)
-                new_pkv.append((k_new, v_new))
-            pkv_tuple = tuple(new_pkv)
 
-            # Update cache_positions
-            comp.cache_positions = [comp.cache_positions[i] for i in keep_indices.tolist()]
+            # Handle 2D per-head indices vs 1D global indices
+            # Matches sparse_round_pruner_prefill_keep.py:589-619
+            if keep_indices.dim() == 2:
+                # Per-head mode: keep_indices shape [num_kv_heads, budget]
+                # Use gather-based slicing for per-head independent compression
+                sys.stderr.write(f"[SpeckV-RKV] Per-head compressed size: {keep_indices.shape}\n")
+                new_pkv = []
+                for k, v in pkv_tuple:
+                    batch_size = k.size(0)
+                    num_kv_heads = k.size(1)
+                    budget = keep_indices.size(1)
+                    head_dim = k.size(3)
+
+                    # Expand indices for gather: [batch, num_kv_heads, budget, head_dim]
+                    expanded_indices = keep_indices.unsqueeze(0).unsqueeze(-1).expand(
+                        batch_size, num_kv_heads, budget, head_dim
+                    )
+
+                    # Gather along sequence dimension (dim=2)
+                    k_new = k.gather(dim=2, index=expanded_indices)
+                    v_new = v.gather(dim=2, index=expanded_indices)
+                    new_pkv.append((k_new.contiguous(), v_new.contiguous()))
+                pkv_tuple = tuple(new_pkv)
+
+                # Update cache_positions using head 0's indices as representative
+                # (all heads have same length after compression)
+                head0_indices = keep_indices[0].tolist()
+                comp.cache_positions = [comp.cache_positions[idx] for idx in head0_indices]
+            else:
+                # Global mode: 1D keep_indices shape [budget]
+                # Use index_select (existing behavior)
+                sys.stderr.write(f"[SpeckV-RKV] Global compressed size: {len(keep_indices)}\n")
+                new_pkv = []
+                for k, v in pkv_tuple:
+                    k_new = k.index_select(2, keep_indices)
+                    v_new = v.index_select(2, keep_indices)
+                    new_pkv.append((k_new, v_new))
+                pkv_tuple = tuple(new_pkv)
+
+                # Update cache_positions
+                comp.cache_positions = [comp.cache_positions[i] for i in keep_indices.tolist()]
 
         # Convert back to original cache type
         if isinstance(outputs.past_key_values, Cache):
