@@ -128,6 +128,10 @@ class SpeckVRKVStyle:
 
         # State tracking
         self.cache_positions: List[int] = []
+        # Per-head positions: when per_head_pruning is active and compression happens,
+        # each KV head may have different token positions at the same cache index.
+        # Shape: [num_kv_heads][seq_len] - None until first per-head compression
+        self.cache_positions_per_head: Optional[List[List[int]]] = None
         self.absolute_position: int = 0
         self.prefix_length: int = 0
         self.divide_length = config.divide_length
@@ -200,11 +204,25 @@ class SpeckVRKVStyle:
             dtype=torch.long
         )
 
+        # Build per-KV-head positions if available (after per-head compression)
+        # This is critical for correct RoPE inversion when different KV heads have different tokens
+        positions_per_kv_head: Optional[List[torch.Tensor]] = None
+        if self.cache_positions_per_head is not None:
+            positions_per_kv_head = [
+                torch.tensor(
+                    head_positions[decode_start:kv_cache_len],
+                    device=self.config.device,
+                    dtype=torch.long
+                )
+                for head_positions in self.cache_positions_per_head
+            ]
+
         # Collect scores from all layers' sampled heads (decode tokens only)
         all_head_scores: List[torch.Tensor] = []
         for layer_idx, (key_states, _) in enumerate(pkv_tuple):
             layer_scores = self._compute_layer_head_scores(
-                key_states, decode_positions, layer_idx, start_index=decode_start
+                key_states, decode_positions, layer_idx, start_index=decode_start,
+                positions_per_kv_head=positions_per_kv_head
             )
             if layer_scores is not None:
                 all_head_scores.append(layer_scores)
@@ -332,10 +350,19 @@ class SpeckVRKVStyle:
         decode_start: int,
     ) -> torch.Tensor:
         """
-        Per-head independent token selection (matches sparse_round_pruner_prefill_keep.py:432-458).
+        Per-head independent token selection with per-layer grouping.
 
         Each KV head independently selects top-k tokens based on aggregated scores
         from sampled attention heads that map to that KV head.
+
+        Bug fix: Changed aggregation from max(all 196 heads) to mean(max(7 heads per layer)).
+        - Before: max over 196 heads (28 layers × 7 heads/layer mixed) ≈ global max
+        - After: mean of per-layer max (each layer contributes equally)
+
+        This preserves per-head variance by:
+        1. Grouping heads by (layer, kv_head) - 7 heads per group
+        2. Computing max within each layer's group - layer-specific importance
+        3. Averaging across layers - balanced contribution from all layers
 
         Args:
             head_matrix: [num_sampled_heads, decode_seq_len] scores per sampled head
@@ -345,21 +372,36 @@ class SpeckVRKVStyle:
         Returns:
             keep_indices: 2D tensor [num_kv_heads, decode_start + keep_count] (absolute indices)
         """
-        # Group sampled attention heads by KV head (matches reference implementation)
-        kv_head_groups: Dict[int, List[int]] = {}
+        # Group sampled attention heads by (layer, kv_head) - each group has ~7 heads
+        kv_head_groups: Dict[Tuple[int, int], List[int]] = {}
         for i, (layer, attn_head) in enumerate(self.sampled_heads):
             kv_head = attn_head // max(1, self.num_key_value_groups)
-            if kv_head not in kv_head_groups:
-                kv_head_groups[kv_head] = []
-            kv_head_groups[kv_head].append(i)
+            group_key = (layer, kv_head)
+            if group_key not in kv_head_groups:
+                kv_head_groups[group_key] = []
+            kv_head_groups[group_key].append(i)
 
-        # For each KV head, aggregate scores and perform independent top-k selection
+        # Get unique layers from sampled_heads
+        unique_layers = sorted(set(l for l, _ in self.sampled_heads))
+        num_layers = len(unique_layers)
+
+        # For each KV head, compute mean of per-layer max scores
         decode_keep_list: List[torch.Tensor] = []
         for kv_head_idx in range(self.num_key_value_heads):
-            if kv_head_idx in kv_head_groups:
-                indices = kv_head_groups[kv_head_idx]
-                group_scores = head_matrix[indices]  # [num_heads_in_group, seq_len]
-                aggregated = group_scores.max(dim=0).values  # [seq_len] - same as existing norm aggregation
+            # Collect per-layer max scores for this KV head
+            layer_max_scores: List[torch.Tensor] = []
+            for layer_idx in unique_layers:
+                group_key = (layer_idx, kv_head_idx)
+                if group_key in kv_head_groups:
+                    indices = kv_head_groups[group_key]
+                    group_scores = head_matrix[indices]  # [~7, seq_len]
+                    layer_max = group_scores.max(dim=0).values  # [seq_len]
+                    layer_max_scores.append(layer_max)
+
+            if layer_max_scores:
+                # Stack and compute mean across layers
+                stacked = torch.stack(layer_max_scores, dim=0)  # [num_layers, seq_len]
+                aggregated = stacked.mean(dim=0)  # [seq_len] - mean of per-layer max
             else:
                 # Fallback for KV heads without sampled heads: use mean of all scores
                 aggregated = head_matrix.mean(dim=0)
@@ -391,25 +433,24 @@ class SpeckVRKVStyle:
         key_positions: torch.Tensor,
         layer_idx: int,
         start_index: int = 0,
+        positions_per_kv_head: Optional[List[torch.Tensor]] = None,
     ) -> Optional[torch.Tensor]:
         """
         Compute per-head frequency scores for a single layer.
 
         Args:
             key_states: Key tensor from the cache [batch, num_heads, seq_len, head_dim]
-            key_positions: Absolute positions of the tokens to score
+            key_positions: Absolute positions of the tokens to score (used when positions_per_kv_head is None)
             layer_idx: Which layer this is
             start_index: Starting index in key_states to gather from (for decode-only scoring)
+            positions_per_kv_head: Optional per-KV-head positions [num_kv_heads][seq_len].
+                                   When provided, each KV head uses its own position array for RoPE inversion.
+                                   This is critical after per-head compression where different KV heads
+                                   have different tokens at the same cache index.
 
         Returns:
             Tensor of shape [num_heads_in_layer, seq_len] or None if no sampled heads
         """
-        # Get rotary cos/sin for positions
-        base = torch.zeros(1, key_positions.shape[0], self.head_dim,
-                          device=self.config.device, dtype=self.config.dtype)
-        cos, sin = self.rotary(base, key_positions.unsqueeze(0))
-        cos_table, sin_table = cos[0], sin[0]
-
         # Collect scores from sampled heads in this layer
         layer_heads = [(l, h) for l, h in self.sampled_heads if l == layer_idx]
         if not layer_heads:
@@ -418,6 +459,23 @@ class SpeckVRKVStyle:
         # Build gather indices for extracting keys from cache
         seq_len = key_positions.shape[0]
         gather_indices = torch.arange(seq_len, device=self.config.device, dtype=torch.long) + start_index
+
+        # Pre-compute RoPE tables per KV head if using per-head positions
+        # Otherwise use shared positions for all heads
+        if positions_per_kv_head is not None:
+            # Per-head mode: compute cos/sin tables for each KV head's positions
+            cos_sin_per_kv_head: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
+            base = torch.zeros(1, seq_len, self.head_dim,
+                              device=self.config.device, dtype=self.config.dtype)
+            for kv_head_idx, kv_positions in enumerate(positions_per_kv_head):
+                cos, sin = self.rotary(base, kv_positions.unsqueeze(0))
+                cos_sin_per_kv_head[kv_head_idx] = (cos[0], sin[0])
+        else:
+            # Shared mode: single cos/sin table for all heads
+            base = torch.zeros(1, key_positions.shape[0], self.head_dim,
+                              device=self.config.device, dtype=self.config.dtype)
+            cos, sin = self.rotary(base, key_positions.unsqueeze(0))
+            shared_cos_table, shared_sin_table = cos[0], sin[0]
 
         per_head_scores: List[torch.Tensor] = []
         for layer, head in layer_heads:
@@ -432,6 +490,14 @@ class SpeckVRKVStyle:
             k_values = key_states[0, kv_head].index_select(0, gather_indices)
             k_values = k_values.to(device=self.config.device, dtype=self.config.dtype)
 
+            # Get appropriate RoPE tables and positions for this KV head
+            if positions_per_kv_head is not None:
+                cos_table, sin_table = cos_sin_per_kv_head[kv_head]
+                head_key_positions = positions_per_kv_head[kv_head]
+            else:
+                cos_table, sin_table = shared_cos_table, shared_sin_table
+                head_key_positions = key_positions
+
             # Invert RoPE
             k_unrot = invert_rope(k_values, cos_table, sin_table, self.attention_scale, style=self.rope_style)
 
@@ -442,7 +508,7 @@ class SpeckVRKVStyle:
 
             # Score keys
             head_scores = score_keys_for_round(
-                key_indices=key_positions,
+                key_indices=head_key_positions,
                 round_start=self.absolute_position,
                 amp=amp,
                 phi=phi,
@@ -462,6 +528,7 @@ class SpeckVRKVStyle:
     def reset_compression_state(self) -> None:
         """Reset state for new generation (aligned with SparseRoundPruner recreation)."""
         self.cache_positions = []
+        self.cache_positions_per_head = None
         self.absolute_position = 0
         self.prefix_length = 0
         # Reset generator to initial seed (aligned with rkv_speckv_generate.py
@@ -671,6 +738,10 @@ def apply_speckv_rkv_style_patch(
             added = seq_len - cached_len
             new_positions = list(range(comp.absolute_position, comp.absolute_position + added))
             comp.cache_positions.extend(new_positions)
+            # Also extend per-head positions if active (all heads get same new tokens)
+            if comp.cache_positions_per_head is not None:
+                for head_positions in comp.cache_positions_per_head:
+                    head_positions.extend(new_positions)
             comp.absolute_position += added
 
         # Apply compression based on trigger mode
@@ -723,10 +794,22 @@ def apply_speckv_rkv_style_patch(
                     new_pkv.append((k_new.contiguous(), v_new.contiguous()))
                 pkv_tuple = tuple(new_pkv)
 
-                # Update cache_positions using head 0's indices as representative
-                # (all heads have same length after compression)
-                head0_indices = keep_indices[0].tolist()
-                comp.cache_positions = [comp.cache_positions[idx] for idx in head0_indices]
+                # Update cache_positions_per_head: each KV head has its own position list
+                # This is critical for correct RoPE inversion in subsequent scoring rounds
+                if comp.cache_positions_per_head is None:
+                    # First per-head compression: initialize from shared cache_positions
+                    comp.cache_positions_per_head = [
+                        [comp.cache_positions[idx] for idx in keep_indices[kv_head].tolist()]
+                        for kv_head in range(num_kv_heads)
+                    ]
+                else:
+                    # Subsequent compression: update each head's positions
+                    comp.cache_positions_per_head = [
+                        [comp.cache_positions_per_head[kv_head][idx] for idx in keep_indices[kv_head].tolist()]
+                        for kv_head in range(num_kv_heads)
+                    ]
+                # Keep cache_positions as head 0's for compatibility (used for length tracking)
+                comp.cache_positions = comp.cache_positions_per_head[0].copy()
             else:
                 # Global mode: 1D keep_indices shape [budget]
                 # Use index_select (existing behavior)

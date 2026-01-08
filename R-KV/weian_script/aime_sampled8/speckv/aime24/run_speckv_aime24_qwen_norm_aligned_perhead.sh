@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Sharded AIME24 SpeckV ALIGNED_BUDGET + PER_HEAD on DeepSeek-R1-Distill-Qwen-7B (flash_attn2 + bfloat16), 8 draws, seed=888.
-# Combines:
-#   - Variant 1 (aligned_budget): --include-prefill-in-budget, --rkv-aligned-budget, --divide-length 128
-#   - Variant 2 (perhead): --per-head-pruning
+# Sharded AIME24 SpeckV ALIGNED + PER_HEAD on DeepSeek-R1-Distill-Qwen-7B (flash_attn2 + bfloat16), 8 draws, seed=888.
+# Purpose: exact aligned baseline + per-head pruning only (fair comparison).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../../../.." && pwd)"
@@ -15,13 +13,14 @@ export HF_HOME="${HF_HOME:-/data/rbg/users/weian/.cache/huggingface}"
 export PIP_CACHE_DIR="${PIP_CACHE_DIR:-/data/rbg/users/weian/.cache/pip}"
 
 python3 "${PROJECT_ROOT}/R-KV/weian_development/rkv_sharded_dispatch.py" \
-  --config "${PROJECT_ROOT}/R-KV/weian_script/configs/aime_sampled8_speckv_aime24_qwen_norm_aligned_perhead.yaml" \
+  --config "${PROJECT_ROOT}/R-KV/weian_script/configs/aime_sampled8_speckv_aime24_qwen_norm_aligned.yaml" \
   --method-output-dir "${PROJECT_ROOT}/R-KV/outputs/aime_sampled8/speckv/aime24/norm_aligned_perhead" \
   --log-dir "${PROJECT_ROOT}/R-KV/logs/aime_sampled8/speckv/aime24/norm_aligned_perhead" \
   --output-dir "${PROJECT_ROOT}/R-KV/outputs/aime_sampled8/speckv/aime24/norm_aligned_perhead/shards" \
   --sparse-normalize-scores \
   --include-prefill-in-budget \
-  --rkv-aligned-budget \
+  --rkv-style-compression \
+  --rkv-style-slack-trigger \
   --divide-length 128 \
   --per-head-pruning \
   "$@"
