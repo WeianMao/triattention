@@ -9,7 +9,7 @@ This directory contains R-KV experiments on AIME24 dataset using DeepSeek-R1-Dis
 | Script | kv_budget | Description |
 |--------|-----------|-------------|
 | `run_rkv_aime24_llama.sh` | 2048 | Baseline R-KV LLaMA experiment |
-| `run_rkv_aime24_llama_budget800.sh` | 800 | Low-budget comparison experiment |
+| `run_rkv_aime24_llama_budget500.sh` | 500 | Low-budget comparison experiment |
 | `run_rkv_aime24_qwen.sh` | 2048 | Qwen version (existing) |
 
 ## Common Parameters
@@ -28,13 +28,13 @@ This directory contains R-KV experiments on AIME24 dataset using DeepSeek-R1-Dis
 ## Configs
 
 - `configs/aime_sampled8_rkv_aime24_llama.yaml` (budget=2048)
-- `configs/aime_sampled8_rkv_aime24_llama_budget800.yaml` (budget=800)
+- `configs/aime_sampled8_rkv_aime24_llama_budget500.yaml` (budget=500)
 
 ## Task Context
 
 Created on 2025-01-09 to:
 1. Migrate RKV LLaMA experiments from `aime24_official_sampled8/` to new directory structure
-2. Add budget=800 experiments for low-budget algorithm comparison with SpeckV
+2. Add budget=500 experiments for low-budget algorithm comparison with SpeckV
 
 ## Notes
 

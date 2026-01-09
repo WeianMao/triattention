@@ -1,9 +1,9 @@
 experiment:
-  name: aime_sampled8_rkv_aime24_llama_budget800
+  name: aime_sampled8_rkv_aime24_llama_budget500
   conda_env: rkv
   runner_path: R-KV/weian_development/rkv_sharded_runner.py
-  log_dir: R-KV/logs/aime_sampled8/rkv/aime24/llama_budget800
-  method_output_dir: R-KV/outputs/aime_sampled8/rkv/aime24/llama_budget800
+  log_dir: R-KV/logs/aime_sampled8/rkv/aime24/llama_budget500
+  method_output_dir: R-KV/outputs/aime_sampled8/rkv/aime24/llama_budget500
   merged_dir_name: merged
   gpus: auto
   auto_gpu_fallback: [0, 1, 2, 3, 4, 5, 6, 7]
@@ -11,14 +11,14 @@ experiment:
   gpu_memory_threshold: 5000
   env: {}
   runner_args:
-    output_dir: R-KV/outputs/aime_sampled8/rkv/aime24/llama_budget800/shards
+    output_dir: R-KV/outputs/aime_sampled8/rkv/aime24/llama_budget500/shards
     dataset_path: R-KV/HuggingFace/data/aime24.jsonl
     model_path: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B
     max_length: 32768
     eval_batch_size: 1
     seed: 888
     method: rkv
-    kv_budget: 800
+    kv_budget: 500
     attn_implementation: flash_attention_2
     load_dtype: bfloat16
     reset_cache_each_batch: false
