@@ -360,12 +360,43 @@ def has_trace_data(trace_root: Path) -> bool:
     return False
 
 
-def build_stats(dry_run: bool) -> None:
+def normalize_selection(
+    selected: List[str] | None, allowed: List[str], kind: str
+) -> List[str]:
+    if not selected:
+        return list(allowed)
+    allowed_set = set(allowed)
+    ordered: List[str] = []
+    seen: set[str] = set()
+    for value in selected:
+        if value not in allowed_set:
+            raise ValueError(f"Unsupported {kind}: {value}")
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def build_stats(
+    dry_run: bool,
+    datasets: List[str] | None = None,
+    models: List[str] | None = None,
+    job_parallel: int = 1,
+) -> None:
+    if job_parallel < 1:
+        raise ValueError("job_parallel must be >= 1")
+
+    dataset_list = normalize_selection(datasets, DATASETS, "dataset")
+    model_list = normalize_selection(models, list(MODEL_SPECS.keys()), "model")
+
     budgets = load_budgets()
     missing_fullkv: List[Tuple[str, str, Path]] = []
-    for dataset in DATASETS:
-        num_traces = 30 if dataset in {"aime24", "aime25"} else 500
-        for model_name in MODEL_SPECS.keys():
+    commands: List[Dict[str, object]] = []
+
+    for dataset in dataset_list:
+        num_traces = 30  # Use 30 traces for stats building
+        for model_name in model_list:
             fullkv_root = OUTPUTS_DIR / dataset / model_name / "fullkv" / "full"
             if not fullkv_root.exists() or not has_trace_data(fullkv_root):
                 missing_fullkv.append((dataset, model_name, fullkv_root))
@@ -398,10 +429,14 @@ def build_stats(dry_run: bool) -> None:
                 env = os.environ.copy()
                 env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
                 env["PYTHONPATH"] = f"{RKV_ROOT}:{env.get('PYTHONPATH', '')}".strip(":")
-                if dry_run:
-                    print(f"[dry-run] {' '.join(cmd)}")
-                else:
-                    subprocess.check_call(cmd, cwd=str(RKV_ROOT), env=env)
+                commands.append(
+                    {
+                        "cmd": cmd,
+                        "cwd": str(RKV_ROOT),
+                        "env": env,
+                        "label": f"{dataset}/{model_name}/budget_{budget}",
+                    }
+                )
 
     if missing_fullkv:
         for dataset, model_name, path in missing_fullkv:
@@ -411,6 +446,44 @@ def build_stats(dry_run: bool) -> None:
             )
         if not dry_run:
             raise SystemExit("FullKV outputs missing. Run scripts/run_all_default_v2.sh first.")
+
+    if not commands:
+        print("[info] No pending stats jobs for requested targets.")
+        return
+
+    if dry_run:
+        print(f"[dry-run] job_parallel={job_parallel}")
+        batch_id = 1
+        for idx in range(0, len(commands), job_parallel):
+            labels = ", ".join(
+                info["label"]  # type: ignore[index]
+                for info in commands[idx : idx + job_parallel]
+            )
+            print(f"[dry-run] batch {batch_id}: {labels}")
+            batch_id += 1
+        for info in commands:
+            cmd_str = " ".join(info["cmd"])  # type: ignore[index]
+            print(f"[dry-run] {cmd_str}")
+        return
+
+    running: List[Tuple[subprocess.Popen, str]] = []
+
+    def wait_for_first() -> None:
+        if not running:
+            return
+        proc, label = running.pop(0)
+        ret = proc.wait()
+        if ret != 0:
+            raise SystemExit(f"[error] Stats job {label} failed with status {ret}")
+
+    for info in commands:
+        proc = subprocess.Popen(info["cmd"], cwd=info["cwd"], env=info["env"])  # type: ignore[arg-type]
+        running.append((proc, info["label"]))  # type: ignore[index]
+        if len(running) >= job_parallel:
+            wait_for_first()
+
+    while running:
+        wait_for_first()
 
 
 def download_models() -> None:
@@ -451,7 +524,27 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser("download-models", help="Download all required models.")
     subparsers.add_parser("run-default", help="Run all default-budget experiments.")
     subparsers.add_parser("run-sweep", help="Run all budget sweep experiments.")
-    subparsers.add_parser("build-stats", help="Build SpeckV stats for all datasets/models.")
+    build_stats_parser = subparsers.add_parser(
+        "build-stats", help="Build SpeckV stats for all datasets/models."
+    )
+    build_stats_parser.add_argument(
+        "--dataset",
+        action="append",
+        choices=DATASETS,
+        help="Datasets to include (repeatable). Defaults to all.",
+    )
+    build_stats_parser.add_argument(
+        "--model",
+        action="append",
+        choices=list(MODEL_SPECS.keys()),
+        help="Models to include (repeatable). Defaults to all.",
+    )
+    build_stats_parser.add_argument(
+        "--job-parallel",
+        type=int,
+        default=1,
+        help="Maximum concurrent stats jobs.",
+    )
 
     run_one_parser = subparsers.add_parser("run-one", help="Run a single dataset/model/method/budget.")
     run_one_parser.add_argument("--dataset", required=True, choices=DATASETS)
@@ -474,7 +567,12 @@ def main() -> None:
         run_sweep(args.dry_run)
         return
     if args.command == "build-stats":
-        build_stats(args.dry_run)
+        build_stats(
+            args.dry_run,
+            datasets=args.dataset,
+            models=args.model,
+            job_parallel=args.job_parallel,
+        )
         return
     if args.command == "run-one":
         defaults = load_runner_defaults()
