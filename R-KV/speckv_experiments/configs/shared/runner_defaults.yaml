@@ -22,7 +22,7 @@ runner_args:
   load_dtype: bfloat16
   reset_cache_each_batch: false
   fp32_topk: false
-  num_samples: 8
+  num_samples: 64
   temperature: 0.6
   top_p: 0.95
   use_chat_template: false
