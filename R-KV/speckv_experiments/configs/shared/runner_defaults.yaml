@@ -1,0 +1,34 @@
+experiment:
+  conda_env: rkv
+  runner_path: R-KV/weian_development/rkv_sharded_runner.py
+  merged_dir_name: merged
+  gpus: auto
+  auto_gpu_fallback:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+  num_shards: 8
+  gpu_memory_threshold: 5000
+  env: {}
+runner_args:
+  eval_batch_size: 1
+  seed: 888
+  attn_implementation: flash_attention_2
+  load_dtype: bfloat16
+  reset_cache_each_batch: false
+  fp32_topk: false
+  num_samples: 8
+  temperature: 0.6
+  top_p: 0.95
+  use_chat_template: false
+  chat_system_prompt: ""
+dataset_max_length:
+  aime24: 32768
+  aime25: 32768
+  math500: 8192
+  math: 8192

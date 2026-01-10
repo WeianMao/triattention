@@ -431,18 +431,22 @@ def main(args: argparse.Namespace) -> None:
 
     method_lower = args.method.lower() if args.method else ""
     if method_lower == "speckv":
-        # SpeckV paper/baseline uses plain prompt (no chat); do not allow chat mode.
         if args.kv_budget is None:
             raise ValueError("kv_budget must be provided for speckv.")
         if bool(args.use_chat_template):
-            raise ValueError("SpeckV uses the plain R-KV prompt; use_chat_template must be False.")
+            import warnings
+            warnings.warn(
+                "SpeckV paper/baseline uses plain prompt (no chat template). "
+                "Enabling chat template may affect reproducibility with published results.",
+                UserWarning
+            )
 
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_path, use_fast=True, padding_side="left"
     )
     tokenizer = configure_tokenizer(tokenizer)
 
-    prompt_use_chat = False
+    prompt_use_chat = args.use_chat_template
     prompts, test_data = load_dataset(
         Path(args.dataset_path),
         args.dataset_name,
