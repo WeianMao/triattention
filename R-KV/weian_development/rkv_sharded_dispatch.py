@@ -342,7 +342,7 @@ def determine_gpus(args: argparse.Namespace, experiment: Dict) -> List[str]:
             return gpus
     cfg_gpus = experiment.get("gpus", [])
     fallback = experiment.get("auto_gpu_fallback", [])
-    threshold = args.gpu_memory_threshold or experiment.get("gpu_memory_threshold", 5000)
+    threshold = args.gpu_memory_threshold or experiment.get("gpu_memory_threshold", 9000)
     if isinstance(cfg_gpus, str) and cfg_gpus.strip().lower() == "auto":
         detected = auto_detect_gpus(threshold)
         if detected:
