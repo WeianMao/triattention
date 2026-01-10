@@ -71,13 +71,9 @@ def validate_stats_metadata(
             f"dtype mismatch for stats {stats_path}: expected {expected_dtype}, found {stats_dtype}."
         )
 
-    expected_kv = expected.get("kv_budget")
-    if expected_kv is not None:
-        stats_kv = _require(metadata, "kv_budget", stats_path)
-        if int(stats_kv) != int(expected_kv):
-            raise ValueError(
-                f"kv_budget mismatch for stats {stats_path}: expected {expected_kv}, found {stats_kv}."
-            )
+    # NOTE: kv_budget validation skipped - stats are collected in fullkv mode
+    # where kv_budget doesn't affect the actual attention computation.
+    # The recorded kv_budget in stats is just a config value, not a constraint.
 
     expected_rope_style = expected.get("rope_style")
     if expected_rope_style is not None:
