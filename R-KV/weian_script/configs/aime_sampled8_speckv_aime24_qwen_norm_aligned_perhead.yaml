@@ -8,7 +8,7 @@ experiment:
   gpus: auto
   auto_gpu_fallback: [0, 1, 2, 3, 4, 5, 6, 7]
   num_shards: 8
-  gpu_memory_threshold: 5000
+  gpu_memory_threshold: 9000
   env: {}
   runner_args:
     output_dir: R-KV/outputs/aime_sampled8/speckv/aime24/norm_aligned_perhead/shards
