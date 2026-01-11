@@ -195,6 +195,14 @@ def parse_args() -> argparse.Namespace:
         help="Override runner arg: disable top-n high-frequency components in position-dependent scoring.",
     )
     parser.add_argument(
+        "--attn-implementation",
+        dest="attn_implementation",
+        type=str,
+        default=None,
+        choices=["eager", "flash_attention_2", "sdpa"],
+        help="Override runner arg: attention implementation (eager for V100, flash_attention_2 for A100/H100).",
+    )
+    parser.add_argument(
         "--simulate-bug-phase-offset",
         dest="simulate_bug_phase_offset",
         type=int,
@@ -645,6 +653,8 @@ def main() -> None:
         runner_args["sparse_offset_max_length"] = args.sparse_offset_max_length
     if args.disable_top_n_high_freq is not None:
         runner_args["disable_top_n_high_freq"] = args.disable_top_n_high_freq
+    if args.attn_implementation is not None:
+        runner_args["attn_implementation"] = args.attn_implementation
     if args.simulate_bug_phase_offset is not None:
         runner_args["simulate_bug_phase_offset"] = args.simulate_bug_phase_offset
     if args.simulate_attention_position_offset is not None:
