@@ -1,5 +1,7 @@
 outputs/
 brumo_2025.jsonl
+aime25.jsonl
+.claude/
 __pycache__
 deepconf_old
 tmp_eval
