@@ -249,6 +249,20 @@ def parse_args() -> argparse.Namespace:
         help="Disable per-layer-per-head independent pruning.",
     )
     parser.set_defaults(per_layer_perhead_pruning=None)
+    layer_group = parser.add_mutually_exclusive_group()
+    layer_group.add_argument(
+        "--per-layer-pruning",
+        dest="per_layer_pruning",
+        action="store_true",
+        help="Enable per-layer independent pruning (all KV heads in same layer share tokens).",
+    )
+    layer_group.add_argument(
+        "--no-per-layer-pruning",
+        dest="per_layer_pruning",
+        action="store_false",
+        help="Disable per-layer independent pruning.",
+    )
+    parser.set_defaults(per_layer_pruning=None)
     return parser.parse_args()
 
 
@@ -639,6 +653,8 @@ def main() -> None:
         runner_args["per_head_pruning"] = args.per_head_pruning
     if args.per_layer_perhead_pruning is not None:
         runner_args["per_layer_perhead_pruning"] = args.per_layer_perhead_pruning
+    if args.per_layer_pruning is not None:
+        runner_args["per_layer_pruning"] = args.per_layer_pruning
     if args.allow_prefill_compression is not None:
         runner_args["allow_prefill_compression"] = args.allow_prefill_compression
     base_env = prepare_environment(experiment.get("env", {}))
