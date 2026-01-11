@@ -342,6 +342,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Enable per-KV-head independent pruning (each head selects tokens independently). Default: False",
     )
     parser.add_argument(
+        "--per_layer_perhead_pruning",
+        type=str2bool,
+        default=False,
+        help="Enable per-layer-per-head independent pruning (each (layer, KV head) selects independently). Default: False",
+    )
+    parser.add_argument(
         "--use_chat_template",
         type=str2bool,
         default=False,
@@ -601,6 +607,7 @@ def main(args: argparse.Namespace) -> None:
                 divide_length=args.divide_length,
                 use_slack_trigger=args.rkv_style_slack_trigger,
                 per_head_pruning=args.per_head_pruning,
+                per_layer_perhead_pruning=args.per_layer_perhead_pruning,
             )
         else:
             # Use original generate wrapper implementation

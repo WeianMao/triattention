@@ -38,3 +38,4 @@ R-KV/logs/
 post_rope_nms_viz/
 
 R-KV/speckv_experiments/configs/generated/
+prompt.txt
