@@ -154,6 +154,51 @@ def run_is_complete(run_path: Path, meta_path: Path, expected_records: int) -> b
         return False
 
 
+def _record_sample_idx(record: dict) -> int | None:
+    value = record.get("sample_idx")
+    if isinstance(value, int):
+        return value
+    value = record.get("index")
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def load_existing_sample_indices(path: Path) -> set[int]:
+    indices: set[int] = set()
+    if not path.exists():
+        return indices
+    try:
+        with path.open() as fp:
+            for line in fp:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    record = json.loads(stripped)
+                except json.JSONDecodeError:
+                    break
+                sample_idx = _record_sample_idx(record)
+                if sample_idx is not None:
+                    indices.add(sample_idx)
+    except Exception:
+        return set()
+    return indices
+
+
+def write_run_meta(meta_path: Path, run_id: int, shard_id: int, records: int) -> None:
+    meta_tmp = meta_path.with_suffix(".meta.json.tmp")
+    meta = {
+        "status": "complete",
+        "records": records,
+        "run_id": run_id,
+        "shard_id": shard_id,
+    }
+    with meta_tmp.open("w") as fp:
+        json.dump(meta, fp)
+    meta_tmp.replace(meta_path)
+
+
 def load_dataset(
     path: Path,
     dataset_name: str,
@@ -649,12 +694,30 @@ def main(args: argparse.Namespace) -> None:
         artifacts = run_artifacts(output_root, args.shard_id, run_id)
         if run_is_complete(artifacts["run"], artifacts["meta"], expected_records):
             continue
-        for stale in ("meta", "meta_tmp", "tmp"):
-            path = artifacts[stale]
-            if path.exists():
-                path.unlink()
 
-        with artifacts["tmp"].open("w") as fout:
+        existing_path = artifacts["tmp"] if artifacts["tmp"].exists() else artifacts["run"] if artifacts["run"].exists() else None
+        existing_indices = load_existing_sample_indices(existing_path) if existing_path else set()
+        completed = len(existing_indices)
+
+        if completed >= expected_records and expected_records > 0:
+            if existing_path == artifacts["tmp"]:
+                existing_path.replace(artifacts["run"])
+            if not artifacts["meta"].exists():
+                write_run_meta(artifacts["meta"], run_id, args.shard_id, expected_records)
+            continue
+
+        if artifacts["meta_tmp"].exists():
+            artifacts["meta_tmp"].unlink()
+
+        out_path = existing_path or artifacts["tmp"]
+        if completed:
+            sys.stderr.write(
+                f"[resume] shard={args.shard_id} run={run_id} done={completed}/{expected_records}\n"
+            )
+            sys.stderr.flush()
+
+        with out_path.open("a") as fout:
+            progress = completed
             for local_idx, prompt in enumerate(prompts):
                 tokenized_prompts = tokenizer(
                     [prompt],
@@ -664,6 +727,8 @@ def main(args: argparse.Namespace) -> None:
                 ).to("cuda")
                 prefill_length = int(tokenized_prompts["attention_mask"].sum().item())
                 sample_idx = test_data[local_idx]["index"]
+                if sample_idx in existing_indices:
+                    continue
                 record_id = int(test_data[local_idx].get("id", sample_idx))
                 seed_value = args.seed + run_id * RUN_SEED_STRIDE + sample_idx
                 set_seed(seed_value)
@@ -683,6 +748,12 @@ def main(args: argparse.Namespace) -> None:
                 else:
                     deactivate_capture()
 
+                progress += 1
+                sys.stderr.write(
+                    f"[progress] shard={args.shard_id} run={run_id} "
+                    f"problem={progress}/{expected_records} sample_idx={sample_idx}\n"
+                )
+                sys.stderr.flush()
                 output = model.generate(
                     **tokenized_prompts,
                     max_length=args.max_length,
@@ -709,20 +780,13 @@ def main(args: argparse.Namespace) -> None:
                 record["draw_idx"] = run_id
 
                 fout.write(json.dumps(record, ensure_ascii=False) + "\n")
+                fout.flush()
                 deactivate_capture()
             torch.cuda.empty_cache()
 
-        meta_tmp = artifacts["meta_tmp"]
-        meta = {
-            "status": "complete",
-            "records": expected_records,
-            "run_id": run_id,
-            "shard_id": args.shard_id,
-        }
-        with meta_tmp.open("w") as fp:
-            json.dump(meta, fp)
-        meta_tmp.replace(artifacts["meta"])
-        artifacts["tmp"].replace(artifacts["run"])
+        write_run_meta(artifacts["meta"], run_id, args.shard_id, expected_records)
+        if out_path == artifacts["tmp"]:
+            artifacts["tmp"].replace(artifacts["run"])
     torch.cuda.empty_cache()
 
 
