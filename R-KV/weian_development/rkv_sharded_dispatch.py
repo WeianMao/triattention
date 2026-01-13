@@ -457,9 +457,10 @@ def launch_shard(
     base_cmd: List[str],
     base_env: Dict[str, str],
     log_dir: Path,
+    log_stamp: str,
 ) -> ActiveShard:
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"rkv_aime24_shard{shard_id:02d}.log"
+    log_path = log_dir / f"rkv_aime24_shard{shard_id:02d}_{log_stamp}.log"
     shard_cmd = base_cmd + ["--shard_id", str(shard_id)]
     env = base_env.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(gpu)
@@ -497,6 +498,7 @@ def run_shards(
     base_cmd: List[str],
     base_env: Dict[str, str],
     log_dir: Path,
+    log_stamp: str,
     dry_run: bool,
     output_dir: Path,
     skip_existing: bool,
@@ -539,7 +541,7 @@ def run_shards(
         for shard_id in shards_to_run:
             start_draw, local_count = compute_local_samples(num_samples, total_shards, shard_id)
             gpu = gpus[shard_id % len(gpus)]
-            log_path = (log_dir / f"rkv_aime24_shard{shard_id:02d}.log").resolve()
+            log_path = (log_dir / f"rkv_aime24_shard{shard_id:02d}_{log_stamp}.log").resolve()
             cmd_preview = base_cmd + ["--shard_id", str(shard_id)]
             runs_preview = pending_runs.get(shard_id)
             run_span = f"runs={local_count}"
@@ -560,7 +562,7 @@ def run_shards(
                     print(f"[skip] shard {shard_id} has 0 assigned runs, continuing.")
                     available.append(gpu)
                     continue
-                active[gpu] = launch_shard(gpu, shard_id, base_cmd, base_env, log_dir)
+                active[gpu] = launch_shard(gpu, shard_id, base_cmd, base_env, log_dir, log_stamp)
             if not active:
                 continue
             time.sleep(5)
@@ -636,6 +638,7 @@ def main() -> None:
     total_shards = args.num_shards or experiment.get("num_shards", 1)
     gpus = determine_gpus(args, experiment)
     log_dir = resolve_path(args.log_dir or experiment.get("log_dir", "R-KV/logs/rkv_aime24_sharded"))
+    log_stamp = time.strftime("%Y%m%d_%H%M%S")
     method_output_dir = resolve_path(args.method_output_dir or experiment.get("method_output_dir", "R-KV/outputs/rkv_aime24_sharded"))
     merged_dir_name = experiment.get("merged_dir_name", "merged")
     eval_output_dir = resolve_path(args.eval_output_dir) if args.eval_output_dir else None
@@ -708,6 +711,7 @@ def main() -> None:
         base_cmd,
         base_env,
         log_dir,
+        log_stamp,
         args.dry_run,
         runner_args["output_dir"],
         args.skip_existing,
