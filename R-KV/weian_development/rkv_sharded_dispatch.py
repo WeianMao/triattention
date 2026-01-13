@@ -257,6 +257,13 @@ def parse_args() -> argparse.Namespace:
         help="Disable per-layer-per-head independent pruning.",
     )
     parser.set_defaults(per_layer_perhead_pruning=None)
+    parser.add_argument(
+        "--layer-perhead-aggregation",
+        type=str,
+        choices=["max", "mean"],
+        default="max",
+        help="Aggregation method for per-layer-perhead pruning: max (default) or mean.",
+    )
     layer_group = parser.add_mutually_exclusive_group()
     layer_group.add_argument(
         "--per-layer-pruning",
@@ -271,6 +278,13 @@ def parse_args() -> argparse.Namespace:
         help="Disable per-layer independent pruning.",
     )
     parser.set_defaults(per_layer_pruning=None)
+    parser.add_argument(
+        "--per-layer-aggregation",
+        type=str,
+        choices=["max", "mean", "pure_mean"],
+        default="max",
+        help="Aggregation method for per-layer pruning: max (default) or mean (max per kv_head then mean).",
+    )
     return parser.parse_args()
 
 
@@ -663,8 +677,12 @@ def main() -> None:
         runner_args["per_head_pruning"] = args.per_head_pruning
     if args.per_layer_perhead_pruning is not None:
         runner_args["per_layer_perhead_pruning"] = args.per_layer_perhead_pruning
+    if args.layer_perhead_aggregation:
+        runner_args["layer_perhead_aggregation"] = args.layer_perhead_aggregation
     if args.per_layer_pruning is not None:
         runner_args["per_layer_pruning"] = args.per_layer_pruning
+    if args.per_layer_aggregation:
+        runner_args["per_layer_aggregation"] = args.per_layer_aggregation
     if args.allow_prefill_compression is not None:
         runner_args["allow_prefill_compression"] = args.allow_prefill_compression
     base_env = prepare_environment(experiment.get("env", {}))

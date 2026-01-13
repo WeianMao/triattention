@@ -393,10 +393,24 @@ def parse_arguments() -> argparse.Namespace:
         help="Enable per-layer-per-head independent pruning (each (layer, KV head) selects independently). Default: False",
     )
     parser.add_argument(
+        "--layer_perhead_aggregation",
+        type=str,
+        choices=["max", "mean"],
+        default="max",
+        help="Aggregation method for per-layer-perhead pruning: max (default) or mean.",
+    )
+    parser.add_argument(
         "--per_layer_pruning",
         type=str2bool,
         default=False,
         help="Enable per-layer independent pruning (all KV heads in same layer share tokens). Default: False",
+    )
+    parser.add_argument(
+        "--per_layer_aggregation",
+        type=str,
+        choices=["max", "mean", "pure_mean"],
+        default="max",
+        help="Aggregation method for per-layer pruning: max (default) or mean (max per kv_head then mean).",
     )
     parser.add_argument(
         "--use_chat_template",
@@ -659,7 +673,9 @@ def main(args: argparse.Namespace) -> None:
                 use_slack_trigger=args.rkv_style_slack_trigger,
                 per_head_pruning=args.per_head_pruning,
                 per_layer_perhead_pruning=args.per_layer_perhead_pruning,
+                layer_perhead_aggregation=args.layer_perhead_aggregation,
                 per_layer_pruning=args.per_layer_pruning,
+                per_layer_aggregation=args.per_layer_aggregation,
                 disable_top_n_high_freq=args.disable_top_n_high_freq,
             )
         else:

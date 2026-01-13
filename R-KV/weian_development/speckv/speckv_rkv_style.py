@@ -51,7 +51,9 @@ class SpeckVRKVStyleConfig:
     use_slack_trigger: bool = False  # If True, trigger at budget + divide_length (like generate wrapper)
     per_head_pruning: bool = False  # If True, each KV head selects tokens independently
     per_layer_perhead_pruning: bool = False  # If True, each (layer, KV head) selects tokens independently
+    layer_perhead_aggregation: str = "max"  # Aggregation method for per_layer_perhead_pruning: "max" or "mean"
     per_layer_pruning: bool = False  # If True, each layer selects same tokens for all KV heads
+    per_layer_aggregation: str = "max"  # Aggregation method for per_layer_pruning: "max" or "mean"
     disable_top_n_high_freq: int = 0  # Mask top-n high-frequency components in position-dependent scoring
 
 
@@ -539,7 +541,10 @@ class SpeckVRKVStyle:
                     if kv_head_idx in kv_head_groups:
                         indices = kv_head_groups[kv_head_idx]
                         group_scores = layer_scores[indices]  # [~7 heads, seq_len]
-                        aggregated = group_scores.max(dim=0).values  # [seq_len]
+                        if self.config.layer_perhead_aggregation == "mean":
+                            aggregated = group_scores.mean(dim=0)  # [seq_len]
+                        else:
+                            aggregated = group_scores.max(dim=0).values  # [seq_len]
                     else:
                         # Fallback: use mean of all layer scores
                         aggregated = layer_scores.mean(dim=0)
@@ -638,8 +643,36 @@ class SpeckVRKVStyle:
                     ) * 1e-6
                     layer_scores = layer_scores + noise
 
-                # Aggregate: max over all sampled heads in this layer
-                aggregated = layer_scores.max(dim=0).values  # [seq_len]
+                # Aggregate scores based on aggregation method
+                if self.config.per_layer_aggregation == "mean":
+                    # Mean of per-kv-head max: group by kv_head, max within group, then mean
+                    layer_heads = [(l, h) for l, h in self.sampled_heads if l == layer_idx]
+                    kv_head_groups: Dict[int, List[int]] = {}
+                    for i, (_, attn_head) in enumerate(layer_heads):
+                        kv_head = attn_head // max(1, self.num_key_value_groups)
+                        if kv_head not in kv_head_groups:
+                            kv_head_groups[kv_head] = []
+                        kv_head_groups[kv_head].append(i)
+
+                    kv_head_max_scores: List[torch.Tensor] = []
+                    for kv_head_idx in range(self.num_key_value_heads):
+                        if kv_head_idx in kv_head_groups:
+                            indices = kv_head_groups[kv_head_idx]
+                            group_scores = layer_scores[indices]  # [~n heads, seq_len]
+                            kv_max = group_scores.max(dim=0).values  # [seq_len]
+                            kv_head_max_scores.append(kv_max)
+
+                    if kv_head_max_scores:
+                        stacked = torch.stack(kv_head_max_scores, dim=0)  # [num_kv_heads_with_samples, seq_len]
+                        aggregated = stacked.mean(dim=0)  # [seq_len]
+                    else:
+                        aggregated = layer_scores.mean(dim=0)  # fallback
+                elif self.config.per_layer_aggregation == "pure_mean":
+                    # Pure mean: directly average all sampled heads without max
+                    aggregated = layer_scores.mean(dim=0)  # [seq_len]
+                else:
+                    # Default: max over all sampled heads in this layer
+                    aggregated = layer_scores.max(dim=0).values  # [seq_len]
 
                 # Top-k selection for this layer
                 actual_keep = min(keep_count, aggregated.numel())
@@ -799,7 +832,9 @@ def apply_speckv_rkv_style_patch(
     use_slack_trigger: bool = False,
     per_head_pruning: bool = False,
     per_layer_perhead_pruning: bool = False,
+    layer_perhead_aggregation: str = "max",
     per_layer_pruning: bool = False,
+    per_layer_aggregation: str = "max",
     disable_top_n_high_freq: int = 0,
 ) -> None:
     """
@@ -829,7 +864,9 @@ def apply_speckv_rkv_style_patch(
         use_slack_trigger=use_slack_trigger,
         per_head_pruning=per_head_pruning,
         per_layer_perhead_pruning=per_layer_perhead_pruning,
+        layer_perhead_aggregation=layer_perhead_aggregation,
         per_layer_pruning=per_layer_pruning,
+        per_layer_aggregation=per_layer_aggregation,
         disable_top_n_high_freq=disable_top_n_high_freq,
     )
 
