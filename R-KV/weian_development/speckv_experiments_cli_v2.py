@@ -118,6 +118,18 @@ def budget_tag(mode: str, budget: int | None) -> str:
     return f"budget_{budget}"
 
 
+def resolve_num_samples(runner_args: dict) -> int:
+    value = runner_args.get("num_samples", 64)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 64
+
+
+def sample_tag(num_samples: int) -> str:
+    return f"sample{num_samples}"
+
+
 def config_output_path(dataset: str, model_name: str, mode: str, budget: int | None) -> Path:
     slug = model_name.lower().replace("/", "-").replace(" ", "-")
     tag = budget_tag(mode, budget)
@@ -141,11 +153,12 @@ def build_config(
     defaults: dict,
 ) -> dict:
     tag = budget_tag(mode, budget)
-    log_dir = LOGS_DIR / dataset / model_name / mode / tag
-    output_dir = OUTPUTS_DIR / dataset / model_name / mode / tag
-
     exp_defaults = defaults.get("experiment", {})
     runner_defaults = defaults.get("runner_args", {})
+    num_samples = resolve_num_samples(runner_defaults)
+    sample_dir = sample_tag(num_samples)
+    log_dir = LOGS_DIR / dataset / model_name / sample_dir / mode / tag
+    output_dir = OUTPUTS_DIR / dataset / model_name / sample_dir / mode / tag
 
     experiment = apply_defaults(
         exp_defaults,
@@ -250,8 +263,11 @@ def run_one(
     dataset_path = resolve_dataset_path(dataset)
     model_path = validate_model_exists(model_name, dry_run)
     tag = budget_tag(mode, budget)
-    log_dir = LOGS_DIR / dataset / model_name / mode / tag
-    output_dir = OUTPUTS_DIR / dataset / model_name / mode / tag
+    runner_defaults = defaults.get("runner_args", {})
+    num_samples = resolve_num_samples(runner_defaults)
+    sample_dir = sample_tag(num_samples)
+    log_dir = LOGS_DIR / dataset / model_name / sample_dir / mode / tag
+    output_dir = OUTPUTS_DIR / dataset / model_name / sample_dir / mode / tag
 
     stats_path = None
     if mode == "speckv":
@@ -387,6 +403,11 @@ def build_stats(
     if job_parallel < 1:
         raise ValueError("job_parallel must be >= 1")
 
+    defaults = load_runner_defaults()
+    runner_defaults = defaults.get("runner_args", {})
+    num_samples = resolve_num_samples(runner_defaults)
+    sample_dir = sample_tag(num_samples)
+
     dataset_list = normalize_selection(datasets, DATASETS, "dataset")
     model_list = normalize_selection(models, list(MODEL_SPECS.keys()), "model")
 
@@ -397,7 +418,7 @@ def build_stats(
     for dataset in dataset_list:
         num_traces = 30  # Use 30 traces for stats building
         for model_name in model_list:
-            fullkv_root = OUTPUTS_DIR / dataset / model_name / "fullkv" / "full"
+            fullkv_root = OUTPUTS_DIR / dataset / model_name / sample_dir / "fullkv" / "full"
             if not fullkv_root.exists() or not has_trace_data(fullkv_root):
                 missing_fullkv.append((dataset, model_name, fullkv_root))
                 continue
