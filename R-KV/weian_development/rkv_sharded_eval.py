@@ -55,6 +55,7 @@ dataset2key = {
     "aime24": ["question", "answer"],
     "aime25": ["question", "answer"],
     "math": ["problem", "answer"],
+    "math500": ["problem", "answer"],
 }
 
 dataset2max_length = {
@@ -62,6 +63,7 @@ dataset2max_length = {
     "aime24": 32768,
     "aime25": 32768,
     "math": 8192,
+    "math500": 8192,
 }
 
 RUN_SEED_STRIDE = 1_000_000
@@ -107,9 +109,9 @@ def resolve_under_rkv(path_like: str | Path) -> Path:
     return (RKV_ROOT / path).resolve()
 
 
-def compute_local_runs(num_samples: int, num_shards: int, shard_id: int) -> tuple[int, int]:
-    base = num_samples // num_shards
-    extra = num_samples % num_shards
+def compute_local_records(total_records: int, num_shards: int, shard_id: int) -> tuple[int, int]:
+    base = total_records // num_shards
+    extra = total_records % num_shards
     start = shard_id * base + min(shard_id, extra)
     count = base + (1 if shard_id < extra else 0)
     return start, count
@@ -492,12 +494,8 @@ def main(args: argparse.Namespace) -> None:
     if args.eval_batch_size != 1:
         raise ValueError("eval_batch_size must be 1 for current R-KV sharded runner.")
 
-    total_samples = args.num_samples
-    start_draw, local_samples = compute_local_runs(total_samples, args.num_shards, args.shard_id)
-    if local_samples == 0:
-        return
-
-    run_ids = list(range(start_draw, start_draw + local_samples))
+    num_samples = args.num_samples
+    run_ids = list(range(num_samples))
     output_root = Path(args.output_dir)
 
     method_lower = args.method.lower() if args.method else ""
@@ -526,9 +524,17 @@ def main(args: argparse.Namespace) -> None:
         system_prompt=args.chat_system_prompt,
         max_examples=args.max_examples,
     )
-    expected_records = len(test_data)
-    if expected_records == 0:
+    total_records = len(test_data)
+    if total_records == 0:
         return
+    start_record, local_records = compute_local_records(total_records, args.num_shards, args.shard_id)
+    if local_records == 0:
+        return
+
+    record_end = start_record + local_records - 1
+    local_prompts = prompts[start_record : start_record + local_records]
+    local_data = test_data[start_record : start_record + local_records]
+    local_sample_indices = {item["index"] for item in local_data}
 
     method_name = method_lower if method_lower else None
     speckv_method_config: Dict[str, object] = {}
@@ -708,18 +714,18 @@ def main(args: argparse.Namespace) -> None:
 
     for run_id in run_ids:
         artifacts = run_artifacts(output_root, args.shard_id, run_id)
-        if run_is_complete(artifacts["run"], artifacts["meta"], expected_records):
+        if run_is_complete(artifacts["run"], artifacts["meta"], local_records):
             continue
 
         existing_path = artifacts["tmp"] if artifacts["tmp"].exists() else artifacts["run"] if artifacts["run"].exists() else None
         existing_indices = load_existing_sample_indices(existing_path) if existing_path else set()
-        completed = len(existing_indices)
+        completed = len(existing_indices & local_sample_indices)
 
-        if completed >= expected_records and expected_records > 0:
+        if completed >= local_records and local_records > 0:
             if existing_path == artifacts["tmp"]:
                 existing_path.replace(artifacts["run"])
             if not artifacts["meta"].exists():
-                write_run_meta(artifacts["meta"], run_id, args.shard_id, expected_records)
+                write_run_meta(artifacts["meta"], run_id, args.shard_id, local_records)
             continue
 
         if artifacts["meta_tmp"].exists():
@@ -728,13 +734,13 @@ def main(args: argparse.Namespace) -> None:
         out_path = existing_path or artifacts["tmp"]
         if completed:
             sys.stderr.write(
-                f"[resume] shard={args.shard_id} run={run_id} done={completed}/{expected_records}\n"
+                f"[resume] shard={args.shard_id} run={run_id} done={completed}/{local_records}\n"
             )
             sys.stderr.flush()
 
         with out_path.open("a") as fout:
             progress = completed
-            for local_idx, prompt in enumerate(prompts):
+            for local_idx, prompt in enumerate(local_prompts):
                 tokenized_prompts = tokenizer(
                     [prompt],
                     padding="longest",
@@ -742,10 +748,10 @@ def main(args: argparse.Namespace) -> None:
                     add_special_tokens=True,
                 ).to("cuda")
                 prefill_length = int(tokenized_prompts["attention_mask"].sum().item())
-                sample_idx = test_data[local_idx]["index"]
+                sample_idx = local_data[local_idx]["index"]
                 if sample_idx in existing_indices:
                     continue
-                record_id = int(test_data[local_idx].get("id", sample_idx))
+                record_id = int(local_data[local_idx].get("id", sample_idx))
                 seed_value = args.seed + run_id * RUN_SEED_STRIDE + sample_idx
                 set_seed(seed_value)
 
@@ -766,8 +772,9 @@ def main(args: argparse.Namespace) -> None:
 
                 progress += 1
                 sys.stderr.write(
-                    f"[progress] shard={args.shard_id} run={run_id} "
-                    f"problem={progress}/{expected_records} sample_idx={sample_idx}\n"
+                    f"[progress] shard={args.shard_id} run={run_id + 1}/{num_samples} "
+                    f"record={progress}/{local_records} "
+                    f"range={start_record}-{record_end} sample_idx={sample_idx}\n"
                 )
                 sys.stderr.flush()
                 output = model.generate(
@@ -786,7 +793,7 @@ def main(args: argparse.Namespace) -> None:
                     output[0][prefill_length:], skip_special_tokens=True
                 )
 
-                record = dict(test_data[local_idx])
+                record = dict(local_data[local_idx])
                 record["prompt"] = prompt
                 record["output"] = decoded
                 record["prefill_tokens"] = prefill_length
@@ -800,7 +807,7 @@ def main(args: argparse.Namespace) -> None:
                 deactivate_capture()
             torch.cuda.empty_cache()
 
-        write_run_meta(artifacts["meta"], run_id, args.shard_id, expected_records)
+        write_run_meta(artifacts["meta"], run_id, args.shard_id, local_records)
         if out_path == artifacts["tmp"]:
             artifacts["tmp"].replace(artifacts["run"])
     torch.cuda.empty_cache()
