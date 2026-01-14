@@ -1,12 +1,19 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
-# Editable defaults (override with flags).
 DATASET="aime24"
-MODEL="DeepSeek-R1-Distill-Qwen-7B"
+MODEL="Qwen3-8B"
 METHOD="rkv"
 BUDGET=""
 DRY_RUN="0"
+JOB_PARALLEL="${JOB_PARALLEL:-1}"
+if ! [[ "${JOB_PARALLEL}" =~ ^[0-9]+$ ]] || [[ "${JOB_PARALLEL}" -lt 1 ]]; then
+  echo "JOB_PARALLEL must be a positive integer (got: ${JOB_PARALLEL})" >&2
+  exit 1
+fi
+if [[ "${JOB_PARALLEL}" -ne 1 ]]; then
+  echo "[warn] run_one.sh runs a single setting; JOB_PARALLEL=${JOB_PARALLEL} is ignored." >&2
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXP_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -14,8 +21,9 @@ RKV_ROOT="$(cd "${EXP_ROOT}/.." && pwd)"
 
 usage() {
   cat <<USAGE
-Usage: bash scripts/run_one.sh [--dataset name] [--model name] [--method fullkv|rkv|speckv] [--budget N] [--dry-run]
+Usage: bash scripts/qwen3/run_one.sh [--dataset name] [--model name] [--method fullkv|rkv|speckv] [--budget N] [--dry-run]
 
+Dataset defaults to aime24 and model defaults to Qwen3-8B.
 If --budget is omitted for rkv/speckv, default_budget from configs/shared/defaults.yaml is used.
 USAGE
 }
