@@ -23,6 +23,11 @@ runner_args:
   reset_cache_each_batch: false
   fp32_topk: false
   num_samples: 64
+  num_samples_by_dataset: 
+    aime24: 8
+    aime25: 8
+    math500: 1
+    math: 1
   temperature: 0.6
   top_p: 0.95
   use_chat_template: false
