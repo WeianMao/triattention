@@ -118,8 +118,11 @@ def budget_tag(mode: str, budget: int | None) -> str:
     return f"budget_{budget}"
 
 
-def resolve_num_samples(runner_args: dict) -> int:
+def resolve_num_samples(runner_args: dict, dataset: str | None = None) -> int:
     value = runner_args.get("num_samples", 64)
+    per_dataset = runner_args.get("num_samples_by_dataset", {})
+    if dataset and isinstance(per_dataset, dict) and dataset in per_dataset:
+        value = per_dataset[dataset]
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -155,7 +158,7 @@ def build_config(
     tag = budget_tag(mode, budget)
     exp_defaults = defaults.get("experiment", {})
     runner_defaults = defaults.get("runner_args", {})
-    num_samples = resolve_num_samples(runner_defaults)
+    num_samples = resolve_num_samples(runner_defaults, dataset)
     sample_dir = sample_tag(num_samples)
     log_dir = LOGS_DIR / dataset / model_name / sample_dir / mode / tag
     output_dir = OUTPUTS_DIR / dataset / model_name / sample_dir / mode / tag
@@ -179,6 +182,8 @@ def build_config(
             "kv_budget": budget,
         },
     )
+    runner_args["num_samples"] = num_samples
+    runner_args.pop("num_samples_by_dataset", None)
 
     if mode == "fullkv":
         runner_args["kv_budget"] = None
@@ -264,7 +269,7 @@ def run_one(
     model_path = validate_model_exists(model_name, dry_run)
     tag = budget_tag(mode, budget)
     runner_defaults = defaults.get("runner_args", {})
-    num_samples = resolve_num_samples(runner_defaults)
+    num_samples = resolve_num_samples(runner_defaults, dataset)
     sample_dir = sample_tag(num_samples)
     log_dir = LOGS_DIR / dataset / model_name / sample_dir / mode / tag
     output_dir = OUTPUTS_DIR / dataset / model_name / sample_dir / mode / tag
@@ -405,9 +410,6 @@ def build_stats(
 
     defaults = load_runner_defaults()
     runner_defaults = defaults.get("runner_args", {})
-    num_samples = resolve_num_samples(runner_defaults)
-    sample_dir = sample_tag(num_samples)
-
     dataset_list = normalize_selection(datasets, DATASETS, "dataset")
     model_list = normalize_selection(models, list(MODEL_SPECS.keys()), "model")
 
@@ -416,6 +418,8 @@ def build_stats(
     commands: List[Dict[str, object]] = []
 
     for dataset in dataset_list:
+        num_samples = resolve_num_samples(runner_defaults, dataset)
+        sample_dir = sample_tag(num_samples)
         num_traces = 30  # Use 30 traces for stats building
         for model_name in model_list:
             fullkv_root = OUTPUTS_DIR / dataset / model_name / sample_dir / "fullkv" / "full"
