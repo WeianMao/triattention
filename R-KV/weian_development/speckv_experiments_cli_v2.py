@@ -67,6 +67,30 @@ def load_runner_defaults() -> dict:
     return data
 
 
+def load_extra_config(extra_paths: List[Path] | None) -> dict:
+    if not extra_paths:
+        return {}
+    merged = {"experiment": {}, "runner_args": {}}
+    for path in extra_paths:
+        data = load_yaml(path)
+        if not data:
+            continue
+        if not isinstance(data, dict):
+            raise ValueError(f"extra config must be a mapping: {path}")
+        if "experiment" in data or "runner_args" in data:
+            experiment = data.get("experiment", {}) or {}
+            runner_args = data.get("runner_args", {}) or {}
+            if not isinstance(experiment, dict) or not isinstance(runner_args, dict):
+                raise ValueError(f"extra config experiment/runner_args must be mappings: {path}")
+            merged["experiment"].update(experiment)
+            merged["runner_args"].update(runner_args)
+        else:
+            merged["runner_args"].update(data)
+    if not merged["experiment"] and not merged["runner_args"]:
+        return {}
+    return merged
+
+
 def dataset_max_length(dataset: str, defaults: dict) -> int:
     mapping = defaults.get("dataset_max_length", {})
     if dataset in mapping:
@@ -107,7 +131,12 @@ def resolve_model_path(model_name: str) -> Path:
 
 
 def stats_path_for(dataset: str, model_name: str, budget: int) -> Path:
-    return STATS_DIR / dataset / model_name / f"stats_budget_{budget}.pt"
+    # Keep stats dataset distinct from evaluation dataset.
+    stats_dataset = "aime25" if dataset == "aime24" else "aime24"
+    sys.stderr.write(
+        f"[info] speckv stats dataset: eval={dataset} stats={stats_dataset}\n"
+    )
+    return STATS_DIR / stats_dataset / model_name / f"stats_budget_{budget}.pt"
 
 
 def budget_tag(mode: str, budget: int | None) -> str:
@@ -154,6 +183,7 @@ def build_config(
     budget: int | None,
     stats_path: Path | None,
     defaults: dict,
+    extra_config: dict | None,
 ) -> dict:
     tag = budget_tag(mode, budget)
     exp_defaults = defaults.get("experiment", {})
@@ -185,17 +215,22 @@ def build_config(
     runner_args["num_samples"] = num_samples
     runner_args.pop("num_samples_by_dataset", None)
 
+    if extra_config:
+        extra_experiment = extra_config.get("experiment", {})
+        extra_runner_args = extra_config.get("runner_args", {})
+        if not isinstance(extra_experiment, dict) or not isinstance(extra_runner_args, dict):
+            raise ValueError("extra config experiment/runner_args must be mappings")
+        experiment = apply_defaults(experiment, extra_experiment)
+        runner_args = apply_defaults(runner_args, extra_runner_args)
+
     if mode == "fullkv":
         runner_args["kv_budget"] = None
     if mode == "speckv":
-        if stats_path is None:
+        if stats_path is None and "sparse_stats_path" not in runner_args:
             raise ValueError("stats_path is required for speckv mode")
-        runner_args.update(
-            {
-                "sparse_stats_path": str(stats_path),
-                "per_head_pruning": True,
-            }
-        )
+        runner_args.setdefault("sparse_stats_path", str(stats_path) if stats_path else None)
+        if "per_head_pruning" not in runner_args and "per_layer_perhead_pruning" not in runner_args:
+            runner_args["per_head_pruning"] = True
 
     return {"experiment": {**experiment, "runner_args": runner_args}}
 
@@ -263,6 +298,7 @@ def run_one(
     *,
     require_stats: bool,
     defaults: dict,
+    extra_config: dict | None,
     dry_run: bool,
 ) -> None:
     dataset_path = resolve_dataset_path(dataset)
@@ -301,6 +337,7 @@ def run_one(
         budget,
         stats_path,
         defaults,
+        extra_config,
     )
     write_config(config, config_path)
     dispatch_run(config_path, dataset, log_dir, dry_run)
@@ -320,6 +357,7 @@ def run_defaults(dry_run: bool) -> None:
                 None,
                 require_stats=False,
                 defaults=defaults,
+                extra_config=None,
                 dry_run=dry_run,
             )
             run_one(
@@ -329,6 +367,7 @@ def run_defaults(dry_run: bool) -> None:
                 default_budget,
                 require_stats=False,
                 defaults=defaults,
+                extra_config=None,
                 dry_run=dry_run,
             )
             run_one(
@@ -338,6 +377,7 @@ def run_defaults(dry_run: bool) -> None:
                 default_budget,
                 require_stats=True,
                 defaults=defaults,
+                extra_config=None,
                 dry_run=dry_run,
             )
 
@@ -355,6 +395,7 @@ def run_sweep(dry_run: bool) -> None:
                     budget,
                     require_stats=False,
                     defaults=defaults,
+                    extra_config=None,
                     dry_run=dry_run,
                 )
             for budget in budgets:
@@ -365,6 +406,7 @@ def run_sweep(dry_run: bool) -> None:
                     budget,
                     require_stats=True,
                     defaults=defaults,
+                    extra_config=None,
                     dry_run=dry_run,
                 )
 
@@ -576,6 +618,12 @@ def parse_args() -> argparse.Namespace:
     run_one_parser.add_argument("--model", required=True, choices=MODEL_SPECS.keys())
     run_one_parser.add_argument("--method", required=True, choices=MODES)
     run_one_parser.add_argument("--budget", type=int, default=None)
+    run_one_parser.add_argument(
+        "--extra-config",
+        action="append",
+        default=None,
+        help="YAML config overrides to merge into runner_args or experiment.",
+    )
 
     return parser.parse_args()
 
@@ -602,6 +650,9 @@ def main() -> None:
     if args.command == "run-one":
         defaults = load_runner_defaults()
         budget = resolve_budget_for_mode(args.method, args.budget)
+        extra_config = load_extra_config(
+            [Path(path) for path in (args.extra_config or [])]
+        )
         run_one(
             args.dataset,
             args.model,
@@ -609,6 +660,7 @@ def main() -> None:
             budget,
             require_stats=(args.method == "speckv"),
             defaults=defaults,
+            extra_config=extra_config,
             dry_run=args.dry_run,
         )
         return

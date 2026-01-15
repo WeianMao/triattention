@@ -6,6 +6,7 @@ import json
 import os
 import random
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
@@ -771,8 +772,9 @@ def main(args: argparse.Namespace) -> None:
                     deactivate_capture()
 
                 progress += 1
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sys.stderr.write(
-                    f"[progress] shard={args.shard_id} run={run_id + 1}/{num_samples} "
+                    f"[progress {timestamp}] shard={args.shard_id} run={run_id + 1}/{num_samples} "
                     f"record={progress}/{local_records} "
                     f"range={start_record}-{record_end} sample_idx={sample_idx}\n"
                 )
