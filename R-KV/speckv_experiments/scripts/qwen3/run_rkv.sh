@@ -7,10 +7,49 @@ RKV_ROOT="$(cd "${EXP_ROOT}/.." && pwd)"
 
 export PYTHONPATH="${RKV_ROOT}:${PYTHONPATH:-}"
 
+usage() {
+  cat <<USAGE
+Usage: bash scripts/qwen3/run_rkv.sh [--budget N]
+
+Runs the Qwen3-8B R-KV sweep for aime24/aime25/math500. When --budget is
+provided, the underlying CLI receives the supplied budget. Omitting the flag
+falls back to the default budget defined in configs/shared/defaults.yaml.
+USAGE
+}
+
+BUDGET=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --budget)
+      BUDGET="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -n "${BUDGET}" ]] && ! [[ "${BUDGET}" =~ ^[0-9]+$ ]]; then
+  echo "--budget expects a positive integer (got: ${BUDGET})" >&2
+  exit 1
+fi
+
 DRY_RUN="${DRY_RUN:-0}"
 EXTRA_ARGS=()
 if [[ "${DRY_RUN}" == "1" ]]; then
   EXTRA_ARGS+=("--dry-run")
+fi
+
+BUDGET_ARGS=()
+if [[ -n "${BUDGET}" ]]; then
+  BUDGET_ARGS+=("--budget" "${BUDGET}")
 fi
 
 JOB_PARALLEL="${JOB_PARALLEL:-1}"
@@ -45,7 +84,8 @@ launch_job() {
     python "${RKV_ROOT}/weian_development/speckv_experiments_cli_v2.py" "${EXTRA_ARGS[@]}" run-one \
       --dataset "$dataset" \
       --model "$model" \
-      --method rkv
+      --method rkv \
+      "${BUDGET_ARGS[@]}"
   ) &
   local pid=$!
   JOB_PIDS+=("${pid}")
@@ -66,7 +106,7 @@ for dataset in "${DATASETS[@]}"; do
 done
 
 if [[ "${DRY_RUN}" == "1" ]]; then
-  echo "[dry-run] JOB_PARALLEL=${JOB_PARALLEL}; planned batches:"
+  echo "[dry-run] JOB_PARALLEL=${JOB_PARALLEL}; budget=${BUDGET:-default}; planned batches:"
   batch=1
   idx=0
   total=${#JOB_QUEUE[@]}
