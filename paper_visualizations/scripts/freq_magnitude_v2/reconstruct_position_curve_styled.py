@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import seaborn as sns
 import torch
+from scipy import stats
 from transformers import AutoConfig
 from transformers.models.qwen3.modeling_qwen3 import Qwen3RotaryEmbedding
 
@@ -206,6 +207,9 @@ def main() -> None:
     recon_np = reconstructed.cpu().numpy()
     gt_np = gt_scores.cpu().numpy()
 
+    # Compute Spearman correlation
+    spearman_corr, _ = stats.spearmanr(gt_np, recon_np)
+
     # Custom color palette (from example.py)
     color_gt = (187 / 250, 130 / 250, 90 / 250)      # warm brown/orange
     color_recon = (85 / 250, 104 / 250, 154 / 250)   # blue
@@ -213,10 +217,18 @@ def main() -> None:
     # Background color
     face_color = (231 / 250, 231 / 250, 240 / 250)   # light gray-purple
 
-    # Set font size
-    plt.rcParams.update({'font.size': 16})
+    # Set larger font sizes for small figure in paper
+    plt.rcParams.update({
+        'font.size': 18,
+        'axes.labelsize': 20,
+        'axes.titlesize': 20,
+        'xtick.labelsize': 16,
+        'ytick.labelsize': 16,
+        'legend.fontsize': 16,
+    })
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    # Smaller figure size for paper (will be displayed small)
+    fig, ax = plt.subplots(figsize=(7, 5.5))
 
     # Set background color
     ax.set_facecolor(face_color)
@@ -230,26 +242,32 @@ def main() -> None:
     # Hide tick marks but keep labels
     ax.tick_params(top=False, bottom=False, left=False, right=False)
 
-    # White grid
-    ax.grid(True, axis="both", alpha=0.7, color="white", linewidth=1)
+    # White grid (thicker for visibility)
+    ax.grid(True, axis="both", alpha=0.7, color="white", linewidth=1.5)
 
-    # Plot curves
+    # Plot curves (Option A: dashed vs dotted)
     ax.plot(dist_np, gt_np,
-            color=color_gt, linestyle='-', linewidth=2.5, alpha=0.9,
+            color=color_gt, linestyle='--', linewidth=2.5, alpha=0.9,
             label='Ground Truth')
     ax.plot(dist_np, recon_np,
-            color=color_recon, linestyle='--', linewidth=2.0, alpha=0.9,
+            color=color_recon, linestyle=':', linewidth=2.5, alpha=0.9,
             label='Reconstructed')
 
     # Log scale x-axis
     ax.set_xscale('log')
 
     # Labels
-    ax.set_xlabel('Relative Position $\\Delta$', fontsize=18)
-    ax.set_ylabel('$\\langle q, k \\rangle_\\Delta$', fontsize=18)
+    ax.set_xlabel('Relative Position $\\Delta$')
+    ax.set_ylabel('$\\langle q, k \\rangle_\\Delta$')
+
+    # Add Spearman correlation annotation (bottom-left)
+    ax.text(0.03, 0.03, f'Spearman $\\rho$ = {spearman_corr:.4f}',
+            transform=ax.transAxes, fontsize=16,
+            verticalalignment='bottom', horizontalalignment='left',
+            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='none'))
 
     # Legend
-    ax.legend(fontsize=14, frameon=False, loc='upper right')
+    ax.legend(frameon=False, loc='upper right')
 
     plt.tight_layout()
 

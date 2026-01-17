@@ -41,3 +41,6 @@ post_rope_nms_viz/
 
 R-KV/speckv_experiments/configs/generated/
 prompt.txt
+
+# Paper visualization outputs (images)
+paper_visualizations/outputs/
