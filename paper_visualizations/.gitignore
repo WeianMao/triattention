@@ -1,0 +1,5 @@
+# Ignore all outputs (images, JSON data)
+outputs/
+
+# Ignore any data directories
+data/
