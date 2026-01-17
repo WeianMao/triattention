@@ -80,6 +80,11 @@ def apply_speckv_generate_patch(
     if validated_divide_length <= 0:
         raise ValueError(f"divide_length must be positive; got {validated_divide_length}")
 
+    raise ValueError(
+        "SpeckV RKV-style integration is deprecated. "
+        "Use the new RKV-style integration in weian_development.speckv.speckv_rkv_style."
+    )
+
     pruner_cfg = SparsePruningConfig(
         stats_path=stats_path,
         model_path=model_path,
@@ -232,7 +237,7 @@ def apply_speckv_generate_patch(
         if input_ids is not None:
             current_seq = input_ids[0].cpu().numpy().tolist()
             import sys
-            sys.stderr.write(f"[SpeckV] Current sequence: {current_seq}\n")     
+            # sys.stderr.write(f"[SpeckV] Current sequence: {current_seq}\n")     
 
         outputs = orig_forward(
             input_ids=input_ids,
@@ -250,10 +255,10 @@ def apply_speckv_generate_patch(
         )
         
         # print top5 logits for debugging
-        if hasattr(outputs, "logits") and outputs.logits is not None:
-            top5_logits = outputs.logits.topk(5, dim=-1).values
-            import sys
-            sys.stderr.write(f"[SpecKV] Top 5 logits: {top5_logits}\n")
+        # if hasattr(outputs, "logits") and outputs.logits is not None:
+        #     top5_logits = outputs.logits.topk(5, dim=-1).values
+        #     import sys
+            # sys.stderr.write(f"[SpecKV] Top 5 logits: {top5_logits}\n")
 
 
         if getattr(outputs, "past_key_values", None) is None:
@@ -262,7 +267,7 @@ def apply_speckv_generate_patch(
         pkv_tuple = _cache_to_tuple(outputs.past_key_values)
 
         import sys
-        sys.stderr.write(f"[SpecKV] Current KV Size: {pkv_tuple[0][0].shape[2]}\n")
+        # sys.stderr.write(f"[SpecKV] Current KV Size: {pkv_tuple[0][0].shape[2]}\n")
         
         if not state.attached:
             state.pruner.attach_initial_cache(pkv_tuple)
@@ -297,7 +302,7 @@ def apply_speckv_generate_patch(
                              else state.pruner.max_keys)
         if state.pruner._dynamic_cache_size >= trigger_threshold:
             pkv_tuple = state.pruner.ensure_capacity(pkv_tuple)
-            sys.stderr.write(f"[SpecKV] Compressed cache size: {pkv_tuple[0][0].shape[2]}\n")
+            # sys.stderr.write(f"[SpecKV] Compressed cache size: {pkv_tuple[0][0].shape[2]}\n")
 
         outputs = CausalLMOutputWithPast(
             loss=getattr(outputs, "loss", None),

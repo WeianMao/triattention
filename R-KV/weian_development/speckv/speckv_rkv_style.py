@@ -964,7 +964,7 @@ def apply_speckv_rkv_style_patch(
         if input_ids is not None:
             current_seq = input_ids[0].cpu().numpy().tolist()
             import sys
-            sys.stderr.write(f"[SpeckV] Current sequence: {current_seq}\n")    
+            # sys.stderr.write(f"[SpeckV] Current sequence: {current_seq}\n")    
 
         outputs = orig_forward(
             input_ids=input_ids,
@@ -981,11 +981,11 @@ def apply_speckv_rkv_style_patch(
             **kwargs,
         )
 
-        # print top5 logits for debugging
-        if hasattr(outputs, "logits") and outputs.logits is not None:
-            top5_logits = outputs.logits.topk(5, dim=-1).values
-            import sys
-            sys.stderr.write(f"[SpeckV-RKV] Top 5 logits: {top5_logits}\n")
+        # # print top5 logits for debugging
+        # if hasattr(outputs, "logits") and outputs.logits is not None:
+        #     top5_logits = outputs.logits.topk(5, dim=-1).values
+        #     import sys
+        #     sys.stderr.write(f"[SpeckV-RKV] Top 5 logits: {top5_logits}\n")
         
 
         if getattr(outputs, "past_key_values", None) is None:
@@ -1052,8 +1052,8 @@ def apply_speckv_rkv_style_patch(
                 and (comp.absolute_position % comp.divide_length == 0)
             )
 
-        import sys
-        sys.stderr.write(f"[SpecKV-RKV] Effective size: {effective_size}, Should compress: {should_compress}\n")
+        # import sys
+        # sys.stderr.write(f"[SpecKV-RKV] Effective size: {effective_size}, Should compress: {should_compress}\n")
 
         if should_compress:
             # Compute keep_indices using scores from ALL layers' sampled heads
@@ -1063,7 +1063,7 @@ def apply_speckv_rkv_style_patch(
             # Handle 3D per-layer-per-head, 2D per-head, or 1D global indices
             if keep_indices.dim() == 3:
                 # Per-layer-per-head mode: keep_indices shape [num_layers, num_kv_heads, budget]
-                sys.stderr.write(f"[SpeckV-RKV] Per-layer-per-head compressed size: {keep_indices.shape}\n")
+                # sys.stderr.write(f"[SpeckV-RKV] Per-layer-per-head compressed size: {keep_indices.shape}\n")
                 num_layers = keep_indices.size(0)
                 num_kv_heads = keep_indices.size(1)
                 budget = keep_indices.size(2)
@@ -1109,7 +1109,7 @@ def apply_speckv_rkv_style_patch(
             elif keep_indices.dim() == 2 and comp.per_layer_pruning:
                 # Per-layer mode: keep_indices shape [num_layers, budget]
                 # All KV heads in each layer share the same token indices
-                sys.stderr.write(f"[SpeckV-RKV] Per-layer compressed size: {keep_indices.shape}\n")
+                # sys.stderr.write(f"[SpeckV-RKV] Per-layer compressed size: {keep_indices.shape}\n")
                 num_layers = keep_indices.size(0)
                 budget = keep_indices.size(1)
 
@@ -1153,7 +1153,7 @@ def apply_speckv_rkv_style_patch(
             elif keep_indices.dim() == 2:
                 # Per-head mode: keep_indices shape [num_kv_heads, budget]
                 # Use gather-based slicing for per-head independent compression
-                sys.stderr.write(f"[SpeckV-RKV] Per-head compressed size: {keep_indices.shape}\n")
+                # sys.stderr.write(f"[SpeckV-RKV] Per-head compressed size: {keep_indices.shape}\n")
                 new_pkv = []
                 for k, v in pkv_tuple:
                     batch_size = k.size(0)
@@ -1191,7 +1191,7 @@ def apply_speckv_rkv_style_patch(
             else:
                 # Global mode: 1D keep_indices shape [budget]
                 # Use index_select (existing behavior)
-                sys.stderr.write(f"[SpeckV-RKV] Global compressed size: {len(keep_indices)}\n")
+                # sys.stderr.write(f"[SpeckV-RKV] Global compressed size: {len(keep_indices)}\n")
                 new_pkv = []
                 for k, v in pkv_tuple:
                     k_new = k.index_select(2, keep_indices)

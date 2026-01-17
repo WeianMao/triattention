@@ -231,6 +231,17 @@ def build_config(
         runner_args.setdefault("sparse_stats_path", str(stats_path) if stats_path else None)
         if "per_head_pruning" not in runner_args and "per_layer_perhead_pruning" not in runner_args:
             runner_args["per_head_pruning"] = True
+        runner_args.setdefault("include_prefill_in_budget", True)
+        runner_args.setdefault("rkv_style_compression", True)
+        runner_args.setdefault("rkv_style_slack_trigger", True)
+        runner_args.setdefault("sparse_normalize_scores", True)
+        runner_args.setdefault("divide_length", 128)
+        runner_args.setdefault("window_size", 128)
+        runner_args.setdefault("sparse_round_window", 32)
+        runner_args.setdefault("sparse_offset_max_length", 65536)
+        runner_args.setdefault("sparse_score_aggregation", "mean")
+        runner_args.setdefault("sparse_head_limit", -1)
+        runner_args.setdefault("sparse_seed", 0)
 
     return {"experiment": {**experiment, "runner_args": runner_args}}
 
