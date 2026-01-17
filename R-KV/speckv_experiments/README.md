@@ -24,6 +24,7 @@ Notes:
 - `run_speckv.sh` runs SpeckV evaluation (require `build_att_stats.sh`).
 - `run_all_sweep.sh` runs all budgets for R-KV + SpeckV (require `build_att_stats.sh`).
 - For a single experiment, use `run_one.sh` with parameters.
+- Model-specific wrappers live under `scripts/qwen3/` and `scripts/distill_qwen7b/`.
 
 Shared runner defaults live at `configs/shared/runner_defaults.yaml`.
 
