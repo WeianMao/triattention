@@ -54,6 +54,7 @@ python examples/example_analyze_online.py --output_dir ./online-dpsk/ --max_qid 
 - `weian_development/`: Helper scripts, HF offline runners (`hf_offline_runner/`, `hf_offline_runner_sparse/`), analysis tools
 - `LazyEviction/`: Separate KV cache eviction subproject for long reasoning (uses `lazy_evict` env)
 - `kvpress/`: KV cache compression library (external)
+- `paper_visualizations/`: Paper visualization scripts and outputs (attention maps, frequency diagnostics, Q/K scatter plots). See `paper_visualizations/README.md` for detailed documentation.
 
 ### Configuration
 YAML configs in `scripts/configs/` define model paths, sampling params (`temperature`, `top_p`, `top_k`), budgets, and output dirs. Key config: `deepseek_r1_qwen3_8b_64trace.yaml`.
