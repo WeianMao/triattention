@@ -8,7 +8,7 @@ This document provides comprehensive details for the combined figure analyzing t
 
 **Research Question**: Can we predict attention scores between query and key vectors using only their frequency-domain statistics (mean amplitude and phase)?
 
-**Key Finding**: Yes. Using only the mean complex representation of pre-RoPE Q/K vectors, we can reconstruct the expected attention score at any relative position with high accuracy (mean Individual Pearson ρ = 0.551 across all heads).
+**Key Finding**: Yes. Using only the mean complex representation of pre-RoPE Q/K vectors, we can reconstruct the expected attention score at any relative position with high accuracy (mean Attn Reconstruction Pearson $r$ = 0.53 across all heads).
 
 ---
 
@@ -61,44 +61,45 @@ $$q_f = \text{mean}_{t}(q_{t,f}^{real} + i \cdot q_{t,f}^{imag})$$
 
 ---
 
-## 3. Correlation Metrics
+## 3. Correlation Metric
 
-### 3.1 Individual Pearson Correlation ρ (Primary Metric)
+### 3.1 Attn Reconstruction Pearson $r$
 
-This measures how well the reconstruction predicts **individual** attention scores, not just the mean.
+This measures how well the reconstruction predicts **individual query's** attention scores.
 
-**Definition**: For all (query position $i$, distance $\Delta$) pairs:
-- Actual score: $s_{i,\Delta} = q_i \cdot k_{i-\Delta}$
-- Predicted score: $r_\Delta$ (reconstruction value at distance $\Delta$)
+**Definition**: For each query position $i$:
+1. Sample log-spaced distances $\Delta \in [1, i]$ (50 samples)
+2. Compute actual attention scores: $s_{i,\Delta} = q_i \cdot k_{i-\Delta}$
+3. Compute predicted scores: $r_\Delta$ (reconstruction value at distance $\Delta$)
+4. Compute Pearson correlation between actual and predicted scores for this query
 
-The Individual Pearson $\rho$ is computed over all such pairs.
+The Attn Reconstruction Pearson $r$ is the **average** of these per-query correlations across sampled query positions (500 log-spaced samples).
 
-**Interpretation**: A high Individual Pearson ρ means the reconstruction captures not just the average trend but also the variance structure across different positions.
+**Interpretation**: A high Attn Reconstruction Pearson $r$ means the reconstruction captures the attention pattern shape for individual queries, not just the global average trend.
 
-### 3.2 Trendline Pearson Correlation r
+### 3.2 Why This Metric Matters
 
-This measures how well the reconstruction matches the **mean** attention score curve (trendline).
-
-**Definition**: Pearson correlation between:
-- Ground truth mean curve: $\bar{s}_\Delta = \frac{1}{T-\Delta}\sum_i s_{i,\Delta}$
-- Reconstruction curve: $r_\Delta$
-
-This is typically very high (>0.99) but doesn't capture individual-level prediction accuracy.
-
-### 3.3 Why Individual Pearson ρ Matters
-
-For sparse attention prediction, we need to predict which specific (i, j) pairs have high attention, not just the average. Individual Pearson ρ directly measures this capability.
+For sparse attention prediction, we need to predict which specific (i, j) pairs have high attention, not just the average. Attn Reconstruction Pearson $r$ directly measures this capability at the query level.
 
 ---
 
-## 4. Distance Sampling Strategy
+## 4. Sampling Strategy
 
-### 4.1 Log-spaced Sampling
+### 4.1 Log-spaced Query Position Sampling
 
-Distances are sampled on a **logarithmic scale** (not linear):
+Query positions are sampled on a **logarithmic scale** to cover both early and late positions:
 
 ```python
-distances = torch.logspace(0, log10(max_dist), 500).unique()
+query_positions = torch.logspace(log10(min_history), log10(token_count-1), 500).unique()
+# min_history = 50 (minimum history length for meaningful sampling)
+```
+
+### 4.2 Log-spaced Distance Sampling (Per Query)
+
+For each query, distances are sampled on a **logarithmic scale**:
+
+```python
+log_distances = torch.logspace(0, log10(query_pos), 50).unique()
 ```
 
 **Rationale**:
@@ -106,13 +107,14 @@ distances = torch.logspace(0, log10(max_dist), 500).unique()
 - Equal weighting in log-space prevents over-representation of large distances
 - Consistent with how relative position effects are typically analyzed
 
-### 4.2 Parameters
+### 4.3 Parameters
 
 | Parameter | Value |
 |-----------|-------|
 | Maximum distance | 5000 tokens |
-| Number of distance samples | ~500 (log-spaced) |
-| Max pairs for correlation | 200,000 (subsampled if exceeded) |
+| Query position samples | ~500 (log-spaced) |
+| Distance samples per query | ~50 (log-spaced) |
+| Minimum history length | 50 tokens |
 
 ---
 
@@ -130,29 +132,27 @@ distances = torch.logspace(0, log10(max_dist), 500).unique()
 **Data Source**: Layer 0, Head 0 (representative example)
 
 **Key Statistics Shown** (bottom-left corner):
-- Individual Pearson $\rho$ = 0.7473
-- Trendline Pearson $r$ = 0.9999
+- Attn Reconstruction Pearson $r$ = 0.72
 
 **Interpretation**: The reconstruction closely tracks the ground truth mean curve. The error band shows the variance of actual attention scores at each distance.
 
-### Panel (B): Distribution of Individual Pearson ρ Across All Heads
+### Panel (B): Distribution of Attn Reconstruction Pearson $r$ Across All Heads
 
 **Content**:
-- X-axis: Individual Pearson $\rho$
+- X-axis: Attn Reconstruction Pearson $r$
 - Y-axis: Count (number of heads)
-- Histogram bins: 0.05 intervals
-- X-axis ticks: 0.2 intervals
-- Red dashed line: Mean = 0.551
+- Histogram bins: 25
+- Red dashed line: Mean = 0.53
 
 **Data Source**: All 1152 heads (36 layers × 32 heads)
 
 **Key Statistics**:
 | Statistic | Value |
 |-----------|-------|
-| Mean | 0.551 |
-| Std | 0.197 |
-| Min | -0.182 |
-| Max | 0.964 |
+| Mean | 0.53 |
+| Std | 0.21 |
+| Min | -0.20 |
+| Max | 0.99 |
 
 **Interpretation**: Most heads show moderate to strong correlation (0.4-0.8), indicating the frequency-magnitude model captures significant structure in attention patterns.
 
@@ -160,16 +160,16 @@ distances = torch.logspace(0, log10(max_dist), 500).unique()
 
 **Content**:
 - X-axis: Layer index (0-35)
-- Y-axis: Percentage of heads with $\rho > 0.55$
+- Y-axis: Percentage of heads with $r$ > 0.55
 - Orange bars: Per-layer percentage
 - Blue line: Smoothed trend (Gaussian σ=2)
 
-**Threshold**: 0.55 (slightly above the global mean of 0.551)
+**Threshold**: 0.55 (slightly above the global mean of 0.53)
 
 **Key Observations**:
-1. **Early layers (0-15)**: Higher percentage (60-95%), reconstruction works well
-2. **Middle layers (16-25)**: Lower percentage (20-55%), reconstruction less accurate
-3. **Late layers (26-35)**: Recovery to moderate levels (40-70%)
+1. **Early layers (0-15)**: Higher percentage (40-97%), reconstruction works well
+2. **Middle layers (16-25)**: Lower percentage (20-60%), reconstruction less accurate
+3. **Late layers (26-35)**: Variable levels (20-60%)
 
 **Interpretation**: The frequency-magnitude model is most effective in early layers, suggesting these layers have more structured, predictable attention patterns based on relative position.
 
@@ -181,22 +181,22 @@ distances = torch.logspace(0, log10(max_dist), 500).unique()
 |--------|-------|
 | Model | DeepSeek-R1-0528-Qwen3-8B |
 | Total heads | 1152 |
-| Mean Individual Pearson ρ | 0.551 |
-| Std Individual Pearson ρ | 0.197 |
-| Best head Individual Pearson ρ | 0.964 |
-| Worst head Individual Pearson ρ | -0.182 |
+| Mean Attn Reconstruction Pearson $r$ | 0.53 |
+| Std | 0.21 |
+| Best head | 0.99 |
+| Worst head | -0.20 |
 | Threshold for Panel (C) | 0.55 |
-| Early layers (0-15) above threshold | ~70-80% |
-| Middle layers (16-25) above threshold | ~30-40% |
+| Early layers (0-15) above threshold | ~40-97% |
+| Middle layers (16-25) above threshold | ~20-60% |
 
 ---
 
 ## 7. Suggested Figure Caption
 
 > **Figure X: Frequency-magnitude reconstruction of attention scores.**
-> (A) Comparison between ground truth attention scores (orange dashed) and reconstruction using frequency-domain statistics (blue dotted) for a representative head (Layer 0, Head 0). The shaded region shows ±1 standard deviation of actual scores. The reconstruction achieves Individual Pearson ρ = 0.75 and Trendline Pearson r > 0.99.
-> (B) Distribution of Individual Pearson ρ across all 1152 attention heads (36 layers × 32 heads). Mean correlation is 0.55, indicating the frequency-magnitude model captures significant structure in attention patterns.
-> (C) Percentage of heads exceeding the correlation threshold (ρ > 0.55) per layer. Early layers show higher reconstruction accuracy (60-95%), while middle layers show reduced accuracy (20-55%), suggesting layer-dependent attention pattern complexity.
+> (A) Comparison between ground truth attention scores (orange dashed) and reconstruction using frequency-domain statistics (blue dotted) for a representative head (Layer 0, Head 0). The shaded region shows ±1 standard deviation of actual scores. The reconstruction achieves Attn Reconstruction Pearson $r$ = 0.72.
+> (B) Distribution of Attn Reconstruction Pearson $r$ across all 1152 attention heads (36 layers × 32 heads). Mean correlation is 0.53, indicating the frequency-magnitude model captures significant structure in attention patterns.
+> (C) Percentage of heads exceeding the correlation threshold ($r$ > 0.55) per layer. Early layers show higher reconstruction accuracy (40-97%), while middle layers show reduced accuracy (20-60%), suggesting layer-dependent attention pattern complexity.
 
 ---
 
@@ -230,7 +230,7 @@ python reconstruct_position_curve_with_band.py /path/to/trace_dir --layer 0 --he
 
 1. **Predictability**: Attention scores can be predicted from frequency-domain statistics of pre-RoPE Q/K vectors
 2. **Layer Heterogeneity**: Prediction accuracy varies by layer, with early layers being more predictable
-3. **Practical Utility**: The moderate Individual Pearson ρ (0.55) suggests this approach can inform sparse attention design
+3. **Practical Utility**: The moderate Attn Reconstruction Pearson $r$ (0.53) suggests this approach can inform sparse attention design
 
 ### Connections to Method
 
@@ -248,3 +248,66 @@ This analysis supports the claim that:
 | `full_model_correlation_results.json` | Per-head correlation results (layer, head, ind_pearson) |
 | `batch_correlation_results.json` | Preliminary 100-head results with additional metrics |
 | `fig_freq_reconstruction_analysis.png` | The combined figure with panels (A), (B), (C) |
+
+---
+
+## 11. Revision History
+
+### v3.0 (Latest) - Simplified Naming
+
+**Changes from v2.0**:
+
+1. **Removed Mean Attn. Pearson $r_{mean}$**: Panel (A) now only shows one metric
+2. **Simplified naming**:
+   - `Per-Query Attn. Pearson $r_{query}$` → **`Attn Reconstruction Pearson $r$`**
+   - Removed subscript since only one metric exists
+3. **Panel (A) display**: Now shows single line `Attn Reconstruction Pearson $r$ = 0.72`
+4. **Panel (A) legend**: Added `Ground Truth` entry for the shaded ±1 std region
+   - Legend items: `Ground Truth` (shaded area), `GT Mean` (dashed line), `Reconstruction` (dotted line)
+
+**Rationale**: Simplify the figure by focusing on the primary metric that matters for sparse attention prediction.
+
+---
+
+### v2.0 - Per-Query Calculation with Log-spaced Sampling
+
+**Major Changes**:
+
+1. **Metric Naming**:
+   - "Individual Pearson r" → "Per-Query Attn. Pearson $r_{query}$"
+   - "Trendline Pearson r" → "Mean Attn. Pearson $r_{mean}$"
+
+2. **Calculation Method Change**:
+
+   | Aspect | Old Method (v1) | New Method (v2) |
+   |--------|-----------------|-----------------|
+   | Approach | Pool all (query, distance) pairs, compute single Pearson | Compute Pearson per query, then average |
+   | Query sampling | All queries | 500 log-spaced query positions |
+   | Distance sampling | Linear | 50 log-spaced distances per query |
+   | Interpretation | Global pooled correlation | Average per-query correlation |
+
+3. **Detailed Algorithm (v2/v3)**:
+   ```
+   For each head:
+     1. Sample 500 query positions (log-spaced from 50 to token_count-1)
+     2. For each query position q_pos:
+        a. Sample 50 distances (log-spaced from 1 to q_pos)
+        b. Compute actual attention scores: actual[d] = q[q_pos] · k[q_pos - d]
+        c. Get predicted scores from reconstruction: pred[d] = recon(d)
+        d. Compute Pearson(actual, pred) for this query
+     3. Final metric = mean of all per-query Pearson values
+   ```
+
+4. **Numerical Results Change** (v1 → v2):
+
+   | Metric | v1 Value | v2 Value |
+   |--------|----------|----------|
+   | Mean $r$ | 0.55 | 0.53 |
+   | Std | 0.20 | 0.21 |
+   | Min | -0.18 | -0.20 |
+   | Max | 0.96 | 0.99 |
+
+**Rationale for Changes**:
+- Per-query calculation better reflects prediction capability for individual queries
+- Log-spaced sampling prevents over-representation of large distances
+- Log-spaced query sampling covers both early and late positions efficiently

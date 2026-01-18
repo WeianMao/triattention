@@ -63,7 +63,7 @@ def to_complex_pairs(tensor):
     return torch.complex(tensor[:, :num_freq].float(), tensor[:, num_freq:].float())
 
 
-def compute_individual_pearson(
+def compute_per_query_pearson(
     q_block: torch.Tensor,
     k_block: torch.Tensor,
     cos_table: torch.Tensor,
@@ -72,13 +72,11 @@ def compute_individual_pearson(
     inv_freq: torch.Tensor,
     max_dist: int,
     device: torch.device,
-    max_pairs: int = 200000,
 ) -> float:
-    """Compute individual-level Pearson for a single head."""
+    """Compute per-query Pearson correlation with log-spaced distance sampling."""
     token_count = q_block.shape[0]
     head_dim = q_block.shape[-1]
     num_freq = head_dim // 2
-    dtype = q_block.dtype
 
     # Invert RoPE
     q_orig = invert_rope(q_block, cos_table, sin_table, attention_scale)
@@ -96,47 +94,50 @@ def compute_individual_pearson(
     amplitude = torch.abs(q_mean) * torch.abs(k_mean)
     omega = inv_freq[:num_freq].to(device=device, dtype=torch.float32)
 
-    # Log-spaced distances
-    actual_max_dist = min(max_dist, token_count - 1)
-    distances = torch.unique(torch.logspace(0, math.log10(actual_max_dist), 500, device=device).long())
-    distances = distances[distances >= 1].float()
+    # Precompute reconstruction values for all distances
+    all_distances = torch.arange(1, token_count, device=device, dtype=torch.float32)
+    recon_all = (torch.cos(all_distances.unsqueeze(1) * omega.unsqueeze(0) + phi_f.unsqueeze(0)) * amplitude.unsqueeze(0)).sum(dim=1)
+    recon_dict = {int(d): recon_all[i].item() for i, d in enumerate(all_distances.long().tolist())}
 
-    # Reconstruction
-    phase_matrix = distances.unsqueeze(1) * omega.unsqueeze(0) + phi_f.unsqueeze(0)
-    reconstructed = (torch.cos(phase_matrix) * amplitude.unsqueeze(0)).sum(dim=1)
-
-    # Individual-level correlation
+    # Per-Query correlation with log-spaced sampling
+    # Sample query positions to speed up computation
     q_float = q_block.float()
     k_float = k_block.float()
+    min_history = 50  # Need enough history for meaningful log-spaced sampling
+    num_log_samples = 50  # Number of log-spaced distance samples per query
+    num_query_samples = 500  # Sample this many query positions instead of all
 
-    all_actual = []
-    all_predicted = []
+    # Sample query positions (log-spaced to cover both early and late positions)
+    query_positions = torch.unique(torch.logspace(
+        math.log10(min_history), math.log10(token_count - 1), num_query_samples, device=device
+    ).long())
+    query_positions = query_positions[(query_positions >= min_history) & (query_positions < token_count)]
 
-    dist_to_recon = {int(d): reconstructed[i].item() for i, d in enumerate(distances.long().tolist())}
+    per_query_pearsons = []
 
-    for delta in distances.long().tolist():
-        if delta >= token_count:
+    for query_pos in query_positions.tolist():
+        # Log-spaced distance sampling for this query
+        log_distances = torch.unique(torch.logspace(0, math.log10(query_pos), num_log_samples, device=device).long())
+        log_distances = log_distances[(log_distances >= 1) & (log_distances <= query_pos)]
+
+        if len(log_distances) < 3:
             continue
-        q_slice = q_float[delta:]
-        k_slice = k_float[:token_count - delta]
-        scores = (q_slice * k_slice).sum(dim=1)
-        recon_val = dist_to_recon[delta]
-        all_actual.extend(scores.cpu().tolist())
-        all_predicted.extend([recon_val] * len(scores))
 
-    all_actual = np.array(all_actual)
-    all_predicted = np.array(all_predicted)
+        # Vectorized computation of attention scores
+        key_positions = query_pos - log_distances  # [num_distances]
+        q_vec = q_float[query_pos]  # [head_dim]
+        k_vecs = k_float[key_positions]  # [num_distances, head_dim]
+        actual_scores = (q_vec.unsqueeze(0) * k_vecs).sum(dim=1)  # [num_distances]
 
-    # Subsample if needed
-    if len(all_actual) > max_pairs:
-        indices = np.random.choice(len(all_actual), max_pairs, replace=False)
-        all_actual = all_actual[indices]
-        all_predicted = all_predicted[indices]
+        # Get predicted scores
+        predicted_scores = torch.tensor([recon_dict[int(d)] for d in log_distances.tolist()], device=device)
 
-    # Pearson correlation
-    pearson_r, _ = stats.pearsonr(all_actual, all_predicted)
+        # Compute Pearson for this query
+        r, _ = stats.pearsonr(actual_scores.cpu().numpy(), predicted_scores.cpu().numpy())
+        if not np.isnan(r):
+            per_query_pearsons.append(r)
 
-    return pearson_r
+    return np.mean(per_query_pearsons) if per_query_pearsons else 0.0
 
 
 def main() -> None:
@@ -195,14 +196,14 @@ def main() -> None:
             q_block = q_tensor[layer, head, :token_count].to(device=device, dtype=dtype)
             k_block = k_tensor[layer, head, :token_count].to(device=device, dtype=dtype)
 
-            pearson = compute_individual_pearson(
+            pearson = compute_per_query_pearson(
                 q_block, k_block, cos_table, sin_table,
                 attention_scale, inv_freq, args.max_distance, device
             )
             results.append({
                 'layer': layer,
                 'head': head,
-                'ind_pearson': pearson,
+                'ind_pearson': float(pearson),  # Keep key name for compatibility
             })
 
         print(f"Layer {layer + 1}/{num_layers} done")
@@ -223,11 +224,11 @@ def main() -> None:
     print("\n" + "=" * 60)
     print(f"FULL MODEL STATISTICS ({total_heads} heads)")
     print("=" * 60)
-    print(f"Individual-level Pearson:")
-    print(f"  Mean:   {global_mean:.4f}")
-    print(f"  Std:    {all_pearson.std():.4f}")
-    print(f"  Min:    {all_pearson.min():.4f}")
-    print(f"  Max:    {all_pearson.max():.4f}")
+    print(f"Attn Reconstruction Pearson r (log-spaced):")
+    print(f"  Mean:   {global_mean:.2f}")
+    print(f"  Std:    {all_pearson.std():.2f}")
+    print(f"  Min:    {all_pearson.min():.2f}")
+    print(f"  Max:    {all_pearson.max():.2f}")
 
     # Per-layer statistics
     layer_above_mean_pct = []
@@ -263,7 +264,7 @@ def main() -> None:
     ax1.axvline(global_mean, color='#E24A33', linestyle='--', linewidth=2.5,
                 label=f'Mean = {global_mean:.3f}')
 
-    ax1.set_xlabel('Individual-level Pearson $r$')
+    ax1.set_xlabel('Attn Reconstruction Pearson $r$')
     ax1.set_ylabel('Count')
     ax1.legend(frameon=False, fontsize=14)
 

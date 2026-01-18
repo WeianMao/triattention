@@ -2,7 +2,7 @@
 
 This script generates the main paper figure with three panels:
 - (A) Reconstruction curve with GT error band for a representative head
-- (B) Histogram of Individual-level Pearson across all 1152 heads
+- (B) Histogram of Attn Reconstruction Pearson r across all 1152 heads
 - (C) Per-layer percentage of heads above correlation threshold
 
 Output: fig_freq_reconstruction_analysis.png
@@ -151,30 +151,47 @@ def compute_panel_a_data(
         gt_means_list.append(scores.mean().item())
         gt_stds_list.append(scores.std().item())
 
-    # Individual correlation
-    log_distances = torch.unique(torch.logspace(0, math.log10(actual_max_dist), 500, device=device).long())
-    log_distances = log_distances[log_distances >= 1].float()
-    recon_at_log = (torch.cos(log_distances.unsqueeze(1) * omega.unsqueeze(0) + phi_f.unsqueeze(0)) * amplitude.unsqueeze(0)).sum(dim=1)
-    dist_to_recon = {int(d): recon_at_log[i].item() for i, d in enumerate(log_distances.long().tolist())}
+    # Per-Query correlation: for each query, compute Pearson between its attention scores and predictions
+    # Using log-spaced distance sampling and log-spaced query position sampling
+    min_history = 50  # Need enough history for meaningful log-spaced sampling
+    num_log_samples = 50  # Number of log-spaced distance samples per query
+    num_query_samples = 500  # Sample this many query positions instead of all
+    per_query_pearsons = []
 
-    all_actual, all_predicted = [], []
-    for delta in log_distances.long().tolist():
-        if delta >= token_count:
+    # Precompute reconstruction values for all distances
+    all_distances = torch.arange(1, token_count, device=device, dtype=torch.float32)
+    recon_all = (torch.cos(all_distances.unsqueeze(1) * omega.unsqueeze(0) + phi_f.unsqueeze(0)) * amplitude.unsqueeze(0)).sum(dim=1)
+    recon_dict = {int(d): recon_all[i].item() for i, d in enumerate(all_distances.long().tolist())}
+
+    # Sample query positions (log-spaced to cover both early and late positions)
+    query_positions = torch.unique(torch.logspace(
+        math.log10(min_history), math.log10(token_count - 1), num_query_samples, device=device
+    ).long())
+    query_positions = query_positions[(query_positions >= min_history) & (query_positions < token_count)]
+
+    for query_pos in query_positions.tolist():
+        # Log-spaced distance sampling for this query
+        log_distances = torch.unique(torch.logspace(0, math.log10(query_pos), num_log_samples, device=device).long())
+        log_distances = log_distances[(log_distances >= 1) & (log_distances <= query_pos)]
+
+        if len(log_distances) < 3:
             continue
-        q_slice = q_float[delta:]
-        k_slice = k_float[:token_count - delta]
-        scores = (q_slice * k_slice).sum(dim=1)
-        all_actual.extend(scores.cpu().tolist())
-        all_predicted.extend([dist_to_recon[delta]] * len(scores))
 
-    all_actual_arr = np.array(all_actual)
-    all_predicted_arr = np.array(all_predicted)
-    if len(all_actual_arr) > 200000:
-        indices = np.random.choice(len(all_actual_arr), 200000, replace=False)
-        all_actual_arr = all_actual_arr[indices]
-        all_predicted_arr = all_predicted_arr[indices]
+        # Vectorized computation of attention scores
+        key_positions = query_pos - log_distances
+        q_vec = q_float[query_pos]
+        k_vecs = k_float[key_positions]
+        actual_scores = (q_vec.unsqueeze(0) * k_vecs).sum(dim=1)
 
-    ind_pearson, _ = stats.pearsonr(all_actual_arr, all_predicted_arr)
+        # Get predicted scores
+        predicted_scores = torch.tensor([recon_dict[int(d)] for d in log_distances.tolist()], device=device)
+
+        # Compute Pearson for this query
+        r, _ = stats.pearsonr(actual_scores.cpu().numpy(), predicted_scores.cpu().numpy())
+        if not np.isnan(r):
+            per_query_pearsons.append(r)
+
+    per_query_pearson = np.mean(per_query_pearsons) if per_query_pearsons else 0.0
     mean_pearson, _ = stats.pearsonr(gt_scores.cpu().numpy(), reconstructed.cpu().numpy())
 
     return {
@@ -184,7 +201,7 @@ def compute_panel_a_data(
         'sample_distances': sample_distances.cpu().numpy(),
         'gt_means': np.array(gt_means_list),
         'gt_stds': np.array(gt_stds_list),
-        'ind_pearson': ind_pearson,
+        'per_query_pearson': per_query_pearson,
         'mean_pearson': mean_pearson,
     }
 
@@ -295,17 +312,17 @@ def main() -> None:
     ax_a.fill_between(panel_a['sample_distances'],
                       panel_a['gt_means'] - panel_a['gt_stds'],
                       panel_a['gt_means'] + panel_a['gt_stds'],
-                      color=color_gt, alpha=0.25, linewidth=0, label='GT ± std')
+                      color=color_gt, alpha=0.25, linewidth=0, label='Ground Truth')
     ax_a.plot(panel_a['distances'], panel_a['gt_scores'],
-              color=color_gt, linestyle='--', linewidth=2.5, alpha=0.9, label='Ground Truth')
+              color=color_gt, linestyle='--', linewidth=2.5, alpha=0.9, label='GT Mean')
     ax_a.plot(panel_a['distances'], panel_a['reconstructed'],
-              color=color_recon, linestyle=':', linewidth=2.5, alpha=0.9, label='Reconstructed')
+              color=color_recon, linestyle=':', linewidth=2.5, alpha=0.9, label='Reconstruction')
     ax_a.set_xscale('log')
     ax_a.set_xlabel(r'QK Relative Position $\Delta$', fontsize=FONT_SIZE)
     ax_a.set_ylabel(r'$\langle q, k \rangle_\Delta$', fontsize=FONT_SIZE)
-    ax_a.legend(frameon=False, fontsize=FONT_SIZE, loc='upper right')
+    ax_a.legend(frameon=False, fontsize=FONT_SIZE, loc='upper right', bbox_to_anchor=(1.02, 1.0))
     ax_a.text(0.03, 0.03,
-              f"Individual Pearson $\\rho$ = {panel_a['ind_pearson']:.4f}\nTrendline Pearson $r$ = {panel_a['mean_pearson']:.4f}",
+              f"Attn Reconstruction Pearson $r$ = {panel_a['per_query_pearson']:.2f}",
               transform=ax_a.transAxes, fontsize=FONT_SIZE,
               verticalalignment='bottom', horizontalalignment='left',
               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='none'))
@@ -318,8 +335,8 @@ def main() -> None:
     bin_edges = np.arange(-0.2, 1.025, 0.05)
     ax_b.hist(all_pearson, bins=bin_edges, color=color_recon, alpha=0.85, edgecolor='white', linewidth=0.8)
     ax_b.axvline(all_pearson.mean(), color='#E24A33', linestyle='--', linewidth=2.5,
-                 label=f'Mean = {all_pearson.mean():.3f}')
-    ax_b.set_xlabel('Individual Pearson $\\rho$', fontsize=FONT_SIZE)
+                 label=f'Mean = {all_pearson.mean():.2f}')
+    ax_b.set_xlabel('Attn Reconstruction Pearson $r$', fontsize=FONT_SIZE)
     ax_b.set_ylabel('Count', fontsize=FONT_SIZE)
     ax_b.legend(frameon=False, fontsize=FONT_SIZE, loc='upper left')
     ax_b.set_xticks(np.arange(0, 1.1, 0.2))
@@ -338,7 +355,7 @@ def main() -> None:
     ax_c.plot(layers_arr, smoothed, color=color_recon, linewidth=2.5, label='Smoothed trend')
 
     ax_c.set_xlabel('Layer Index', fontsize=FONT_SIZE)
-    ax_c.set_ylabel(f'% Heads with $\\rho$ > {threshold}', fontsize=FONT_SIZE)
+    ax_c.set_ylabel(f'% Heads with $r$ > {threshold:.2f}', fontsize=FONT_SIZE)
     ax_c.set_xticks(layers_arr[::2])
     ax_c.set_ylim(0, 100)
 
@@ -361,8 +378,7 @@ def main() -> None:
 
     print(f"Figure saved to {output_path}")
     print(f"\nPanel (A): Layer {args.layer}, Head {args.head}")
-    print(f"  Individual Pearson r = {panel_a['ind_pearson']:.4f}")
-    print(f"  Mean Pearson r = {panel_a['mean_pearson']:.4f}")
+    print(f"  Attn Reconstruction Pearson r = {panel_a['per_query_pearson']:.4f}")
     print(f"\nPanel (B): {len(all_pearson)} heads")
     print(f"  Mean = {all_pearson.mean():.4f}, Std = {all_pearson.std():.4f}")
     print(f"\nPanel (C): Threshold = {threshold}")
