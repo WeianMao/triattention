@@ -274,6 +274,8 @@ def main() -> None:
     face_color = (231 / 250, 231 / 250, 240 / 250)
 
     FONT_SIZE = 14
+    LABEL_FONT_SIZE = 18  # For (A), (B), (C) labels
+    LABEL_FONT = 'DejaVu Sans'
 
     def style_ax(ax):
         ax.set_facecolor(face_color)
@@ -299,15 +301,15 @@ def main() -> None:
     ax_a.plot(panel_a['distances'], panel_a['reconstructed'],
               color=color_recon, linestyle=':', linewidth=2.5, alpha=0.9, label='Reconstructed')
     ax_a.set_xscale('log')
-    ax_a.set_xlabel(r'Relative Position $\Delta$', fontsize=FONT_SIZE)
+    ax_a.set_xlabel(r'QK Relative Position $\Delta$', fontsize=FONT_SIZE)
     ax_a.set_ylabel(r'$\langle q, k \rangle_\Delta$', fontsize=FONT_SIZE)
     ax_a.legend(frameon=False, fontsize=FONT_SIZE, loc='upper right')
     ax_a.text(0.03, 0.03,
-              f"Individual Pearson $r$ = {panel_a['ind_pearson']:.4f}\nMean Pearson $r$ = {panel_a['mean_pearson']:.4f}",
+              f"Individual Pearson $\\rho$ = {panel_a['ind_pearson']:.4f}\nTrendline Pearson $r$ = {panel_a['mean_pearson']:.4f}",
               transform=ax_a.transAxes, fontsize=FONT_SIZE,
               verticalalignment='bottom', horizontalalignment='left',
               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='none'))
-    ax_a.text(-0.08, 1.05, '(A)', transform=ax_a.transAxes, fontsize=FONT_SIZE, fontweight='bold', va='bottom')
+    ax_a.text(-0.08, 1.05, '(A)', transform=ax_a.transAxes, fontsize=LABEL_FONT_SIZE, fontweight='bold', va='bottom', fontname=LABEL_FONT)
 
     # (B) Histogram
     ax_b = fig.add_subplot(gs[0, 1])
@@ -317,12 +319,12 @@ def main() -> None:
     ax_b.hist(all_pearson, bins=bin_edges, color=color_recon, alpha=0.85, edgecolor='white', linewidth=0.8)
     ax_b.axvline(all_pearson.mean(), color='#E24A33', linestyle='--', linewidth=2.5,
                  label=f'Mean = {all_pearson.mean():.3f}')
-    ax_b.set_xlabel('Individual-level Pearson $r$', fontsize=FONT_SIZE)
+    ax_b.set_xlabel('Individual Pearson $\\rho$', fontsize=FONT_SIZE)
     ax_b.set_ylabel('Count', fontsize=FONT_SIZE)
     ax_b.legend(frameon=False, fontsize=FONT_SIZE, loc='upper left')
     ax_b.set_xticks(np.arange(0, 1.1, 0.2))
     ax_b.set_xlim(-0.25, 1.05)
-    ax_b.text(-0.08, 1.05, '(B)', transform=ax_b.transAxes, fontsize=FONT_SIZE, fontweight='bold', va='bottom')
+    ax_b.text(-0.08, 1.05, '(B)', transform=ax_b.transAxes, fontsize=LABEL_FONT_SIZE, fontweight='bold', va='bottom', fontname=LABEL_FONT)
 
     # (C) Per-layer percentage
     ax_c = fig.add_subplot(gs[1, :])
@@ -336,15 +338,15 @@ def main() -> None:
     ax_c.plot(layers_arr, smoothed, color=color_recon, linewidth=2.5, label='Smoothed trend')
 
     ax_c.set_xlabel('Layer Index', fontsize=FONT_SIZE)
-    ax_c.set_ylabel(f'% Heads with $r$ > {threshold}', fontsize=FONT_SIZE)
+    ax_c.set_ylabel(f'% Heads with $\\rho$ > {threshold}', fontsize=FONT_SIZE)
     ax_c.set_xticks(layers_arr[::2])
     ax_c.set_ylim(0, 100)
 
     handles, labels = ax_c.get_legend_handles_labels()
     handles.insert(0, Patch(facecolor=color_bar, alpha=0.85, edgecolor='white', label='Per-layer percentage'))
     labels.insert(0, 'Per-layer percentage')
-    ax_c.legend(handles, labels, frameon=False, fontsize=FONT_SIZE, loc='upper right')
-    ax_c.text(-0.04, 1.08, '(C)', transform=ax_c.transAxes, fontsize=FONT_SIZE, fontweight='bold', va='bottom')
+    ax_c.legend(handles, labels, frameon=False, fontsize=FONT_SIZE, loc='upper right', bbox_to_anchor=(1.0, 1.05))
+    ax_c.text(-0.04, 1.08, '(C)', transform=ax_c.transAxes, fontsize=LABEL_FONT_SIZE, fontweight='bold', va='bottom', fontname=LABEL_FONT)
 
     plt.tight_layout()
 

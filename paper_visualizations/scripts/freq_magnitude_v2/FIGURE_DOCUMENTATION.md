@@ -8,7 +8,7 @@ This document provides comprehensive details for the combined figure analyzing t
 
 **Research Question**: Can we predict attention scores between query and key vectors using only their frequency-domain statistics (mean amplitude and phase)?
 
-**Key Finding**: Yes. Using only the mean complex representation of pre-RoPE Q/K vectors, we can reconstruct the expected attention score at any relative position with high accuracy (mean Individual-level Pearson r = 0.551 across all heads).
+**Key Finding**: Yes. Using only the mean complex representation of pre-RoPE Q/K vectors, we can reconstruct the expected attention score at any relative position with high accuracy (mean Individual Pearson ρ = 0.551 across all heads).
 
 ---
 
@@ -63,7 +63,7 @@ $$q_f = \text{mean}_{t}(q_{t,f}^{real} + i \cdot q_{t,f}^{imag})$$
 
 ## 3. Correlation Metrics
 
-### 3.1 Individual-level Pearson Correlation (Primary Metric)
+### 3.1 Individual Pearson Correlation ρ (Primary Metric)
 
 This measures how well the reconstruction predicts **individual** attention scores, not just the mean.
 
@@ -71,13 +71,13 @@ This measures how well the reconstruction predicts **individual** attention scor
 - Actual score: $s_{i,\Delta} = q_i \cdot k_{i-\Delta}$
 - Predicted score: $r_\Delta$ (reconstruction value at distance $\Delta$)
 
-The Individual-level Pearson $r$ is computed over all such pairs.
+The Individual Pearson $\rho$ is computed over all such pairs.
 
-**Interpretation**: A high Individual-level Pearson means the reconstruction captures not just the average trend but also the variance structure across different positions.
+**Interpretation**: A high Individual Pearson ρ means the reconstruction captures not just the average trend but also the variance structure across different positions.
 
-### 3.2 Mean-level Pearson Correlation
+### 3.2 Trendline Pearson Correlation r
 
-This measures how well the reconstruction matches the **mean** attention score curve.
+This measures how well the reconstruction matches the **mean** attention score curve (trendline).
 
 **Definition**: Pearson correlation between:
 - Ground truth mean curve: $\bar{s}_\Delta = \frac{1}{T-\Delta}\sum_i s_{i,\Delta}$
@@ -85,9 +85,9 @@ This measures how well the reconstruction matches the **mean** attention score c
 
 This is typically very high (>0.99) but doesn't capture individual-level prediction accuracy.
 
-### 3.3 Why Individual-level Matters
+### 3.3 Why Individual Pearson ρ Matters
 
-For sparse attention prediction, we need to predict which specific (i, j) pairs have high attention, not just the average. Individual-level correlation directly measures this capability.
+For sparse attention prediction, we need to predict which specific (i, j) pairs have high attention, not just the average. Individual Pearson ρ directly measures this capability.
 
 ---
 
@@ -121,7 +121,7 @@ distances = torch.logspace(0, log10(max_dist), 500).unique()
 ### Panel (A): Reconstruction Curve with Error Band
 
 **Content**:
-- X-axis: Relative position $\Delta$ (log scale)
+- X-axis: QK Relative Position $\Delta$ (log scale)
 - Y-axis: Attention score $\langle q, k \rangle_\Delta$
 - Orange dashed line: Ground truth mean
 - Blue dotted line: Reconstruction
@@ -129,16 +129,16 @@ distances = torch.logspace(0, log10(max_dist), 500).unique()
 
 **Data Source**: Layer 0, Head 0 (representative example)
 
-**Key Statistics Shown**:
-- Individual Pearson $r$ = 0.7489
-- Mean Pearson $r$ = 0.9999
+**Key Statistics Shown** (bottom-left corner):
+- Individual Pearson $\rho$ = 0.7473
+- Trendline Pearson $r$ = 0.9999
 
 **Interpretation**: The reconstruction closely tracks the ground truth mean curve. The error band shows the variance of actual attention scores at each distance.
 
-### Panel (B): Distribution of Individual-level Pearson Across All Heads
+### Panel (B): Distribution of Individual Pearson ρ Across All Heads
 
 **Content**:
-- X-axis: Individual-level Pearson $r$
+- X-axis: Individual Pearson $\rho$
 - Y-axis: Count (number of heads)
 - Histogram bins: 0.05 intervals
 - X-axis ticks: 0.2 intervals
@@ -160,7 +160,7 @@ distances = torch.logspace(0, log10(max_dist), 500).unique()
 
 **Content**:
 - X-axis: Layer index (0-35)
-- Y-axis: Percentage of heads with $r > 0.55$
+- Y-axis: Percentage of heads with $\rho > 0.55$
 - Orange bars: Per-layer percentage
 - Blue line: Smoothed trend (Gaussian σ=2)
 
@@ -181,10 +181,10 @@ distances = torch.logspace(0, log10(max_dist), 500).unique()
 |--------|-------|
 | Model | DeepSeek-R1-0528-Qwen3-8B |
 | Total heads | 1152 |
-| Mean Individual Pearson | 0.551 |
-| Std Individual Pearson | 0.197 |
-| Best head Individual Pearson | 0.964 |
-| Worst head Individual Pearson | -0.182 |
+| Mean Individual Pearson ρ | 0.551 |
+| Std Individual Pearson ρ | 0.197 |
+| Best head Individual Pearson ρ | 0.964 |
+| Worst head Individual Pearson ρ | -0.182 |
 | Threshold for Panel (C) | 0.55 |
 | Early layers (0-15) above threshold | ~70-80% |
 | Middle layers (16-25) above threshold | ~30-40% |
@@ -194,9 +194,9 @@ distances = torch.logspace(0, log10(max_dist), 500).unique()
 ## 7. Suggested Figure Caption
 
 > **Figure X: Frequency-magnitude reconstruction of attention scores.**
-> (A) Comparison between ground truth attention scores (orange dashed) and reconstruction using frequency-domain statistics (blue dotted) for a representative head (Layer 0, Head 0). The shaded region shows ±1 standard deviation of actual scores. The reconstruction achieves Individual-level Pearson r = 0.75 and Mean-level Pearson r > 0.99.
-> (B) Distribution of Individual-level Pearson correlation across all 1152 attention heads (36 layers × 32 heads). Mean correlation is 0.55, indicating the frequency-magnitude model captures significant structure in attention patterns.
-> (C) Percentage of heads exceeding the correlation threshold (r > 0.55) per layer. Early layers show higher reconstruction accuracy (60-95%), while middle layers show reduced accuracy (20-55%), suggesting layer-dependent attention pattern complexity.
+> (A) Comparison between ground truth attention scores (orange dashed) and reconstruction using frequency-domain statistics (blue dotted) for a representative head (Layer 0, Head 0). The shaded region shows ±1 standard deviation of actual scores. The reconstruction achieves Individual Pearson ρ = 0.75 and Trendline Pearson r > 0.99.
+> (B) Distribution of Individual Pearson ρ across all 1152 attention heads (36 layers × 32 heads). Mean correlation is 0.55, indicating the frequency-magnitude model captures significant structure in attention patterns.
+> (C) Percentage of heads exceeding the correlation threshold (ρ > 0.55) per layer. Early layers show higher reconstruction accuracy (60-95%), while middle layers show reduced accuracy (20-55%), suggesting layer-dependent attention pattern complexity.
 
 ---
 
@@ -230,7 +230,7 @@ python reconstruct_position_curve_with_band.py /path/to/trace_dir --layer 0 --he
 
 1. **Predictability**: Attention scores can be predicted from frequency-domain statistics of pre-RoPE Q/K vectors
 2. **Layer Heterogeneity**: Prediction accuracy varies by layer, with early layers being more predictable
-3. **Practical Utility**: The moderate Individual-level correlation (0.55) suggests this approach can inform sparse attention design
+3. **Practical Utility**: The moderate Individual Pearson ρ (0.55) suggests this approach can inform sparse attention design
 
 ### Connections to Method
 
