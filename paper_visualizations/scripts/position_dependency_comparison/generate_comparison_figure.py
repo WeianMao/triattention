@@ -28,7 +28,7 @@ if str(ROOT) not in sys.path:
 from weian_development.process_utils import mask_process_command
 
 # ============ Styling Constants ============
-FONT_SIZE = 14
+FONT_SIZE = 16
 color_dependent = (85 / 250, 104 / 250, 154 / 250)    # blue for dependent
 color_independent = (187 / 250, 130 / 250, 90 / 250)  # warm brown for independent
 face_color = (231 / 250, 231 / 250, 240 / 250)        # light gray-purple background
@@ -319,9 +319,11 @@ def generate_figure(
     all_heads = DEPENDENT_HEADS + INDEPENDENT_HEADS
     num_heads = len(all_heads)
 
-    # Create figure: 4 rows (heads) x 2 cols (attn map, scatter)
-    fig = plt.figure(figsize=(10, 16), dpi=dpi)
-    gs = GridSpec(num_heads, 2, figure=fig, wspace=0.3, hspace=0.4)
+    # Create figure: 2 rows x 4 cols (horizontal layout)
+    # Row 0: attention maps, Row 1: scatter plots
+    fig = plt.figure(figsize=(16, 8), dpi=dpi)
+    gs = GridSpec(2, num_heads, figure=fig, wspace=0.08, hspace=0.15,
+                  left=0.05, right=0.98, top=0.92, bottom=0.05)
 
     plt.rcParams.update({
         'font.size': FONT_SIZE,
@@ -331,13 +333,16 @@ def generate_figure(
         'ytick.labelsize': FONT_SIZE - 2,
     })
 
-    for row_idx, head_info in enumerate(all_heads):
+    # Store data for both rows
+    heatmaps = []
+    scatter_data = []
+
+    for col_idx, head_info in enumerate(all_heads):
         layer = head_info["layer"]
         head = head_info["head"]
         label = head_info["label"]
 
-        is_dependent = row_idx < len(DEPENDENT_HEADS)
-        head_type = "Dependent" if is_dependent else "Independent"
+        is_dependent = col_idx < len(DEPENDENT_HEADS)
         scatter_color = color_dependent if is_dependent else color_independent
 
         print(f"Processing Layer {layer}, Head {head} ({label})...")
@@ -345,75 +350,72 @@ def generate_figure(
         q_block = q_tensor[layer, head, :token_count].to(device=device, dtype=torch.float32)
         k_block = k_tensor[layer, head, :token_count].to(device=device, dtype=torch.float32)
 
-        # === Column 0: Attention Map ===
-        ax_attn = fig.add_subplot(gs[row_idx, 0])
+        # Compute attention map
         with torch.no_grad():
             heatmap = compute_attention_heatmap(q_block, k_block, token_count, patch_size, q_tile, device)
+        heatmaps.append(heatmap)
 
-        im = ax_attn.imshow(heatmap.numpy(), cmap="inferno", aspect="auto", origin="upper")
-        ax_attn.set_xlabel("Key Group")
-        ax_attn.set_ylabel("Query Group")
-        ax_attn.set_title(f"L{layer}H{head}: {label}", fontsize=FONT_SIZE)
-
-        # Add row label on the left
-        if row_idx == 0:
-            ax_attn.annotate(
-                "Rel-Pos\nDependent",
-                xy=(-0.3, 0.5), xycoords='axes fraction',
-                fontsize=FONT_SIZE, fontweight='bold',
-                ha='center', va='center', rotation=90,
-            )
-        elif row_idx == len(DEPENDENT_HEADS):
-            ax_attn.annotate(
-                "Rel-Pos\nIndependent",
-                xy=(-0.3, 0.5), xycoords='axes fraction',
-                fontsize=FONT_SIZE, fontweight='bold',
-                ha='center', va='center', rotation=90,
-            )
-
-        # === Column 1: Scatter Plot ===
-        ax_scatter = fig.add_subplot(gs[row_idx, 1])
-        style_ax(ax_scatter)
-
-        # Compute dominant frequency (amplitude-based)
+        # Compute dominant frequency and scatter data
         amp_product, dom_freq = compute_dominant_frequency(
             q_block, k_block, cos_table, sin_table, attention_scale
         )
         print(f"  Dominant frequency (amplitude-based): {dom_freq}")
 
-        # Get scatter data
         q_real, q_imag, k_real, k_imag = get_scatter_data(
             q_block, k_block, cos_table, sin_table, attention_scale, dom_freq
         )
+        scatter_data.append({
+            'q_real': q_real, 'q_imag': q_imag,
+            'k_real': k_real, 'k_imag': k_imag,
+            'dom_freq': dom_freq, 'amp': amp_product[dom_freq].item(),
+            'color': scatter_color,
+        })
 
-        # Plot Q and K together (more transparent to avoid occlusion)
-        ax_scatter.scatter(q_real, q_imag, s=6, alpha=0.25, color=scatter_color, label="Q", edgecolors="none")
-        ax_scatter.scatter(k_real, k_imag, s=6, alpha=0.25, color="gray", label="K", edgecolors="none")
+    # Row 0: Attention Maps
+    for col_idx, head_info in enumerate(all_heads):
+        layer = head_info["layer"]
+        head = head_info["head"]
+        label = head_info["label"]
+
+        ax_attn = fig.add_subplot(gs[0, col_idx])
+        ax_attn.imshow(heatmaps[col_idx].numpy(), cmap="inferno", aspect="equal", origin="upper")
+        ax_attn.set_title(f"{label}", fontsize=FONT_SIZE)
+        ax_attn.set_xticks([])
+        ax_attn.set_yticks([])
+        # Remove black border
+        for spine in ax_attn.spines.values():
+            spine.set_visible(False)
+
+
+    # Row 1: Scatter Plots
+    for col_idx, data in enumerate(scatter_data):
+        ax_scatter = fig.add_subplot(gs[1, col_idx])
+        style_ax(ax_scatter)
+
+        ax_scatter.scatter(data['q_real'], data['q_imag'], s=6, alpha=0.25,
+                          color=data['color'], label="Q", edgecolors="none")
+        ax_scatter.scatter(data['k_real'], data['k_imag'], s=6, alpha=0.25,
+                          color="gray", label="K", edgecolors="none")
 
         ax_scatter.axhline(0.0, color="gray", linewidth=0.8, alpha=0.5)
         ax_scatter.axvline(0.0, color="gray", linewidth=0.8, alpha=0.5)
 
-        # Set symmetric limits (fixed to [-1, 1] since independently scaled)
         ax_scatter.set_xlim(-1.1, 1.1)
         ax_scatter.set_ylim(-1.1, 1.1)
         ax_scatter.set_aspect("equal", adjustable="box")
-
-        # Remove tick labels and axis labels since Q and K have different scales
         ax_scatter.set_xticklabels([])
         ax_scatter.set_yticklabels([])
-        ax_scatter.set_xlabel("")
-        ax_scatter.set_ylabel("")
-        ax_scatter.set_title(f"Dom. Freq f={dom_freq} (amp={amp_product[dom_freq]:.2f})", fontsize=FONT_SIZE)
-        ax_scatter.legend(loc="upper right", fontsize=FONT_SIZE - 2, frameon=False)
+        ax_scatter.set_title(f"f={data['dom_freq']}", fontsize=FONT_SIZE)
 
-    # Add column headers
-    fig.text(0.28, 0.97, "Attention Map", ha='center', fontsize=FONT_SIZE + 2, fontweight='bold')
-    fig.text(0.72, 0.97, "Q/K Scatter (Dom. Freq)", ha='center', fontsize=FONT_SIZE + 2, fontweight='bold')
+        if col_idx == 0:
+            ax_scatter.legend(loc="upper left", fontsize=FONT_SIZE - 2, frameon=False)
 
-    # Add separator line between dependent and independent
-    # fig.add_artist(plt.Line2D([0.05, 0.95], [0.52, 0.52], transform=fig.transFigure, color='gray', linewidth=1))
+    # Add row labels on the left
+    fig.text(0.01, 0.72, "Attention\nMap", ha='center', va='center',
+             fontsize=FONT_SIZE, fontweight='bold', rotation=90)
+    fig.text(0.01, 0.28, "Q/K @\nDom. Freq", ha='center', va='center',
+             fontsize=FONT_SIZE, fontweight='bold', rotation=90)
 
-    plt.tight_layout(rect=[0.05, 0, 1, 0.96])
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=dpi, bbox_inches='tight')
