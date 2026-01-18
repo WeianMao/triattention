@@ -8,7 +8,7 @@ This document provides comprehensive details for the combined figure analyzing t
 
 **Research Question**: Can we predict attention scores between query and key vectors using only their frequency-domain statistics (mean amplitude and phase)?
 
-**Key Finding**: Yes. Using only the mean complex representation of pre-RoPE Q/K vectors, we can reconstruct the expected attention score at any relative position with high accuracy (mean Attn Reconstruction Pearson $r$ = 0.53 across all heads).
+**Key Finding**: Yes. Using only the mean complex representation of pre-RoPE Q/K vectors, we can reconstruct the expected attention score at any relative position with high accuracy (mean Attn Reconstruction Pearson $\bar{r}$ = 0.53 across all heads).
 
 ---
 
@@ -63,7 +63,7 @@ $$q_f = \text{mean}_{t}(q_{t,f}^{real} + i \cdot q_{t,f}^{imag})$$
 
 ## 3. Correlation Metric
 
-### 3.1 Attn Reconstruction Pearson $r$
+### 3.1 Attn Reconstruction Pearson $\bar{r}$
 
 This measures how well the reconstruction predicts **individual query's** attention scores.
 
@@ -73,13 +73,13 @@ This measures how well the reconstruction predicts **individual query's** attent
 3. Compute predicted scores: $r_\Delta$ (reconstruction value at distance $\Delta$)
 4. Compute Pearson correlation between actual and predicted scores for this query
 
-The Attn Reconstruction Pearson $r$ is the **average** of these per-query correlations across sampled query positions (500 log-spaced samples).
+The Attn Reconstruction Pearson $\bar{r}$ is the **average** of these per-query correlations across sampled query positions (500 log-spaced samples).
 
-**Interpretation**: A high Attn Reconstruction Pearson $r$ means the reconstruction captures the attention pattern shape for individual queries, not just the global average trend.
+**Interpretation**: A high Attn Reconstruction Pearson $\bar{r}$ means the reconstruction captures the attention pattern shape for individual queries, not just the global average trend.
 
 ### 3.2 Why This Metric Matters
 
-For sparse attention prediction, we need to predict which specific (i, j) pairs have high attention, not just the average. Attn Reconstruction Pearson $r$ directly measures this capability at the query level.
+For sparse attention prediction, we need to predict which specific (i, j) pairs have high attention, not just the average. Attn Reconstruction Pearson $\bar{r}$ directly measures this capability at the query level.
 
 ---
 
@@ -132,14 +132,14 @@ log_distances = torch.logspace(0, log10(query_pos), 50).unique()
 **Data Source**: Layer 0, Head 0 (representative example)
 
 **Key Statistics Shown** (bottom-left corner):
-- Attn Reconstruction Pearson $r$ = 0.72
+- Attn Reconstruction Pearson $\bar{r}$ = 0.72
 
 **Interpretation**: The reconstruction closely tracks the ground truth mean curve. The error band shows the variance of actual attention scores at each distance.
 
-### Panel (B): Distribution of Attn Reconstruction Pearson $r$ Across All Heads
+### Panel (B): Distribution of Attn Reconstruction Pearson $\bar{r}$ Across All Heads
 
 **Content**:
-- X-axis: Attn Reconstruction Pearson $r$
+- X-axis: Attn Reconstruction Pearson $\bar{r}$
 - Y-axis: Count (number of heads)
 - Histogram bins: 25
 - Red dashed line: Mean = 0.53
@@ -160,7 +160,7 @@ log_distances = torch.logspace(0, log10(query_pos), 50).unique()
 
 **Content**:
 - X-axis: Layer index (0-35)
-- Y-axis: Percentage of heads with $r$ > 0.55
+- Y-axis: Percentage of heads with $\bar{r}$ > 0.55
 - Orange bars: Per-layer percentage
 - Blue line: Smoothed trend (Gaussian σ=2)
 
@@ -181,7 +181,7 @@ log_distances = torch.logspace(0, log10(query_pos), 50).unique()
 |--------|-------|
 | Model | DeepSeek-R1-0528-Qwen3-8B |
 | Total heads | 1152 |
-| Mean Attn Reconstruction Pearson $r$ | 0.53 |
+| Mean Attn Reconstruction Pearson $\bar{r}$ | 0.53 |
 | Std | 0.21 |
 | Best head | 0.99 |
 | Worst head | -0.20 |
@@ -194,9 +194,9 @@ log_distances = torch.logspace(0, log10(query_pos), 50).unique()
 ## 7. Suggested Figure Caption
 
 > **Figure X: Frequency-magnitude reconstruction of attention scores.**
-> (A) Comparison between ground truth attention scores (orange dashed) and reconstruction using frequency-domain statistics (blue dotted) for a representative head (Layer 0, Head 0). The shaded region shows ±1 standard deviation of actual scores. The reconstruction achieves Attn Reconstruction Pearson $r$ = 0.72.
-> (B) Distribution of Attn Reconstruction Pearson $r$ across all 1152 attention heads (36 layers × 32 heads). Mean correlation is 0.53, indicating the frequency-magnitude model captures significant structure in attention patterns.
-> (C) Percentage of heads exceeding the correlation threshold ($r$ > 0.55) per layer. Early layers show higher reconstruction accuracy (40-97%), while middle layers show reduced accuracy (20-60%), suggesting layer-dependent attention pattern complexity.
+> (A) Comparison between ground truth attention scores (orange dashed) and reconstruction using frequency-domain statistics (blue dotted) for a representative head (Layer 0, Head 0). The shaded region shows ±1 standard deviation of actual scores. The reconstruction achieves Attn Reconstruction Pearson $\bar{r}$ = 0.72.
+> (B) Distribution of Attn Reconstruction Pearson $\bar{r}$ across all 1152 attention heads (36 layers × 32 heads). Mean correlation is 0.53, indicating the frequency-magnitude model captures significant structure in attention patterns.
+> (C) Percentage of heads exceeding the correlation threshold ($\bar{r}$ > 0.55) per layer. Early layers show higher reconstruction accuracy (40-97%), while middle layers show reduced accuracy (20-60%), suggesting layer-dependent attention pattern complexity.
 
 ---
 
@@ -230,7 +230,7 @@ python reconstruct_position_curve_with_band.py /path/to/trace_dir --layer 0 --he
 
 1. **Predictability**: Attention scores can be predicted from frequency-domain statistics of pre-RoPE Q/K vectors
 2. **Layer Heterogeneity**: Prediction accuracy varies by layer, with early layers being more predictable
-3. **Practical Utility**: The moderate Attn Reconstruction Pearson $r$ (0.53) suggests this approach can inform sparse attention design
+3. **Practical Utility**: The moderate Attn Reconstruction Pearson $\bar{r}$ (0.53) suggests this approach can inform sparse attention design
 
 ### Connections to Method
 
@@ -259,9 +259,9 @@ This analysis supports the claim that:
 
 1. **Removed Mean Attn. Pearson $r_{mean}$**: Panel (A) now only shows one metric
 2. **Simplified naming**:
-   - `Per-Query Attn. Pearson $r_{query}$` → **`Attn Reconstruction Pearson $r$`**
-   - Removed subscript since only one metric exists
-3. **Panel (A) display**: Now shows single line `Attn Reconstruction Pearson $r$ = 0.72`
+   - `Per-Query Attn. Pearson $r_{query}$` → **`Attn Reconstruction Pearson $\bar{r}$`**
+   - Use $\bar{r}$ (r-bar) notation to indicate this is a mean correlation across sampled queries
+3. **Panel (A) display**: Now shows single line `Attn Reconstruction Pearson $\bar{r}$ = 0.72`
 4. **Panel (A) legend**: Added `Ground Truth` entry for the shaded ±1 std region
    - Legend items: `Ground Truth` (shaded area), `GT Mean` (dashed line), `Reconstruction` (dotted line)
 
@@ -302,7 +302,7 @@ This analysis supports the claim that:
 
    | Metric | v1 Value | v2 Value |
    |--------|----------|----------|
-   | Mean $r$ | 0.55 | 0.53 |
+   | Mean $\bar{r}$ | 0.55 | 0.53 |
    | Std | 0.20 | 0.21 |
    | Min | -0.18 | -0.20 |
    | Max | 0.96 | 0.99 |

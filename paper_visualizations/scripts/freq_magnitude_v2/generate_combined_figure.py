@@ -322,7 +322,7 @@ def main() -> None:
     ax_a.set_ylabel(r'$\langle q, k \rangle_\Delta$', fontsize=FONT_SIZE)
     ax_a.legend(frameon=False, fontsize=FONT_SIZE, loc='upper right', bbox_to_anchor=(1.02, 1.0))
     ax_a.text(0.03, 0.03,
-              f"Attn Reconstruction Pearson $r$ = {panel_a['per_query_pearson']:.2f}",
+              f"Attn Reconstruction Pearson $\\bar{{r}}$ = {panel_a['per_query_pearson']:.2f}",
               transform=ax_a.transAxes, fontsize=FONT_SIZE,
               verticalalignment='bottom', horizontalalignment='left',
               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='none'))
@@ -336,7 +336,7 @@ def main() -> None:
     ax_b.hist(all_pearson, bins=bin_edges, color=color_recon, alpha=0.85, edgecolor='white', linewidth=0.8)
     ax_b.axvline(all_pearson.mean(), color='#E24A33', linestyle='--', linewidth=2.5,
                  label=f'Mean = {all_pearson.mean():.2f}')
-    ax_b.set_xlabel('Attn Reconstruction Pearson $r$', fontsize=FONT_SIZE)
+    ax_b.set_xlabel('Attn Reconstruction Pearson $\\bar{r}$', fontsize=FONT_SIZE)
     ax_b.set_ylabel('Count', fontsize=FONT_SIZE)
     ax_b.legend(frameon=False, fontsize=FONT_SIZE, loc='upper left')
     ax_b.set_xticks(np.arange(0, 1.1, 0.2))
@@ -355,7 +355,7 @@ def main() -> None:
     ax_c.plot(layers_arr, smoothed, color=color_recon, linewidth=2.5, label='Smoothed trend')
 
     ax_c.set_xlabel('Layer Index', fontsize=FONT_SIZE)
-    ax_c.set_ylabel(f'% Heads with $r$ > {threshold:.2f}', fontsize=FONT_SIZE)
+    ax_c.set_ylabel(f'% Heads with $\\bar{{r}}$ > {threshold:.2f}', fontsize=FONT_SIZE)
     ax_c.set_xticks(layers_arr[::2])
     ax_c.set_ylim(0, 100)
 

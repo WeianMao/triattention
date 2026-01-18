@@ -264,7 +264,7 @@ def main() -> None:
     ax1.axvline(global_mean, color='#E24A33', linestyle='--', linewidth=2.5,
                 label=f'Mean = {global_mean:.3f}')
 
-    ax1.set_xlabel('Attn Reconstruction Pearson $r$')
+    ax1.set_xlabel('Attn Reconstruction Pearson $\\bar{r}$')
     ax1.set_ylabel('Count')
     ax1.legend(frameon=False, fontsize=14)
 
