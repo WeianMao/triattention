@@ -54,7 +54,7 @@ DEPENDENT_HEADS = [
 # Relative-Position-Independent Heads
 INDEPENDENT_HEADS = [
     {"layer": 3, "head": 11, "label": "Vertical Stripes"},
-    {"layer": 17, "head": 25, "label": "No Fixed Pattern"},
+    {"layer": 17, "head": 25, "label": "Retrieval Head"},
 ]
 
 
@@ -293,6 +293,7 @@ def generate_figure(
     q_tile: int,
     dpi: int,
     output_path: Path,
+    attn_cmap: str = "inferno",
 ) -> None:
     """Generate the comparison figure."""
     mask_process_command("PD-L1_binder_pos_dep")
@@ -338,8 +339,8 @@ def generate_figure(
 
     # Create figure: 2 rows x 4 cols (horizontal layout)
     # Row 0: attention maps, Row 1: scatter plots
-    fig = plt.figure(figsize=(14, 7), dpi=dpi)
-    gs = GridSpec(2, num_heads, figure=fig, wspace=0.02, hspace=0.12,
+    fig = plt.figure(figsize=(13, 6.5), dpi=dpi)
+    gs = GridSpec(2, num_heads, figure=fig, wspace=0.01, hspace=0.05,
                   left=0.06, right=0.99, top=0.94, bottom=0.03)
 
     plt.rcParams.update({
@@ -359,8 +360,8 @@ def generate_figure(
         head = head_info["head"]
         label = head_info["label"]
 
-        is_dependent = col_idx < len(DEPENDENT_HEADS)
-        scatter_color = color_dependent if is_dependent else color_independent
+        # Use unified color for all Q points (blue-purple)
+        scatter_color = color_dependent
 
         print(f"Processing Layer {layer}, Head {head} ({label})...")
 
@@ -397,7 +398,7 @@ def generate_figure(
         label = head_info["label"]
 
         ax_attn = fig.add_subplot(gs[0, col_idx])
-        ax_attn.imshow(heatmaps[col_idx].numpy(), cmap="inferno", aspect="equal", origin="upper")
+        ax_attn.imshow(heatmaps[col_idx].numpy(), cmap=attn_cmap, aspect="equal", origin="upper")
         ax_attn.set_title(f"{label}", fontsize=FONT_SIZE)
         ax_attn.set_xticks([])
         ax_attn.set_yticks([])
@@ -424,7 +425,7 @@ def generate_figure(
         ax_scatter.set_aspect("equal", adjustable="box")
         ax_scatter.set_xticklabels([])
         ax_scatter.set_yticklabels([])
-        ax_scatter.set_title(f"f={data['dom_freq']}", fontsize=FONT_SIZE)
+        ax_scatter.set_title("", fontsize=FONT_SIZE)
 
         # Add R values in top right corner
         ax_scatter.text(0.95, 0.95, f"$R_Q$={data['R_q']:.3f}\n$R_K$={data['R_k']:.3f}",
@@ -444,6 +445,53 @@ def generate_figure(
     fig.text(0.04, 0.28, "Q/K @\nDom. Freq", ha='center', va='center',
              fontsize=FONT_SIZE, fontweight='bold', rotation=90)
 
+    # Add top labels: Relative-Position-Dependent (left) and Independent (right) with arrow
+    from matplotlib.patches import FancyArrowPatch
+
+    # Place text at left and right edges
+    txt_left = fig.text(0.06, 0.98, "Relative-Position-Dependent", ha='left', va='bottom',
+                        fontsize=FONT_SIZE, fontweight='bold')
+    txt_right = fig.text(0.99, 0.98, "Relative-Position-Independent", ha='right', va='bottom',
+                         fontsize=FONT_SIZE, fontweight='bold')
+
+    # Draw once to get text bounding boxes
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    # Get text bounds in figure coordinates
+    bbox_left = txt_left.get_window_extent(renderer).transformed(fig.transFigure.inverted())
+    bbox_right = txt_right.get_window_extent(renderer).transformed(fig.transFigure.inverted())
+
+    # Arrow starts after left text, ends before right text
+    arrow_y = (bbox_left.y0 + bbox_left.y1) / 2
+    arrow_start = bbox_left.x1 + 0.01
+    arrow_end = bbox_right.x0 - 0.01
+
+    arrow = FancyArrowPatch((arrow_start, arrow_y), (arrow_end, arrow_y),
+                            transform=fig.transFigure,
+                            arrowstyle='->', mutation_scale=15,
+                            color='black', lw=1.5)
+    fig.patches.append(arrow)
+
+    # Add bottom labels: Concentrated (left) and Dispersed (right) with arrow
+    txt_bottom_left = fig.text(0.06, -0.01, "Concentrated", ha='left', va='bottom',
+                               fontsize=FONT_SIZE, fontweight='bold')
+    txt_bottom_right = fig.text(0.99, -0.01, "Dispersed", ha='right', va='bottom',
+                                fontsize=FONT_SIZE, fontweight='bold')
+
+    # Get text bounds for bottom arrow
+    bbox_bottom_left = txt_bottom_left.get_window_extent(renderer).transformed(fig.transFigure.inverted())
+    bbox_bottom_right = txt_bottom_right.get_window_extent(renderer).transformed(fig.transFigure.inverted())
+
+    arrow_bottom_y = (bbox_bottom_left.y0 + bbox_bottom_left.y1) / 2
+    arrow_bottom_start = bbox_bottom_left.x1 + 0.01
+    arrow_bottom_end = bbox_bottom_right.x0 - 0.01
+
+    arrow_bottom = FancyArrowPatch((arrow_bottom_start, arrow_bottom_y), (arrow_bottom_end, arrow_bottom_y),
+                                   transform=fig.transFigure,
+                                   arrowstyle='->', mutation_scale=15,
+                                   color='black', lw=1.5)
+    fig.patches.append(arrow_bottom)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=dpi, bbox_inches='tight')
