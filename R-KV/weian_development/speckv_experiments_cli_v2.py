@@ -35,7 +35,7 @@ MODEL_SPECS: Dict[str, str] = {
 }
 
 DATASETS = ["aime24", "aime25", "math500"]
-MODES = ["fullkv", "rkv", "speckv"]
+MODES = ["fullkv", "rkv", "snapkv", "speckv"]
 
 
 def load_yaml(path: Path) -> dict:
