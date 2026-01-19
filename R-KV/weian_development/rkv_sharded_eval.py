@@ -676,6 +676,7 @@ def main(args: argparse.Namespace) -> None:
                 normalize_scores=args.sparse_normalize_scores,
                 use_rank_aggregation=args.use_rank_aggregation,
                 include_prefill_in_budget=args.include_prefill_in_budget,
+                allow_prefill_compression=args.allow_prefill_compression,
                 divide_length=args.divide_length,
                 use_slack_trigger=args.rkv_style_slack_trigger,
                 per_head_pruning=args.per_head_pruning,

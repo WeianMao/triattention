@@ -1,0 +1,3 @@
+per_head_pruning: true
+per_layer_perhead_pruning: false
+allow_prefill_compression: true

@@ -12,6 +12,7 @@ from types import MethodType
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
+import sys
 from transformers import AutoConfig
 from transformers.cache_utils import Cache, DynamicCache
 from transformers.modeling_outputs import CausalLMOutputWithPast
@@ -47,6 +48,7 @@ class SpeckVRKVStyleConfig:
     normalize_scores: bool = False
     use_rank_aggregation: bool = False
     include_prefill_in_budget: bool = False
+    allow_prefill_compression: bool = False
     divide_length: int = 128  # Compress every N steps (like R-KV's divide_length)
     use_slack_trigger: bool = False  # If True, trigger at budget + divide_length (like generate wrapper)
     per_head_pruning: bool = False  # If True, each KV head selects tokens independently
@@ -70,6 +72,12 @@ class SpeckVRKVStyle:
     def __init__(self, config: SpeckVRKVStyleConfig) -> None:
         self.config = config
         self.budget = config.budget
+        if config.allow_prefill_compression and not config.include_prefill_in_budget:
+            print(
+                "[warn] allow_prefill_compression=True with include_prefill_in_budget=False "
+                "can delay compression when prefill dominates the cache.",
+                file=sys.stderr,
+            )
 
         # Load model config
         model_config = AutoConfig.from_pretrained(
@@ -156,6 +164,7 @@ class SpeckVRKVStyle:
         self.per_layer_perhead_pruning = config.per_layer_perhead_pruning
         self.per_layer_pruning = config.per_layer_pruning
         self.disable_top_n_high_freq = config.disable_top_n_high_freq
+        self.allow_prefill_compression = config.allow_prefill_compression
 
         # Random generator
         self.generator: torch.Generator | None = None
@@ -180,8 +189,9 @@ class SpeckVRKVStyle:
         3. Add noise for tie-breaking
         4. Union-based selection: each head selects top-k, then select from union
 
-        Prefill tokens (first prefix_length) are always preserved.
-        Only decode tokens compete for the remaining budget.
+        Prefill tokens (first prefix_length) are always preserved unless
+        allow_prefill_compression is enabled.
+        Only decode tokens compete for the remaining budget when prefill is pinned.
 
         Args:
             pkv_tuple: Tuple of (key, value) for each layer
@@ -194,6 +204,9 @@ class SpeckVRKVStyle:
             return torch.arange(0, device=self.config.device)
 
         kv_cache_len = pkv_tuple[0][0].shape[-2]
+
+        if self.allow_prefill_compression:
+            prefix_length = 0
 
         # Nothing to compress
         if kv_cache_len <= self.budget:
@@ -828,6 +841,7 @@ def apply_speckv_rkv_style_patch(
     normalize_scores: bool = False,
     use_rank_aggregation: bool = False,
     include_prefill_in_budget: bool = False,
+    allow_prefill_compression: bool = False,
     divide_length: int = 128,
     use_slack_trigger: bool = False,
     per_head_pruning: bool = False,
@@ -860,6 +874,7 @@ def apply_speckv_rkv_style_patch(
         normalize_scores=normalize_scores,
         use_rank_aggregation=use_rank_aggregation,
         include_prefill_in_budget=include_prefill_in_budget,
+        allow_prefill_compression=allow_prefill_compression,
         divide_length=divide_length,
         use_slack_trigger=use_slack_trigger,
         per_head_pruning=per_head_pruning,
