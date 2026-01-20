@@ -15,6 +15,7 @@ from typing import Dict, List, Tuple
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.gridspec import GridSpec
 import numpy as np
 import torch
@@ -33,6 +34,11 @@ color_dependent = (85 / 250, 104 / 250, 154 / 250)    # blue for dependent
 color_independent = (187 / 250, 130 / 250, 90 / 250)  # warm brown for independent
 face_color = (231 / 250, 231 / 250, 240 / 250)        # light gray-purple background
 
+# Custom colormap: face_color (low attention) -> color_dependent (high attention)
+attn_cmap_custom = LinearSegmentedColormap.from_list(
+    "attn_custom", [face_color, color_dependent]
+)
+
 
 def style_ax(ax, grid_axis="both"):
     """Apply consistent styling to axes."""
@@ -48,13 +54,13 @@ def style_ax(ax, grid_axis="both"):
 # Relative-Position-Dependent Heads
 DEPENDENT_HEADS = [
     {"layer": 6, "head": 9, "label": "Local Attention"},
-    {"layer": 9, "head": 20, "label": "Attention Sink"},
+    {"layer": 9, "head": 20, "label": "Sink Attention"},
 ]
 
 # Relative-Position-Independent Heads
 INDEPENDENT_HEADS = [
-    {"layer": 3, "head": 11, "label": "Vertical Stripes"},
-    {"layer": 17, "head": 25, "label": "Retrieval Head"},
+    {"layer": 3, "head": 11, "label": "Vertical Attention"},
+    {"layer": 17, "head": 25, "label": "Retrieval Attention"},
 ]
 
 
@@ -339,9 +345,9 @@ def generate_figure(
 
     # Create figure: 2 rows x 4 cols (horizontal layout)
     # Row 0: attention maps, Row 1: scatter plots
-    fig = plt.figure(figsize=(13, 6.5), dpi=dpi)
-    gs = GridSpec(2, num_heads, figure=fig, wspace=0.01, hspace=0.05,
-                  left=0.06, right=0.99, top=0.94, bottom=0.03)
+    fig = plt.figure(figsize=(13, 6.2), dpi=dpi)
+    gs = GridSpec(2, num_heads, figure=fig, wspace=0.05, hspace=0.02,
+                  left=0.06, right=0.99, top=0.93, bottom=0.05)
 
     plt.rcParams.update({
         'font.size': FONT_SIZE,
@@ -368,9 +374,10 @@ def generate_figure(
         q_block = q_tensor[layer, head, :token_count].to(device=device, dtype=torch.float32)
         k_block = k_tensor[layer, head, :token_count].to(device=device, dtype=torch.float32)
 
-        # Compute attention map
+        # Compute attention map (use larger patch_size for Sink Attention)
+        head_patch_size = 192 if label == "Sink Attention" else patch_size
         with torch.no_grad():
-            heatmap = compute_attention_heatmap(q_block, k_block, token_count, patch_size, q_tile, device)
+            heatmap = compute_attention_heatmap(q_block, k_block, token_count, head_patch_size, q_tile, device)
         heatmaps.append(heatmap)
 
         # Compute dominant frequency and scatter data
@@ -398,13 +405,15 @@ def generate_figure(
         label = head_info["label"]
 
         ax_attn = fig.add_subplot(gs[0, col_idx])
-        ax_attn.imshow(heatmaps[col_idx].numpy(), cmap=attn_cmap, aspect="equal", origin="upper")
-        ax_attn.set_title(f"{label}", fontsize=FONT_SIZE)
+        ax_attn.imshow(heatmaps[col_idx].numpy(), cmap=attn_cmap_custom, aspect="equal", origin="upper")
         ax_attn.set_xticks([])
         ax_attn.set_yticks([])
         # Remove black border
         for spine in ax_attn.spines.values():
             spine.set_visible(False)
+        # Add label inside the attention map (upper-right corner, which is empty due to causal mask)
+        ax_attn.text(0.98, 0.98, label, transform=ax_attn.transAxes,
+                     fontsize=FONT_SIZE - 2, ha='right', va='top', color='black')
 
 
     # Row 1: Scatter Plots
@@ -445,14 +454,33 @@ def generate_figure(
     fig.text(0.04, 0.28, "Q/K @\nDom. Freq", ha='center', va='center',
              fontsize=FONT_SIZE, fontweight='bold', rotation=90)
 
+    # Add vertical dashed lines between columns to show correspondence
+    # Get actual subplot positions to calculate divider positions accurately
+    fig.canvas.draw()
+    # Collect all attention map axes (row 0) to get their positions
+    attn_axes = [fig.axes[i] for i in range(num_heads)]
+    divider_x_positions = []
+    for i in range(num_heads - 1):
+        # Get bounding boxes of adjacent subplots
+        bbox_left = attn_axes[i].get_position()
+        bbox_right = attn_axes[i + 1].get_position()
+        # Divider is at the midpoint between right edge of left subplot and left edge of right subplot
+        x_pos = (bbox_left.x1 + bbox_right.x0) / 2
+        divider_x_positions.append(x_pos)
+
+    for x_pos in divider_x_positions:
+        fig.add_artist(plt.Line2D([x_pos, x_pos], [0.12, 0.88],
+                                   transform=fig.transFigure,
+                                   color='#505050', linestyle=(0, (3, 2)), linewidth=1.2))
+
     # Add top labels: Relative-Position-Dependent (left) and Independent (right) with arrow
     from matplotlib.patches import FancyArrowPatch
 
-    # Place text at left and right edges
-    txt_left = fig.text(0.06, 0.98, "Relative-Position-Dependent", ha='left', va='bottom',
-                        fontsize=FONT_SIZE, fontweight='bold')
-    txt_right = fig.text(0.99, 0.98, "Relative-Position-Independent", ha='right', va='bottom',
-                         fontsize=FONT_SIZE, fontweight='bold')
+    # Place text at left and right edges (moved down since labels are now inside attention maps)
+    txt_left = fig.text(0.06, 0.935, "Relative-Position-Dependent", ha='left', va='bottom',
+                        fontsize=FONT_SIZE - 2)
+    txt_right = fig.text(0.99, 0.935, "Relative-Position-Independent", ha='right', va='bottom',
+                         fontsize=FONT_SIZE - 2)
 
     # Draw once to get text bounding boxes
     fig.canvas.draw()
@@ -469,15 +497,15 @@ def generate_figure(
 
     arrow = FancyArrowPatch((arrow_start, arrow_y), (arrow_end, arrow_y),
                             transform=fig.transFigure,
-                            arrowstyle='->', mutation_scale=15,
-                            color='black', lw=1.5)
+                            arrowstyle='->', mutation_scale=10,
+                            color='black', lw=1.0)
     fig.patches.append(arrow)
 
     # Add bottom labels: Concentrated (left) and Dispersed (right) with arrow
-    txt_bottom_left = fig.text(0.06, -0.01, "Concentrated", ha='left', va='bottom',
-                               fontsize=FONT_SIZE, fontweight='bold')
-    txt_bottom_right = fig.text(0.99, -0.01, "Dispersed", ha='right', va='bottom',
-                                fontsize=FONT_SIZE, fontweight='bold')
+    txt_bottom_left = fig.text(0.06, 0.0, "Concentrated", ha='left', va='bottom',
+                               fontsize=FONT_SIZE - 2)
+    txt_bottom_right = fig.text(0.99, 0.0, "Dispersed", ha='right', va='bottom',
+                                fontsize=FONT_SIZE - 2)
 
     # Get text bounds for bottom arrow
     bbox_bottom_left = txt_bottom_left.get_window_extent(renderer).transformed(fig.transFigure.inverted())
@@ -489,8 +517,8 @@ def generate_figure(
 
     arrow_bottom = FancyArrowPatch((arrow_bottom_start, arrow_bottom_y), (arrow_bottom_end, arrow_bottom_y),
                                    transform=fig.transFigure,
-                                   arrowstyle='->', mutation_scale=15,
-                                   color='black', lw=1.5)
+                                   arrowstyle='->', mutation_scale=10,
+                                   color='black', lw=1.0)
     fig.patches.append(arrow_bottom)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
