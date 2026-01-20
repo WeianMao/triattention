@@ -156,22 +156,29 @@ log_distances = torch.logspace(0, log10(query_pos), 50).unique()
 
 **Interpretation**: Most heads show moderate to strong correlation (0.4-0.8), indicating the frequency-magnitude model captures significant structure in attention patterns.
 
-### Panel (C): Per-layer Percentage of Heads Above Threshold
+### Panel (C): Per-layer Percentage of Heads Above Threshold with R_Q Curve
 
 **Content**:
 - X-axis: Layer index (0-35)
-- Y-axis: Percentage of heads with $\bar{r}$ > 0.55
-- Orange bars: Per-layer percentage
-- Blue line: Smoothed trend (Gaussian σ=2)
+- Left Y-axis: Percentage of heads with $\bar{r}$ > 0.55
+- Right Y-axis: Median $R_Q$ (Mean Resultant Length at dominant frequency)
+- Orange bars: Per-layer percentage (left axis)
+- Green curve with markers: Median $R_Q$ per layer (right axis)
 
 **Threshold**: 0.55 (slightly above the global mean of 0.53)
+
+**R_Q Calculation**:
+1. For each head, find the dominant frequency: $f^* = \arg\max_f |E[q_f]| \cdot |E[k_f]|$
+2. Extract Q vectors at this frequency and compute Mean Resultant Length: $R_Q = \frac{||E[z]||}{E[||z||]}$
+3. For each layer, take the median of 32 heads' $R_Q$ values
 
 **Key Observations**:
 1. **Early layers (0-15)**: Higher percentage (40-97%), reconstruction works well
 2. **Middle layers (16-25)**: Lower percentage (20-60%), reconstruction less accurate
 3. **Late layers (26-35)**: Variable levels (20-60%)
+4. **R_Q is consistently high** (0.98-1.00) across all layers, indicating strong phase concentration at the dominant frequency
 
-**Interpretation**: The frequency-magnitude model is most effective in early layers, suggesting these layers have more structured, predictable attention patterns based on relative position.
+**Interpretation**: The frequency-magnitude model is most effective in early layers, suggesting these layers have more structured, predictable attention patterns based on relative position. The high R_Q values indicate that the dominant frequency exhibits strong phase coherence across all layers.
 
 ---
 
@@ -253,7 +260,25 @@ This analysis supports the claim that:
 
 ## 11. Revision History
 
-### v3.0 (Latest) - Simplified Naming
+### v3.1 (Latest) - Added R_Q Curve to Panel C
+
+**Changes from v3.0**:
+
+1. **Panel (C) - Replaced smoothed trend with R_Q curve**:
+   - Removed: Gaussian smoothed trend line
+   - Added: Green curve showing per-layer median $R_Q$ (Mean Resultant Length at dominant frequency)
+   - Added: Right Y-axis for $R_Q$ values (range: dynamic lower bound to 1.0)
+
+2. **R_Q Calculation Method**:
+   - For each head: find dominant frequency via $\arg\max_f |E[q_f]| \cdot |E[k_f]|$
+   - Compute $R_Q = ||E[z]|| / E[||z||]$ for Q vectors at that frequency
+   - Take median across 32 heads per layer
+
+3. **New statistics**: Median $R_Q$ range: [0.98, 1.00]
+
+---
+
+### v3.0 - Simplified Naming
 
 **Changes from v2.0**:
 
