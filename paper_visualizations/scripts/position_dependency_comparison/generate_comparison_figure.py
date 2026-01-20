@@ -502,9 +502,9 @@ def generate_figure(
     fig.patches.append(arrow)
 
     # Add bottom labels: Concentrated (left) and Dispersed (right) with arrow
-    txt_bottom_left = fig.text(0.06, 0.0, "Concentrated", ha='left', va='bottom',
+    txt_bottom_left = fig.text(0.06, 0.01, "Concentrated", ha='left', va='bottom',
                                fontsize=FONT_SIZE - 2)
-    txt_bottom_right = fig.text(0.99, 0.0, "Dispersed", ha='right', va='bottom',
+    txt_bottom_right = fig.text(0.99, 0.01, "Dispersed", ha='right', va='bottom',
                                 fontsize=FONT_SIZE - 2)
 
     # Get text bounds for bottom arrow
