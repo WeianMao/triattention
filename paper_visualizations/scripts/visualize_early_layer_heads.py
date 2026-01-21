@@ -35,9 +35,69 @@ color_dependent = (85 / 250, 104 / 250, 154 / 250)    # blue for dependent
 color_independent = (187 / 250, 130 / 250, 90 / 250)  # warm brown for independent
 face_color = (231 / 250, 231 / 250, 240 / 250)        # light gray-purple background
 
-# Custom colormap
+# Custom colormap (original)
 attn_cmap_custom = LinearSegmentedColormap.from_list(
     "attn_custom", [face_color, color_dependent]
+)
+
+# Darker colormap (deeper blue endpoint)
+color_dependent_darker = (40 / 250, 60 / 250, 120 / 250)  # darker blue
+attn_cmap_darker = LinearSegmentedColormap.from_list(
+    "attn_darker", [face_color, color_dependent_darker]
+)
+
+# White background colormap (higher contrast with background)
+white_bg = (1.0, 1.0, 1.0)
+attn_cmap_white_bg = LinearSegmentedColormap.from_list(
+    "attn_white_bg", [white_bg, color_dependent_darker]
+)
+
+# Lighter background (more contrast)
+lighter_bg = (0.98, 0.98, 1.0)  # almost white with slight blue tint
+attn_cmap_lighter_bg = LinearSegmentedColormap.from_list(
+    "attn_lighter_bg", [lighter_bg, color_dependent_darker]
+)
+
+# High contrast colormap (wider color range)
+high_contrast_dark = (20 / 250, 40 / 250, 100 / 250)  # very dark blue
+attn_cmap_high_contrast = LinearSegmentedColormap.from_list(
+    "attn_high_contrast", [white_bg, high_contrast_dark]
+)
+
+# Non-linear colormap (faster transition to dark)
+attn_cmap_nonlinear = LinearSegmentedColormap.from_list(
+    "attn_nonlinear", [white_bg, (0.7, 0.75, 0.85), (0.4, 0.5, 0.7), color_dependent_darker]
+)
+
+# ============ Hotspot color variations (all use original background) ============
+# Darker blue hotspot
+hotspot_darker_blue = (30 / 255, 50 / 255, 120 / 255)
+attn_cmap_darker_blue = LinearSegmentedColormap.from_list(
+    "attn_darker_blue", [face_color, hotspot_darker_blue]
+)
+
+# Deep navy hotspot
+hotspot_deep_navy = (10 / 255, 20 / 255, 80 / 255)
+attn_cmap_deep_navy = LinearSegmentedColormap.from_list(
+    "attn_deep_navy", [face_color, hotspot_deep_navy]
+)
+
+# Purple hotspot
+hotspot_purple = (60 / 255, 30 / 255, 120 / 255)
+attn_cmap_purple = LinearSegmentedColormap.from_list(
+    "attn_purple", [face_color, hotspot_purple]
+)
+
+# Dark teal hotspot
+hotspot_dark_teal = (20 / 255, 80 / 255, 100 / 255)
+attn_cmap_dark_teal = LinearSegmentedColormap.from_list(
+    "attn_dark_teal", [face_color, hotspot_dark_teal]
+)
+
+# Black hotspot (maximum contrast)
+hotspot_black = (20 / 255, 20 / 255, 30 / 255)
+attn_cmap_black = LinearSegmentedColormap.from_list(
+    "attn_black", [face_color, hotspot_black]
 )
 
 
@@ -45,8 +105,8 @@ attn_cmap_custom = LinearSegmentedColormap.from_list(
 # Single head to visualize with different temperatures
 TARGET_HEAD = {"layer": 1, "head": 18, "label": "L1H18"}
 
-# Temperature values to compare ("orig" means original pooling method)
-TEMPERATURES = ["orig"]  # Only show original pooling method
+# Selected color method
+COLOR_METHODS = ["darker_blue"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -291,11 +351,20 @@ def generate_figure(
     q_block = q_tensor[layer, head, :token_count].to(device=device, dtype=torch.float32)
     k_block = k_tensor[layer, head, :token_count].to(device=device, dtype=torch.float32)
 
-    num_temps = len(TEMPERATURES)
+    # Compute heatmap once
+    print(f"Processing {label} with ORIGINAL POOLING method...")
+    with torch.no_grad():
+        heatmap = compute_attention_heatmap_with_pooling(
+            q_block, k_block, token_count, patch_size, q_tile, device
+        )
+    print(f"  Heatmap shape: {heatmap.shape}")
+    heatmap_np = heatmap.numpy()
 
-    # Layout: 1 row x N cols for different temperatures
-    fig, axes = plt.subplots(1, num_temps, figsize=(3.5 * num_temps, 3.5), dpi=dpi)
-    fig.suptitle(f"{label} Attention Map at Different Temperatures",
+    num_methods = len(COLOR_METHODS)
+
+    # Layout: 1 row x N cols for different color methods
+    fig, axes = plt.subplots(1, num_methods, figsize=(3.5 * num_methods, 3.5), dpi=dpi)
+    fig.suptitle(f"{label} Attention Map - Color Enhancement Comparison",
                  fontsize=FONT_SIZE + 2, fontweight='bold')
 
     plt.rcParams.update({
@@ -304,28 +373,25 @@ def generate_figure(
         'axes.titlesize': FONT_SIZE,
     })
 
-    for idx, temperature in enumerate(TEMPERATURES):
-        ax = axes[idx] if num_temps > 1 else axes
+    for idx, method in enumerate(COLOR_METHODS):
+        ax = axes[idx] if num_methods > 1 else axes
 
-        if temperature == "orig":
-            # Original method from generate_comparison_figure.py: pooling + min-max normalization
-            print(f"Processing {label} with ORIGINAL POOLING method...")
-            with torch.no_grad():
-                heatmap = compute_attention_heatmap_with_pooling(
-                    q_block, k_block, token_count, patch_size, q_tile, device
-                )
-            title = "Original"
-        else:
-            print(f"Processing {label} with temperature={temperature}...")
-            with torch.no_grad():
-                heatmap = compute_attention_heatmap_no_pooling(
-                    q_block, k_block, token_count, crop_size, q_tile, device, temperature
-                )
-            title = f"T={temperature}"
-        print(f"  Heatmap shape: {heatmap.shape}")
+        if method == "darker_blue":
+            ax.imshow(heatmap_np, cmap=attn_cmap_darker_blue, aspect="equal", origin="upper")
+            title = "Darker Blue"
+        elif method == "deep_navy":
+            ax.imshow(heatmap_np, cmap=attn_cmap_deep_navy, aspect="equal", origin="upper")
+            title = "Deep Navy"
+        elif method == "purple":
+            ax.imshow(heatmap_np, cmap=attn_cmap_purple, aspect="equal", origin="upper")
+            title = "Purple"
+        elif method == "dark_teal":
+            ax.imshow(heatmap_np, cmap=attn_cmap_dark_teal, aspect="equal", origin="upper")
+            title = "Dark Teal"
+        elif method == "black":
+            ax.imshow(heatmap_np, cmap=attn_cmap_black, aspect="equal", origin="upper")
+            title = "Black"
 
-        # Plot
-        ax.imshow(heatmap.numpy(), cmap=attn_cmap_custom, aspect="equal", origin="upper")
         ax.set_title(title, fontsize=FONT_SIZE, fontweight='bold')
         ax.set_xticks([])
         ax.set_yticks([])
