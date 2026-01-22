@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DATASET="aime24"
-MODEL="DeepSeek-R1-Distill-Qwen-7B"
+MODEL="DeepSeek-R1-Distill-Llama-8B"
 METHOD="rkv"
 BUDGET=""
 DRY_RUN="0"
@@ -21,9 +21,9 @@ RKV_ROOT="$(cd "${EXP_ROOT}/.." && pwd)"
 
 usage() {
   cat <<USAGE
-Usage: bash scripts/distill_qwen7b/run_one.sh [--dataset name] [--model name] [--method fullkv|rkv|snapkv|speckv] [--budget N] [--dry-run]
+Usage: bash scripts/distill_llama8b/run_one.sh [--dataset name] [--model name] [--method fullkv|rkv|snapkv|speckv] [--budget N] [--dry-run]
 
-Dataset defaults to aime24 and model defaults to DeepSeek-R1-Distill-Qwen-7B.
+Dataset defaults to aime24 and model defaults to DeepSeek-R1-Distill-Llama-8B.
 If --budget is omitted for rkv/snapkv/speckv, default_budget from configs/shared/defaults.yaml is used.
 USAGE
 }
