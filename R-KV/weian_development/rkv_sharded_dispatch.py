@@ -286,6 +286,19 @@ def parse_args() -> argparse.Namespace:
         default="max",
         help="Aggregation method for per-layer pruning: max (default) or mean (max per kv_head then mean).",
     )
+    parser.add_argument(
+        "--disable-mlr",
+        dest="disable_mlr",
+        action="store_true",
+        help="Override runner arg: disable MLR term in SpeckV extra computation.",
+    )
+    parser.add_argument(
+        "--no-disable-mlr",
+        dest="disable_mlr",
+        action="store_false",
+        help="Override runner arg: enable MLR term in SpeckV extra computation (default).",
+    )
+    parser.set_defaults(disable_mlr=None)
     return parser.parse_args()
 
 
@@ -677,6 +690,8 @@ def main() -> None:
         runner_args["sparse_offset_max_length"] = args.sparse_offset_max_length
     if args.disable_top_n_high_freq is not None:
         runner_args["disable_top_n_high_freq"] = args.disable_top_n_high_freq
+    if args.disable_mlr is not None:
+        runner_args["disable_mlr"] = args.disable_mlr
     if args.attn_implementation is not None:
         runner_args["attn_implementation"] = args.attn_implementation
     if args.simulate_bug_phase_offset is not None:

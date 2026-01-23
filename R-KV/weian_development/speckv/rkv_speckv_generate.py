@@ -67,6 +67,7 @@ def apply_speckv_generate_patch(
     rkv_aligned_budget: bool = False,
     divide_length: int = 128,
     allow_prefill_compression: bool = False,
+    disable_mlr: bool = False,
     disable_top_n_high_freq: int = 0,
     simulate_bug_phase_offset: int = 0,
     simulate_attention_position_offset: int = 0,
@@ -108,6 +109,7 @@ def apply_speckv_generate_patch(
         divide_length=validated_divide_length,
         allow_prefill_compression=allow_prefill_compression,
         disable_top_n_high_freq=disable_top_n_high_freq,
+        disable_mlr=disable_mlr,
         simulate_bug_phase_offset=simulate_bug_phase_offset,
     )
     state = _SpeckVState(pruner=SparseRoundPruner(pruner_cfg), config=pruner_cfg)

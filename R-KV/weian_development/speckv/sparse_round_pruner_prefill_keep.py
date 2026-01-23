@@ -59,6 +59,8 @@ class SparsePruningConfig:
     # When 0 (default): all frequency components are used
     # When > 0: omega[0:n] (highest frequencies) are masked in base_scores, but additive term is unaffected
     disable_top_n_high_freq: int = 0
+    # Disable MLR term in extra computation
+    disable_mlr: bool = False
     # Bug 896cbca6 phase offset simulation: simulate the phase offset caused by the bug
     # When 0 (default): no phase offset applied
     # When > 0: subtract N×ω from phase to simulate bug behavior (Δ ≈ 156 tokens average)
@@ -175,6 +177,8 @@ class SparseRoundPruner:
         self.allow_prefill_compression = bool(getattr(config, "allow_prefill_compression", False))
         # High-frequency ablation: disable top-n high-frequency components in position-dependent scoring
         self.disable_top_n_high_freq = int(getattr(config, "disable_top_n_high_freq", 0))
+        # Disable MLR term in extra computation
+        self.disable_mlr = bool(getattr(config, "disable_mlr", False))
         # Bug 896cbca6 phase offset simulation
         self.simulate_bug_phase_offset = int(getattr(config, "simulate_bug_phase_offset", 0))
         self.generator: torch.Generator | None = None
@@ -538,6 +542,7 @@ class SparseRoundPruner:
                 stats.q_abs_mean,
                 k_unrot,
                 style=self.rope_style,
+                disable_mlr=self.disable_mlr,
             )
             head_scores = score_keys_for_round(
                 key_indices=key_positions,

@@ -7,12 +7,12 @@ The frequency-based scoring logic is identical to SparseRoundPruner.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import sys
 from pathlib import Path
 from types import MethodType
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
-import sys
 from transformers import AutoConfig
 from transformers.cache_utils import Cache, DynamicCache
 from transformers.modeling_outputs import CausalLMOutputWithPast
@@ -57,6 +57,7 @@ class SpeckVRKVStyleConfig:
     per_layer_pruning: bool = False  # If True, each layer selects same tokens for all KV heads
     per_layer_aggregation: str = "max"  # Aggregation method for per_layer_pruning: "max" or "mean"
     disable_top_n_high_freq: int = 0  # Mask top-n high-frequency components in position-dependent scoring
+    disable_mlr: bool = False  # If True, use q_abs_mean directly for extra term
 
 
 class SpeckVRKVStyle:
@@ -164,6 +165,7 @@ class SpeckVRKVStyle:
         self.per_layer_perhead_pruning = config.per_layer_perhead_pruning
         self.per_layer_pruning = config.per_layer_pruning
         self.disable_top_n_high_freq = config.disable_top_n_high_freq
+        self.disable_mlr = config.disable_mlr
         self.allow_prefill_compression = config.allow_prefill_compression
 
         # Random generator
@@ -785,7 +787,11 @@ class SpeckVRKVStyle:
 
             # Compute frequency statistics
             amp, phi, extra = compute_frequency_statistics_from_means(
-                stats.q_mean_complex, stats.q_abs_mean, k_unrot, style=self.rope_style
+                stats.q_mean_complex,
+                stats.q_abs_mean,
+                k_unrot,
+                style=self.rope_style,
+                disable_mlr=self.disable_mlr,
             )
 
             # Score keys
@@ -850,6 +856,7 @@ def apply_speckv_rkv_style_patch(
     per_layer_pruning: bool = False,
     per_layer_aggregation: str = "max",
     disable_top_n_high_freq: int = 0,
+    disable_mlr: bool = False,
 ) -> None:
     """
     Apply SpeckV with R-KV style compression triggering.
@@ -883,6 +890,7 @@ def apply_speckv_rkv_style_patch(
         per_layer_pruning=per_layer_pruning,
         per_layer_aggregation=per_layer_aggregation,
         disable_top_n_high_freq=disable_top_n_high_freq,
+        disable_mlr=disable_mlr,
     )
 
     compressor = SpeckVRKVStyle(config)

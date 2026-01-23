@@ -259,6 +259,7 @@ def compute_frequency_statistics_from_means(
     k_unrot: torch.Tensor,
     *,
     style: str = "half",
+    disable_mlr: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     k_complex = to_complex_pairs(k_unrot, style=style)
     q_mean_abs = torch.abs(q_mean_complex)
@@ -266,7 +267,10 @@ def compute_frequency_statistics_from_means(
     relative = q_mean_complex.unsqueeze(0) * torch.conj(k_complex)
     phi = torch.atan2(relative.imag, relative.real)
     amp = q_mean_abs.unsqueeze(0) * k_abs
-    extra = (q_abs_mean - q_mean_abs).unsqueeze(0) * k_abs
+    if disable_mlr:
+        extra = q_abs_mean.unsqueeze(0) * k_abs
+    else:
+        extra = (q_abs_mean - q_mean_abs).unsqueeze(0) * k_abs
     return amp, phi, extra
 
 
