@@ -267,6 +267,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--update_kv", "--update-kv", dest="update_kv", type=str2bool, default=True)
     parser.add_argument("--fp32_topk", "--fp32-topk", dest="fp32_topk", type=str2bool, default=False)
     parser.add_argument(
+        "--protect_prefill",
+        "--protect-prefill",
+        dest="protect_prefill",
+        type=str2bool,
+        default=False,
+        help="Protect prefill tokens from compression (ablation for R-KV method). "
+             "When True, prefill tokens are always preserved; when False, all tokens compete for budget (default R-KV behavior).",
+    )
+    parser.add_argument(
         "--reset_cache_each_batch",
         "--reset-cache-each-batch",
         dest="reset_cache_each_batch",
@@ -580,6 +589,7 @@ def main(args: argparse.Namespace) -> None:
                 "retain_direction": args.retain_direction,
                 "first_tokens": args.first_tokens,
                 "fp32_topk": args.fp32_topk,
+                "protect_prefill": args.protect_prefill,
             }
         )
     elif method_name == "streamingllm":

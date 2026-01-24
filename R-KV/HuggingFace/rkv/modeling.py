@@ -124,6 +124,11 @@ def LlamaAttention_forward(
             past_key_value.query_cache[self.layer_idx] = query_states[
                 :, :, -self.config.method_config["window_size"] :, :
             ]
+            # =============== Prefill protection: record prefill length ===============
+            if hasattr(self.kv_cluster, "attach_prefill_length"):
+                prefill_length = query_states.shape[2]
+                self.kv_cluster.attach_prefill_length(prefill_length)
+            # =============== Prefill protection end ===============
         else:
             # Add current query to cache
             past_key_value.query_cache[self.layer_idx] = torch.cat(
@@ -285,6 +290,11 @@ def Qwen2Attention_forward(
             past_key_value.query_cache[self.layer_idx] = query_states[
                 :, :, -self.config.method_config["window_size"] :, :
             ]
+            # =============== Prefill protection: record prefill length ===============
+            if hasattr(self.kv_cluster, "attach_prefill_length"):
+                prefill_length = query_states.shape[2]
+                self.kv_cluster.attach_prefill_length(prefill_length)
+            # =============== Prefill protection end ===============
         else:
             # Add current query to cache
             past_key_value.query_cache[self.layer_idx] = torch.cat(
@@ -462,6 +472,11 @@ def Qwen3Attention_forward(
             past_key_value.query_cache[self.layer_idx] = query_states[
                 :, :, -self.config.method_config["window_size"] :, :
             ]
+            # =============== Prefill protection: record prefill length ===============
+            if hasattr(self.kv_cluster, "attach_prefill_length"):
+                prefill_length = query_states.shape[2]
+                self.kv_cluster.attach_prefill_length(prefill_length)
+            # =============== Prefill protection end ===============
         else:
             # Add current query to cache
             past_key_value.query_cache[self.layer_idx] = torch.cat(
