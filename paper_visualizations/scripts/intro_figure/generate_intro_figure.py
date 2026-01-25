@@ -1,10 +1,9 @@
-"""Generate Introduction figure with 5 subplots.
+"""Generate Introduction figure with 4 subplots.
 
 (a) Pre-RoPE Q/K distribution (L32H27, across 3 traces)
 (b) R concentration histogram (Q/K merged, bar chart)
 (c) Reconstruction curve Case 1 (L0H0)
 (d) Reconstruction curve Case 2 (L1H18)
-(e) Pearson correlation histogram
 """
 from __future__ import annotations
 
@@ -18,7 +17,6 @@ from typing import List, Tuple
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
 import numpy as np
 import torch
 from scipy import stats
@@ -244,7 +242,7 @@ def compute_reconstruction_data(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate Introduction figure with 5 subplots")
+    parser = argparse.ArgumentParser(description="Generate Introduction figure with 4 subplots")
     parser.add_argument(
         "--trace-dirs",
         type=Path,
@@ -261,12 +259,6 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B"),
         help="Model directory for RoPE parameters",
-    )
-    parser.add_argument(
-        "--results-json",
-        type=Path,
-        default=Path("paper_visualizations/outputs/freq_magnitude_v2/full_model_correlation_results.json"),
-        help="Path to correlation results JSON for subplot (e)",
     )
     parser.add_argument("--device", default="cuda:0", help="Computation device")
     parser.add_argument("--dpi", type=int, default=200, help="DPI for saved figure")
@@ -422,21 +414,12 @@ def main() -> None:
     )
     print(f"  Pearson r = {recon_d['per_query_pearson']:.4f}")
 
-    # ========== Subplot (e): Pearson histogram ==========
-    print("\n=== Subplot (e): Pearson Histogram ===")
-    if not args.results_json.exists():
-        raise FileNotFoundError(f"Results JSON not found: {args.results_json}")
-
-    with open(args.results_json) as f:
-        results = json.load(f)
-
-    all_pearson = np.array([r['ind_pearson'] for r in results])
-    print(f"  {len(all_pearson)} heads, mean={all_pearson.mean():.4f}, std={all_pearson.std():.4f}")
 
     # ========== Create Figure ==========
     print("\n=== Creating figure ===")
-    fig = plt.figure(figsize=(20, 4), dpi=args.dpi)
-    gs = GridSpec(1, 5, figure=fig, wspace=0.28)
+    # Each subplot is a square, same size (4 subplots)
+    fig, axes = plt.subplots(1, 4, figsize=(16, 4), dpi=args.dpi)
+    plt.subplots_adjust(wspace=0.18, left=0.04, right=0.98, top=0.88, bottom=0.14)
 
     plt.rcParams.update({
         'font.size': FONT_SIZE,
@@ -445,7 +428,7 @@ def main() -> None:
     })
 
     # ========== (a) Q/K Scatter ==========
-    ax_a = fig.add_subplot(gs[0, 0])
+    ax_a = axes[0]
     style_ax(ax_a)
 
     ax_a.scatter(all_q_real, all_q_imag, s=6, alpha=0.25, color=color_q, edgecolors="none", label="Q")
@@ -454,9 +437,9 @@ def main() -> None:
     ax_a.axvline(0.0, color="gray", linewidth=0.8, alpha=0.4)
     ax_a.set_xlim(-1.15, 1.15)
     ax_a.set_ylim(-1.15, 1.15)
-    ax_a.set_aspect("equal", adjustable="box")
-    ax_a.set_xticks([-1, 0, 1])
-    ax_a.set_yticks([-1, 0, 1])
+    ax_a.set_box_aspect(1)
+    ax_a.set_xticks([-1, -0.5, 0, 0.5, 1])
+    ax_a.set_yticks([-1, -0.5, 0, 0.5, 1])
     ax_a.text(0.95, 0.95, f"$R_Q$={mean_R_q:.2f}\n$R_K$={mean_R_k:.2f}",
               transform=ax_a.transAxes, fontsize=FONT_SIZE, ha='right', va='top')
     leg = ax_a.legend(loc="lower left", fontsize=FONT_SIZE, frameon=False, markerscale=2.5, handletextpad=0.2)
@@ -465,78 +448,69 @@ def main() -> None:
     ax_a.text(-0.15, 1.02, '(a)', transform=ax_a.transAxes, fontsize=LABEL_FONT_SIZE, fontweight='bold', va='bottom')
 
     # ========== (b) R Histogram ==========
-    ax_b = fig.add_subplot(gs[0, 1])
+    ax_b = axes[1]
     style_ax(ax_b)
 
-    bin_edges = np.linspace(0.5, 1.0, 21)
+    # Use 0.05 bin width like reference (0.5-1.0 range = 10 bins)
+    bin_edges = np.arange(0.5, 1.025, 0.05)
     ax_b.hist([r_q_values, r_k_values], bins=bin_edges,
               color=[color_q, color_k], label=['Q', 'K'],
-              alpha=0.85, edgecolor='white', linewidth=0.5)
+              alpha=0.85, edgecolor='white', linewidth=0.8)
     ax_b.set_xlabel("R", fontsize=FONT_SIZE)
-    ax_b.set_ylabel("Count", fontsize=FONT_SIZE)
+    ax_b.set_ylabel("Count", fontsize=FONT_SIZE, labelpad=2)
+    ax_b.set_box_aspect(1)
+    ax_b.set_xlim(0.45, 1.05)
+    ax_b.set_xticks([0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
+    ax_b.set_yticks([0, 200, 400, 600, 800, 1000])
     ax_b.legend(frameon=False, fontsize=FONT_SIZE, loc='upper left')
     ax_b.text(-0.12, 1.02, '(b)', transform=ax_b.transAxes, fontsize=LABEL_FONT_SIZE, fontweight='bold', va='bottom')
 
     # ========== (c) Reconstruction L0H0 ==========
-    ax_c = fig.add_subplot(gs[0, 2])
+    ax_c = axes[2]
     style_ax(ax_c)
 
     ax_c.fill_between(recon_c['sample_distances'],
                       recon_c['gt_means'] - recon_c['gt_stds'],
                       recon_c['gt_means'] + recon_c['gt_stds'],
-                      color=color_k, alpha=0.25, linewidth=0, label='GT Band')
+                      color=color_k, alpha=0.25, linewidth=0)
     ax_c.plot(recon_c['distances'], recon_c['gt_scores'],
-              color=color_k, linestyle='--', linewidth=2, alpha=0.9, label='GT Mean')
+              color=color_k, linestyle='--', linewidth=2.5, alpha=0.9, label='Ground Truth')
     ax_c.plot(recon_c['distances'], recon_c['reconstructed'],
-              color=color_q, linestyle=':', linewidth=2, alpha=0.9, label='Recon')
+              color=color_q, linestyle=':', linewidth=2.5, alpha=0.9, label='Trig. Recon.')
     ax_c.set_xscale('log')
-    ax_c.set_xlabel(r'$\Delta$', fontsize=FONT_SIZE)
-    ax_c.set_ylabel(r'$\langle q, k \rangle$', fontsize=FONT_SIZE)
-    ax_c.legend(frameon=False, fontsize=FONT_SIZE - 2, loc='upper right')
-    ax_c.text(0.03, 0.03, f"$\\bar{{r}}$={recon_c['per_query_pearson']:.2f}",
-              transform=ax_c.transAxes, fontsize=FONT_SIZE,
-              va='bottom', ha='left',
-              bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8, edgecolor='none'))
+    ax_c.set_xlim(1, 5000)
+    ax_c.set_xticks([1, 10, 100, 1000, 5000])
+    ax_c.set_xticklabels(['1', '10', '100', '1k', '5k'])
+    ax_c.set_xlabel(r'Query-Key Distance $\Delta$', fontsize=FONT_SIZE)
+    ax_c.set_ylabel('Attention Logit', fontsize=FONT_SIZE, labelpad=2)
+    ax_c.set_box_aspect(1)
+    ax_c.set_yticks([0, 25, 50, 75, 100, 125])
+    ax_c.legend(frameon=False, fontsize=FONT_SIZE - 2, loc='lower left')
     ax_c.text(-0.12, 1.02, '(c)', transform=ax_c.transAxes, fontsize=LABEL_FONT_SIZE, fontweight='bold', va='bottom')
 
     # ========== (d) Reconstruction L1H18 ==========
-    ax_d = fig.add_subplot(gs[0, 3])
+    ax_d = axes[3]
     style_ax(ax_d)
 
     ax_d.fill_between(recon_d['sample_distances'],
                       recon_d['gt_means'] - recon_d['gt_stds'],
                       recon_d['gt_means'] + recon_d['gt_stds'],
-                      color=color_k, alpha=0.25, linewidth=0, label='GT Band')
+                      color=color_k, alpha=0.25, linewidth=0)
     ax_d.plot(recon_d['distances'], recon_d['gt_scores'],
-              color=color_k, linestyle='--', linewidth=2, alpha=0.9, label='GT Mean')
+              color=color_k, linestyle='--', linewidth=2.5, alpha=0.9, label='Ground Truth')
     ax_d.plot(recon_d['distances'], recon_d['reconstructed'],
-              color=color_q, linestyle=':', linewidth=2, alpha=0.9, label='Recon')
+              color=color_q, linestyle=':', linewidth=2.5, alpha=0.9, label='Trig. Recon.')
     ax_d.set_xscale('log')
-    ax_d.set_xlabel(r'$\Delta$', fontsize=FONT_SIZE)
-    ax_d.set_ylabel(r'$\langle q, k \rangle$', fontsize=FONT_SIZE)
-    ax_d.legend(frameon=False, fontsize=FONT_SIZE - 2, loc='upper right')
-    ax_d.text(0.03, 0.03, f"$\\bar{{r}}$={recon_d['per_query_pearson']:.2f}",
-              transform=ax_d.transAxes, fontsize=FONT_SIZE,
-              va='bottom', ha='left',
-              bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8, edgecolor='none'))
+    ax_d.set_xlim(1, 5000)
+    ax_d.set_xticks([1, 10, 100, 1000, 5000])
+    ax_d.set_xticklabels(['1', '10', '100', '1k', '5k'])
+    ax_d.set_xlabel(r'Query-Key Distance $\Delta$', fontsize=FONT_SIZE)
+    ax_d.set_ylabel('Attention Logit', fontsize=FONT_SIZE, labelpad=2)
+    ax_d.set_box_aspect(1)
+    ax_d.set_yticks([0, 20, 40, 60, 80, 100])
+    ax_d.legend(frameon=False, fontsize=FONT_SIZE - 2, loc='lower left')
     ax_d.text(-0.12, 1.02, '(d)', transform=ax_d.transAxes, fontsize=LABEL_FONT_SIZE, fontweight='bold', va='bottom')
 
-    # ========== (e) Pearson Histogram ==========
-    ax_e = fig.add_subplot(gs[0, 4])
-    style_ax(ax_e)
-
-    bin_edges_e = np.arange(-0.2, 1.025, 0.05)
-    ax_e.hist(all_pearson, bins=bin_edges_e, color=color_q, alpha=0.85, edgecolor='white', linewidth=0.5)
-    ax_e.axvline(all_pearson.mean(), color=color_mean, linestyle='--', linewidth=2.5,
-                 label=f'Mean={all_pearson.mean():.2f}')
-    ax_e.set_xlabel('Pearson $\\bar{r}$', fontsize=FONT_SIZE)
-    ax_e.set_ylabel('Count', fontsize=FONT_SIZE)
-    ax_e.legend(frameon=False, fontsize=FONT_SIZE, loc='upper left')
-    ax_e.set_xticks(np.arange(0, 1.1, 0.2))
-    ax_e.set_xlim(-0.25, 1.05)
-    ax_e.text(-0.12, 1.02, '(e)', transform=ax_e.transAxes, fontsize=LABEL_FONT_SIZE, fontweight='bold', va='bottom')
-
-    plt.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=args.dpi, bbox_inches='tight')
     plt.close(fig)
