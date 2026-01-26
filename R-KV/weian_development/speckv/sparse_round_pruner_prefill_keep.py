@@ -61,6 +61,8 @@ class SparsePruningConfig:
     disable_top_n_high_freq: int = 0
     # Disable MLR term in extra computation
     disable_mlr: bool = False
+    # Disable position-dependent term (base_scores) in SpeckV scoring
+    disable_trig: bool = False
     # Bug 896cbca6 phase offset simulation: simulate the phase offset caused by the bug
     # When 0 (default): no phase offset applied
     # When > 0: subtract N×ω from phase to simulate bug behavior (Δ ≈ 156 tokens average)
@@ -179,6 +181,8 @@ class SparseRoundPruner:
         self.disable_top_n_high_freq = int(getattr(config, "disable_top_n_high_freq", 0))
         # Disable MLR term in extra computation
         self.disable_mlr = bool(getattr(config, "disable_mlr", False))
+        # Disable position-dependent term in SpeckV scoring
+        self.disable_trig = bool(getattr(config, "disable_trig", False))
         # Bug 896cbca6 phase offset simulation
         self.simulate_bug_phase_offset = int(getattr(config, "simulate_bug_phase_offset", 0))
         self.generator: torch.Generator | None = None
@@ -556,6 +560,7 @@ class SparseRoundPruner:
                 freq_scale_sq=self.freq_scale_sq,
                 disable_top_n_high_freq=self.disable_top_n_high_freq,
                 simulate_bug_phase_offset=self.simulate_bug_phase_offset,
+                disable_trig=self.disable_trig,
             )
             per_head_scores.append(head_scores)
 

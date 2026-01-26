@@ -480,6 +480,12 @@ def parse_arguments() -> argparse.Namespace:
         default=False,
         help="Disable MLR term in SpeckV extra computation (use q_abs_mean directly).",
     )
+    parser.add_argument(
+        "--disable_trig",
+        type=str2bool,
+        default=False,
+        help="Disable position-dependent term in SpeckV scoring (use additive term only).",
+    )
     # Note: --divide_length is already defined above (line 238) for R-KV, reused for SpeckV alignment
     return parser.parse_args()
 
@@ -692,6 +698,7 @@ def main(args: argparse.Namespace) -> None:
                 per_layer_aggregation=args.per_layer_aggregation,
                 disable_top_n_high_freq=args.disable_top_n_high_freq,
                 disable_mlr=args.disable_mlr,
+                disable_trig=args.disable_trig,
             )
         else:
             # Use original generate wrapper implementation
@@ -718,6 +725,7 @@ def main(args: argparse.Namespace) -> None:
                 allow_prefill_compression=args.allow_prefill_compression,
                 disable_top_n_high_freq=args.disable_top_n_high_freq,
                 disable_mlr=args.disable_mlr,
+                disable_trig=args.disable_trig,
                 simulate_bug_phase_offset=args.simulate_bug_phase_offset,
                 simulate_attention_position_offset=args.simulate_attention_position_offset,
             )

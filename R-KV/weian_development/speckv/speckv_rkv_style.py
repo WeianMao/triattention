@@ -58,6 +58,7 @@ class SpeckVRKVStyleConfig:
     per_layer_aggregation: str = "max"  # Aggregation method for per_layer_pruning: "max" or "mean"
     disable_top_n_high_freq: int = 0  # Mask top-n high-frequency components in position-dependent scoring
     disable_mlr: bool = False  # If True, use q_abs_mean directly for extra term
+    disable_trig: bool = False  # If True, drop position-dependent term (base_scores)
 
 
 class SpeckVRKVStyle:
@@ -166,6 +167,7 @@ class SpeckVRKVStyle:
         self.per_layer_pruning = config.per_layer_pruning
         self.disable_top_n_high_freq = config.disable_top_n_high_freq
         self.disable_mlr = config.disable_mlr
+        self.disable_trig = config.disable_trig
         self.allow_prefill_compression = config.allow_prefill_compression
 
         # Random generator
@@ -806,6 +808,7 @@ class SpeckVRKVStyle:
                 aggregation=self.score_aggregation,
                 freq_scale_sq=self.freq_scale_sq,
                 disable_top_n_high_freq=self.disable_top_n_high_freq,
+                disable_trig=self.disable_trig,
             )
             per_head_scores.append(head_scores)
 
@@ -857,6 +860,7 @@ def apply_speckv_rkv_style_patch(
     per_layer_aggregation: str = "max",
     disable_top_n_high_freq: int = 0,
     disable_mlr: bool = False,
+    disable_trig: bool = False,
 ) -> None:
     """
     Apply SpeckV with R-KV style compression triggering.
@@ -891,6 +895,7 @@ def apply_speckv_rkv_style_patch(
         per_layer_aggregation=per_layer_aggregation,
         disable_top_n_high_freq=disable_top_n_high_freq,
         disable_mlr=disable_mlr,
+        disable_trig=disable_trig,
     )
 
     compressor = SpeckVRKVStyle(config)

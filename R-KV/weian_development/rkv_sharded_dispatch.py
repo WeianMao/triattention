@@ -299,6 +299,19 @@ def parse_args() -> argparse.Namespace:
         help="Override runner arg: enable MLR term in SpeckV extra computation (default).",
     )
     parser.set_defaults(disable_mlr=None)
+    parser.add_argument(
+        "--disable-trig",
+        dest="disable_trig",
+        action="store_true",
+        help="Override runner arg: disable position-dependent term in SpeckV scoring.",
+    )
+    parser.add_argument(
+        "--no-disable-trig",
+        dest="disable_trig",
+        action="store_false",
+        help="Override runner arg: enable position-dependent term in SpeckV scoring (default).",
+    )
+    parser.set_defaults(disable_trig=None)
     return parser.parse_args()
 
 
@@ -692,6 +705,8 @@ def main() -> None:
         runner_args["disable_top_n_high_freq"] = args.disable_top_n_high_freq
     if args.disable_mlr is not None:
         runner_args["disable_mlr"] = args.disable_mlr
+    if args.disable_trig is not None:
+        runner_args["disable_trig"] = args.disable_trig
     if args.attn_implementation is not None:
         runner_args["attn_implementation"] = args.attn_implementation
     if args.simulate_bug_phase_offset is not None:

@@ -286,6 +286,7 @@ def score_keys_for_round(
     freq_scale_sq: torch.Tensor,
     disable_top_n_high_freq: int = 0,
     simulate_bug_phase_offset: int = 0,
+    disable_trig: bool = False,
 ) -> torch.Tensor:
     if key_indices.numel() == 0:
         return torch.empty(0, device=amp.device, dtype=torch.float32)
@@ -314,7 +315,7 @@ def score_keys_for_round(
     base_scores = (amp.unsqueeze(1) * scale * cos_phase).sum(dim=2)
     # additive term uses original freq_scale_sq (not affected by high-freq masking)
     additive = (extra * freq_scale_sq.view(1, -1)).sum(dim=1, keepdim=True)
-    combined = base_scores + additive
+    combined = additive if disable_trig else (base_scores + additive)
 
     if aggregation == "mean":
         return combined.mean(dim=1)
