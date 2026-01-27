@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -70,13 +71,15 @@ def load_runner_defaults() -> dict:
 def load_extra_config(extra_paths: List[Path] | None) -> dict:
     if not extra_paths:
         return {}
-    merged = {"experiment": {}, "runner_args": {}}
+    merged = {"experiment": {}, "runner_args": {}, "run_tag": None}
     for path in extra_paths:
         data = load_yaml(path)
         if not data:
             continue
         if not isinstance(data, dict):
             raise ValueError(f"extra config must be a mapping: {path}")
+        if "run_tag" in data:
+            merged["run_tag"] = data.get("run_tag")
         if "experiment" in data or "runner_args" in data:
             experiment = data.get("experiment", {}) or {}
             runner_args = data.get("runner_args", {}) or {}
@@ -85,8 +88,10 @@ def load_extra_config(extra_paths: List[Path] | None) -> dict:
             merged["experiment"].update(experiment)
             merged["runner_args"].update(runner_args)
         else:
-            merged["runner_args"].update(data)
-    if not merged["experiment"] and not merged["runner_args"]:
+            runner_args = dict(data)
+            runner_args.pop("run_tag", None)
+            merged["runner_args"].update(runner_args)
+    if not merged["experiment"] and not merged["runner_args"] and merged["run_tag"] is None:
         return {}
     return merged
 
@@ -130,12 +135,19 @@ def resolve_model_path(model_name: str) -> Path:
     return MODELS_DIR / model_name
 
 
-def stats_path_for(dataset: str, model_name: str, budget: int) -> Path:
+def stats_path_for(
+    dataset: str,
+    model_name: str,
+    budget: int,
+    *,
+    announce: bool = True,
+) -> Path:
     # Keep stats dataset distinct from evaluation dataset.
     stats_dataset = "aime25" if dataset == "aime24" else "aime24"
-    sys.stderr.write(
-        f"[info] speckv stats dataset: eval={dataset} stats={stats_dataset}\n"
-    )
+    if announce:
+        sys.stderr.write(
+            f"[info] speckv stats dataset: eval={dataset} stats={stats_dataset}\n"
+        )
     return STATS_DIR / stats_dataset / model_name / f"stats_budget_{budget}.pt"
 
 
@@ -161,10 +173,64 @@ def resolve_num_samples(runner_args: dict, dataset: str | None = None) -> int:
 def sample_tag(num_samples: int) -> str:
     return f"sample{num_samples}"
 
+def sanitize_tag(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-")
+    if not cleaned:
+        return "custom"
+    return cleaned[:64]
 
-def config_output_path(dataset: str, model_name: str, mode: str, budget: int | None) -> Path:
+def tag_with_suffix(tag: str, suffix: str | None) -> str:
+    if not suffix:
+        return tag
+    return f"{tag}_{sanitize_tag(suffix)}"
+
+
+def resolve_stats_path(value: str) -> Path:
+    expanded = os.path.expandvars(str(value))
+    if "$" in expanded:
+        raise ValueError(f"Unresolved environment variable in stats path: {value}")
+    path = Path(expanded).expanduser()
+    if not path.is_absolute():
+        path = (EXP_ROOT / path).resolve()
+    return path
+
+
+def resolve_stats_override(
+    extra_config: dict | None,
+    stats_path_arg: str | None,
+) -> Path | None:
+    if stats_path_arg:
+        return resolve_stats_path(stats_path_arg)
+    if not extra_config:
+        return None
+    runner_args = extra_config.get("runner_args", {})
+    if not isinstance(runner_args, dict):
+        return None
+    value = runner_args.get("sparse_stats_path")
+    if not value:
+        return None
+    return resolve_stats_path(str(value))
+
+def resolve_run_tag(extra_config: dict | None, run_tag_arg: str | None) -> str | None:
+    if run_tag_arg:
+        return sanitize_tag(str(run_tag_arg))
+    if not extra_config:
+        return None
+    value = extra_config.get("run_tag")
+    if value is None:
+        return None
+    return sanitize_tag(str(value))
+
+
+def config_output_path(
+    dataset: str,
+    model_name: str,
+    mode: str,
+    budget: int | None,
+    run_tag: str | None,
+) -> Path:
     slug = model_name.lower().replace("/", "-").replace(" ", "-")
-    tag = budget_tag(mode, budget)
+    tag = tag_with_suffix(budget_tag(mode, budget), run_tag)
     return EXP_ROOT / "configs" / "generated" / dataset / slug / f"{mode}_{tag}.yaml"
 
 
@@ -182,10 +248,11 @@ def build_config(
     mode: str,
     budget: int | None,
     stats_path: Path | None,
+    run_tag: str | None,
     defaults: dict,
     extra_config: dict | None,
 ) -> dict:
-    tag = budget_tag(mode, budget)
+    tag = tag_with_suffix(budget_tag(mode, budget), run_tag)
     exp_defaults = defaults.get("experiment", {})
     runner_defaults = defaults.get("runner_args", {})
     num_samples = resolve_num_samples(runner_defaults, dataset)
@@ -308,6 +375,8 @@ def run_one(
     budget: int | None,
     *,
     require_stats: bool,
+    stats_path_arg: str | None,
+    run_tag: str | None,
     defaults: dict,
     extra_config: dict | None,
     dry_run: bool,
@@ -318,15 +387,19 @@ def run_one(
     runner_defaults = defaults.get("runner_args", {})
     num_samples = resolve_num_samples(runner_defaults, dataset)
     sample_dir = sample_tag(num_samples)
-    log_dir = LOGS_DIR / dataset / model_name / sample_dir / mode / tag
-    output_dir = OUTPUTS_DIR / dataset / model_name / sample_dir / mode / tag
+    resolved_run_tag = resolve_run_tag(extra_config, run_tag)
 
     stats_path = None
     if mode == "speckv":
         if budget is None:
             raise ValueError("budget is required for speckv runs")
-        stats_path = stats_path_for(dataset, model_name, budget)
-        if require_stats and not stats_path.exists():
+        stats_override = resolve_stats_override(extra_config, stats_path_arg)
+        if stats_override is None:
+            stats_path = stats_path_for(dataset, model_name, budget)
+        else:
+            stats_path = stats_override
+            sys.stderr.write(f"[info] speckv stats override: {stats_path}\n")
+        if require_stats and stats_path and not stats_path.exists():
             if dry_run:
                 print(
                     f"[dry-run] missing stats for {dataset}/{model_name}/budget {budget}: {stats_path}",
@@ -338,7 +411,11 @@ def run_one(
                     f"Run scripts/build_all_stats_v2.sh first."
                 )
 
-    config_path = config_output_path(dataset, model_name, mode, budget)
+    tag = tag_with_suffix(tag, resolved_run_tag)
+    log_dir = LOGS_DIR / dataset / model_name / sample_dir / mode / tag
+    output_dir = OUTPUTS_DIR / dataset / model_name / sample_dir / mode / tag
+
+    config_path = config_output_path(dataset, model_name, mode, budget, resolved_run_tag)
     config = build_config(
         dataset,
         dataset_path,
@@ -347,6 +424,7 @@ def run_one(
         mode,
         budget,
         stats_path,
+        run_tag,
         defaults,
         extra_config,
     )
@@ -367,6 +445,8 @@ def run_defaults(dry_run: bool) -> None:
                 "fullkv",
                 None,
                 require_stats=False,
+                stats_path_arg=None,
+                run_tag=None,
                 defaults=defaults,
                 extra_config=None,
                 dry_run=dry_run,
@@ -377,6 +457,8 @@ def run_defaults(dry_run: bool) -> None:
                 "rkv",
                 default_budget,
                 require_stats=False,
+                stats_path_arg=None,
+                run_tag=None,
                 defaults=defaults,
                 extra_config=None,
                 dry_run=dry_run,
@@ -387,6 +469,8 @@ def run_defaults(dry_run: bool) -> None:
                 "speckv",
                 default_budget,
                 require_stats=True,
+                stats_path_arg=None,
+                run_tag=None,
                 defaults=defaults,
                 extra_config=None,
                 dry_run=dry_run,
@@ -405,6 +489,8 @@ def run_sweep(dry_run: bool) -> None:
                     "rkv",
                     budget,
                     require_stats=False,
+                    stats_path_arg=None,
+                    run_tag=None,
                     defaults=defaults,
                     extra_config=None,
                     dry_run=dry_run,
@@ -416,6 +502,8 @@ def run_sweep(dry_run: bool) -> None:
                     "speckv",
                     budget,
                     require_stats=True,
+                    stats_path_arg=None,
+                    run_tag=None,
                     defaults=defaults,
                     extra_config=None,
                     dry_run=dry_run,
@@ -630,6 +718,16 @@ def parse_args() -> argparse.Namespace:
     run_one_parser.add_argument("--method", required=True, choices=MODES)
     run_one_parser.add_argument("--budget", type=int, default=None)
     run_one_parser.add_argument(
+        "--stats-path",
+        default=None,
+        help="Override SpeckV stats path (supports env vars).",
+    )
+    run_one_parser.add_argument(
+        "--run-tag",
+        default=None,
+        help="Optional suffix for output/log/config dirs to avoid collisions.",
+    )
+    run_one_parser.add_argument(
         "--extra-config",
         action="append",
         default=None,
@@ -670,6 +768,8 @@ def main() -> None:
             args.method,
             budget,
             require_stats=(args.method == "speckv"),
+            stats_path_arg=args.stats_path,
+            run_tag=args.run_tag,
             defaults=defaults,
             extra_config=extra_config,
             dry_run=args.dry_run,
