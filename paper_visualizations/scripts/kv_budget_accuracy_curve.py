@@ -1,7 +1,7 @@
 """Generate KV Cache budget vs accuracy curves for different compression methods.
 
 This script generates accuracy curves comparing different KV Cache compression methods
-(FullKV, R-KV, SpecKV) across different budget levels for Qwen3-8B model.
+(FullKV, R-KV, TriAttention) across different budget levels for Qwen3-8B model.
 
 Output: Combined figure with 3 panels (A, B, C) for MATH, AIME24, AIME25
 """
@@ -13,6 +13,11 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+# Force Times New Roman font for all text
+plt.rcParams['font.family'] = 'serif'
+plt.rcParams['font.serif'] = ['Times New Roman']
+plt.rcParams['mathtext.fontset'] = 'stix'  # STIX fonts match Times New Roman for math
 from matplotlib.gridspec import GridSpec
 import pandas as pd
 import numpy as np
@@ -60,7 +65,9 @@ def load_and_filter_data(csv_path: Path) -> pd.DataFrame:
 
 def get_method_data(df: pd.DataFrame, benchmark: str, method: str) -> tuple[list, list]:
     """Extract budget and accuracy data for a specific method."""
-    row = df[(df['Benchmark'] == benchmark) & (df['Method'] == method)]
+    # Map display name to CSV method name
+    csv_method = 'SpecKV' if method == 'TriAttention' else method
+    row = df[(df['Benchmark'] == benchmark) & (df['Method'] == csv_method)]
     if row.empty:
         return [], []
 
@@ -105,7 +112,7 @@ def plot_benchmark(df: pd.DataFrame, benchmark: str, output_path: Path, dpi: int
     colors = {
         'FullKV': '#E24A33',      # Red (baseline)
         'R-KV': (85/250, 104/250, 154/250),    # Blue
-        'SpecKV': (46/250, 139/250, 87/250),   # Green
+        'TriAttention': (46/250, 139/250, 87/250),   # Green
         'SnapKV': (187/250, 130/250, 90/250),  # Orange/brown
     }
 
@@ -113,7 +120,7 @@ def plot_benchmark(df: pd.DataFrame, benchmark: str, output_path: Path, dpi: int
     linestyles = {
         'FullKV': '--',   # Dashed for baseline
         'R-KV': '-',
-        'SpecKV': '-',
+        'TriAttention': '-',
         'SnapKV': '-',
     }
 
@@ -121,7 +128,7 @@ def plot_benchmark(df: pd.DataFrame, benchmark: str, output_path: Path, dpi: int
     markers = {
         'FullKV': '',      # No marker for baseline
         'R-KV': 'o',
-        'SpecKV': 's',
+        'TriAttention': 's',
         'SnapKV': '^',
     }
 
@@ -129,7 +136,7 @@ def plot_benchmark(df: pd.DataFrame, benchmark: str, output_path: Path, dpi: int
     style_ax(ax, face_color)
 
     # Methods to plot (in order)
-    methods = ['FullKV', 'R-KV', 'SpecKV', 'SnapKV']
+    methods = ['FullKV', 'R-KV', 'TriAttention', 'SnapKV']
 
     plotted_methods = []
 
@@ -192,20 +199,20 @@ def plot_combined(df: pd.DataFrame, output_path: Path, dpi: int) -> None:
     FONT_SIZE = 16
     TICK_SIZE = 14
     LABEL_FONT_SIZE = 22
-    LABEL_FONT = 'DejaVu Sans'
+    LABEL_FONT = 'Times New Roman'
 
     # Color scheme for methods
     colors = {
         'FullKV': '#E24A33',      # Red (baseline)
         'R-KV': (85/250, 104/250, 154/250),    # Blue
-        'SpecKV': (46/250, 139/250, 87/250),   # Green
+        'TriAttention': (46/250, 139/250, 87/250),   # Green
         'SnapKV': (187/250, 130/250, 90/250),  # Orange/brown
     }
 
     # Markers
     markers = {
         'R-KV': 'o',
-        'SpecKV': 's',
+        'TriAttention': 's',
         'SnapKV': '^',
     }
 
@@ -221,15 +228,16 @@ def plot_combined(df: pd.DataFrame, output_path: Path, dpi: int) -> None:
     fig = plt.figure(figsize=(12, 4.5), dpi=dpi, constrained_layout=True)
     gs = GridSpec(1, 3, figure=fig, wspace=0.05)
 
-    benchmarks = ['MATH', 'AIME24', 'AIME25']
+    benchmarks = ['MATH', 'AIME24', 'AIME25']  # CSV column names
+    display_titles = ['MATH500', 'AIME24', 'AIME25']  # Display titles
     panel_labels = ['(A)', '(B)', '(C)']
 
-    for idx, (benchmark, label) in enumerate(zip(benchmarks, panel_labels)):
+    for idx, (benchmark, title, label) in enumerate(zip(benchmarks, display_titles, panel_labels)):
         ax = fig.add_subplot(gs[0, idx])
         ax.set_box_aspect(1)  # Force square subplot
         style_ax_combined(ax)
 
-        methods = ['FullKV', 'R-KV', 'SpecKV', 'SnapKV']
+        methods = ['FullKV', 'R-KV', 'TriAttention', 'SnapKV']
 
         for method in methods:
             budgets, accuracies = get_method_data(df, benchmark, method)
@@ -261,8 +269,8 @@ def plot_combined(df: pd.DataFrame, output_path: Path, dpi: int) -> None:
         if idx == 0:
             ax.set_ylabel('Accuracy (%)', fontsize=FONT_SIZE)
 
-        # Title as benchmark name
-        ax.set_title(benchmark, fontsize=FONT_SIZE + 2, fontweight='bold', pad=10)
+        # Title as display name
+        ax.set_title(title, fontsize=FONT_SIZE + 2, fontweight='bold', pad=10)
 
         # X-axis ticks
         all_budgets = [512, 1024, 2048, 3072, 4096]
