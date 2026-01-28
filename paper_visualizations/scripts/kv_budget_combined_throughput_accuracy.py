@@ -103,7 +103,7 @@ def main() -> None:
 
     # FullKV horizontal line
     ax1.axhline(y=throughput_fullkv, color=colors['FullKV'], linestyle='--',
-                linewidth=2.5, label='FullKV', alpha=0.9)
+                linewidth=2.5, label='Full Attention', alpha=0.9)
 
     # R-KV
     ax1.plot(throughput_rkv_budgets, throughput_rkv,
@@ -134,7 +134,7 @@ def main() -> None:
 
     # FullKV horizontal line
     ax2.axhline(y=accuracy_fullkv, color=colors['FullKV'], linestyle='--',
-                linewidth=2.5, label='FullKV', alpha=0.9)
+                linewidth=2.5, label='Full Attention', alpha=0.9)
 
     # R-KV
     ax2.plot(accuracy_rkv_budgets, accuracy_rkv,
