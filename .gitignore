@@ -40,6 +40,7 @@ R-KV/logs/
 post_rope_nms_viz/
 
 R-KV/speckv_experiments/configs/generated/
+R-KV/speckv_experiments/models/
 prompt.txt
 
 # Paper visualization outputs (images)

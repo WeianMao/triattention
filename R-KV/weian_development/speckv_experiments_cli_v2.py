@@ -424,7 +424,7 @@ def run_one(
         mode,
         budget,
         stats_path,
-        run_tag,
+        resolved_run_tag,
         defaults,
         extra_config,
     )
