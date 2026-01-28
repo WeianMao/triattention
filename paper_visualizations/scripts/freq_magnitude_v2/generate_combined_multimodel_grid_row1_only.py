@@ -1,13 +1,12 @@
-"""Generate combined 2x3 grid figure showing Panel B and Panel C for three models.
+"""Generate combined 1x3 grid figure showing only Panel A (histograms) for three models.
 
 Layout:
-- Row 1 (A): Histograms of Pearson correlation for all heads
-- Row 2 (B): Per-layer percentage of heads with r > threshold
+- Row 1: Histograms of Pearson correlation for all heads
 - Columns: Qwen3-8B, Qwen2-7B, Llama-8B
 
 Usage:
     conda activate rkv
-    python paper_visualizations/scripts/freq_magnitude_v2/generate_combined_multimodel_grid.py --gpu 0
+    python paper_visualizations/scripts/freq_magnitude_v2/generate_combined_multimodel_grid_row1_only.py --gpu 0
 """
 from __future__ import annotations
 
@@ -289,7 +288,7 @@ def load_model_data(model_cfg: ModelConfig, device: torch.device, threshold: flo
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate combined 2x3 grid figure for three models"
+        description="Generate combined 1x3 grid figure (histograms only) for three models"
     )
     parser.add_argument("--gpu", type=int, default=0, help="GPU device index")
     parser.add_argument("--threshold", type=float, default=0.55, help="Correlation threshold")
@@ -298,7 +297,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-path",
         type=Path,
-        default=ROOT / "paper_visualizations/outputs/freq_magnitude_v2/fig_freq_reconstruction_multimodel_grid.png",
+        default=ROOT / "paper_visualizations/outputs/freq_magnitude_v2/fig_freq_reconstruction_multimodel_row1_only.png",
         help="Output path for the figure",
     )
     parser.add_argument(
@@ -383,18 +382,15 @@ def main() -> None:
 
     # ========== Plotting ==========
     print("\n" + "=" * 60)
-    print("Generating combined figure...")
+    print("Generating combined figure (Row 1 only)...")
     print("=" * 60)
 
     # Colors
     color_recon = (85 / 250, 104 / 250, 154 / 250)
-    color_bar = (187 / 250, 130 / 250, 90 / 250)
     face_color = (231 / 250, 231 / 250, 240 / 250)
 
     FONT_SIZE = 12
-    LABEL_FONT_SIZE = 16
     TITLE_FONT_SIZE = 14
-    LABEL_FONT = 'Times New Roman'
 
     def style_ax(ax):
         ax.set_facecolor(face_color)
@@ -404,12 +400,11 @@ def main() -> None:
         ax.set_axisbelow(True)
         ax.grid(True, axis="both", alpha=0.7, color="white", linewidth=1.5)
 
-    # Create figure with 2 rows, 3 columns
-    # Adjust to be wider (closer to 4-column ratio): increase width, reduce height
-    fig = plt.figure(figsize=(14, 5.5))
-    gs = GridSpec(2, 3, figure=fig, height_ratios=[1, 1], hspace=0.28, wspace=0.25)
+    # Create figure with 1 row, 3 columns (reduced height since only one row)
+    fig = plt.figure(figsize=(14, 3.0))
+    gs = GridSpec(1, 3, figure=fig, wspace=0.25)
 
-    # Row 1: Histograms (Panel B from original) - using percentage on y-axis
+    # Row 1: Histograms - using percentage on y-axis (no panel label)
     for col, data in enumerate(model_data_list):
         ax = fig.add_subplot(gs[0, col])
         style_ax(ax)
@@ -430,44 +425,6 @@ def main() -> None:
 
         # Column title (model name) - bold
         ax.set_title(data['name'], fontsize=TITLE_FONT_SIZE, fontweight='bold', pad=10)
-
-        # Row label (A) only on first column
-        if col == 0:
-            ax.text(-0.22, 1.08, '(A)', transform=ax.transAxes, fontsize=LABEL_FONT_SIZE,
-                    fontweight='bold', va='bottom', fontname=LABEL_FONT)
-
-    # Row 2: Per-layer percentage (Panel C from original) - made square-like with narrow bars
-    for col, data in enumerate(model_data_list):
-        ax = fig.add_subplot(gs[1, col])
-        style_ax(ax)
-        ax.grid(True, axis='y', alpha=0.7, color='white', linewidth=1.5)
-
-        num_layers = data['num_layers']
-        layer_above_thr_pct = data['layer_above_thr_pct']
-        layers_arr = np.arange(num_layers)
-
-        # Narrower bars with smaller gap
-        bar_width = 0.6
-        ax.bar(layers_arr, layer_above_thr_pct, color=color_bar, alpha=0.85,
-               edgecolor='white', linewidth=0.3, width=bar_width)
-
-        ax.set_xlabel('Layer Index', fontsize=FONT_SIZE)
-        if col == 0:
-            ax.set_ylabel(f'% Heads with $\\bar{{r}}$ > {args.threshold:.2f}', fontsize=FONT_SIZE)
-
-        # Adjust x-ticks based on number of layers
-        if num_layers <= 30:
-            ax.set_xticks(layers_arr[::4])
-        else:
-            ax.set_xticks(layers_arr[::5])
-
-        ax.set_ylim(0, 100)
-        ax.set_xlim(-0.5, num_layers - 0.5)
-
-        # Row label (B) only on first column
-        if col == 0:
-            ax.text(-0.22, 1.08, '(B)', transform=ax.transAxes, fontsize=LABEL_FONT_SIZE,
-                    fontweight='bold', va='bottom', fontname=LABEL_FONT)
 
     plt.tight_layout()
 

@@ -411,9 +411,6 @@ def generate_figure(
         # Remove black border
         for spine in ax_attn.spines.values():
             spine.set_visible(False)
-        # Add label inside the attention map (upper-right corner, which is empty due to causal mask)
-        ax_attn.text(0.98, 0.98, label, transform=ax_attn.transAxes,
-                     fontsize=FONT_SIZE - 2, ha='right', va='top', color='black')
 
 
     # Row 1: Scatter Plots
@@ -468,18 +465,29 @@ def generate_figure(
         x_pos = (bbox_left.x1 + bbox_right.x0) / 2
         divider_x_positions.append(x_pos)
 
+    # Add column labels (head type names) above each column
+    for col_idx, head_info in enumerate(all_heads):
+        label = head_info["label"]
+        # Get the x position from the attention map axes
+        ax_pos = fig.axes[col_idx].get_position()
+        col_center_x = (ax_pos.x0 + ax_pos.x1) / 2
+        fig.text(col_center_x, 0.94, label, ha='center', va='bottom',
+                 fontsize=FONT_SIZE - 2, fontweight='bold')
+
+    # Draw vertical dashed lines between columns
+    # Bottom aligns with scatter plots bottom, top covers column labels
     for x_pos in divider_x_positions:
-        fig.add_artist(plt.Line2D([x_pos, x_pos], [0.12, 0.88],
+        fig.add_artist(plt.Line2D([x_pos, x_pos], [0.06, 0.965],
                                    transform=fig.transFigure,
                                    color='#505050', linestyle=(0, (3, 2)), linewidth=1.2))
 
     # Add top labels: Relative-Position-Dependent (left) and Independent (right) with arrow
     from matplotlib.patches import FancyArrowPatch
 
-    # Place text at left and right edges (moved down since labels are now inside attention maps)
-    txt_left = fig.text(0.06, 0.935, "Relative-Position-Dependent", ha='left', va='bottom',
+    # Place text at left and right edges
+    txt_left = fig.text(0.06, 0.975, "Relative-Position-Dependent", ha='left', va='bottom',
                         fontsize=FONT_SIZE - 2)
-    txt_right = fig.text(0.99, 0.935, "Relative-Position-Independent", ha='right', va='bottom',
+    txt_right = fig.text(0.99, 0.975, "Relative-Position-Independent", ha='right', va='bottom',
                          fontsize=FONT_SIZE - 2)
 
     # Draw once to get text bounding boxes

@@ -44,3 +44,16 @@ prompt.txt
 
 # Paper visualization outputs (images)
 paper_visualizations/outputs/
+
+# Paper visualization materials (data files, large files)
+paper_visualizations/Materials/
+
+# Large file types
+*.zip
+*.tar.gz
+*.tar
+*.pt
+*.safetensors
+*.bin
+*.ckpt
+.DS_Store
