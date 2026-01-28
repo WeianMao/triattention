@@ -176,6 +176,25 @@ def main() -> None:
              fontname=LABEL_FONT)
     ax1.legend(frameon=False, fontsize=FONT_SIZE - 2, loc='lower left')
 
+    # --- Annotation: TriAttention at budget=3072 matches Full Attention accuracy ---
+    # TriAttention at budget=3072: throughput=563.49, accuracy=40.8
+    # Full Attention: throughput=222.76, accuracy=40.8
+    # Speedup: 563.49 / 222.76 = 2.5x
+    triatt_match_throughput = 563.49
+    speedup = triatt_match_throughput / throughput_fullkv  # 2.5x
+    # Shorten arrow to avoid overlapping with markers
+    arrow_left = throughput_fullkv * 1.08  # move right from Full Attention
+    arrow_right = triatt_match_throughput * 0.92  # move left from TriAttention
+    ax1.annotate('', xy=(arrow_right, accuracy_fullkv),
+                 xytext=(arrow_left, accuracy_fullkv),
+                 arrowprops=dict(arrowstyle='<->', color='#E24A33', lw=2.5,
+                                 mutation_scale=18))
+    # Add label below the arrow
+    mid_x = (arrow_left * arrow_right) ** 0.5  # geometric mean for log scale
+    ax1.text(mid_x, accuracy_fullkv - 2.5, f'{speedup:.1f}X Faster',
+             ha='center', va='top', fontsize=FONT_SIZE + 2, fontweight='bold',
+             color='#E24A33')
+
     # --- Panel (B): Accuracy (AIME25) with KV Memory (%) x-axis ---
     ax2 = fig.add_subplot(gs[0, 1])
     ax2.set_box_aspect(1)
@@ -219,6 +238,25 @@ def main() -> None:
              fontsize=LABEL_FONT_SIZE, fontweight='bold', va='bottom',
              fontname=LABEL_FONT)
     ax2.legend(frameon=False, fontsize=FONT_SIZE - 2, loc='lower right')
+
+    # --- Annotation: TriAttention at budget=3072 matches Full Attention accuracy ---
+    # TriAttention at budget=3072: mem_ratio=9.38%, accuracy=40.8
+    # Full Attention: mem_ratio=100%, accuracy=40.8
+    # Memory saving: 100 / 9.38 = 10.7x
+    triatt_match_mem_ratio = budget_to_memory_ratio(3072)  # 9.38%
+    mem_saving = fullkv_mem_ratio / triatt_match_mem_ratio  # 10.7x
+    # Shorten arrow to avoid overlapping with markers
+    arrow_left = triatt_match_mem_ratio * 1.15  # move right from TriAttention
+    arrow_right = fullkv_mem_ratio * 0.92  # move left from Full Attention
+    ax2.annotate('', xy=(arrow_right, accuracy_fullkv),
+                 xytext=(arrow_left, accuracy_fullkv),
+                 arrowprops=dict(arrowstyle='<->', color='#E24A33', lw=2.5,
+                                 mutation_scale=18))
+    # Add label below the arrow
+    mid_x = (arrow_left * arrow_right) ** 0.5  # geometric mean for log scale
+    ax2.text(mid_x, accuracy_fullkv - 2.5, f'{mem_saving:.1f}X Smaller',
+             ha='center', va='top', fontsize=FONT_SIZE + 2, fontweight='bold',
+             color='#E24A33')
 
     output_path = args.output_dir / "fig_kv_budget_throughput_accuracy_memratio.png"
     fig.savefig(output_path, dpi=args.dpi, bbox_inches='tight')
