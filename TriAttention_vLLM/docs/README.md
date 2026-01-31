@@ -17,9 +17,15 @@ docs/
 │   ├── data_structures.md         # 数据结构：position_indices、stats
 │   └── vllm_integration.md        # vLLM PagedAttention 集成分析
 ├── project/                       # 项目管理
+│   ├── key_decisions.md           # ⭐ 关键决策与验证结论汇总
 │   ├── roadmap.md                 # 实施路线图与开发准则
 │   ├── todo.md                    # 待办事项
 │   └── CLARIFICATIONS_NEEDED.md   # 设计问题澄清记录
+├── r-kv-analysis/                 # R-KV/vLLM 对比分析（详细）
+│   ├── README.md                  # 分析文档索引与核心结论速查
+│   ├── Q1_requirement_coverage.md # 需求覆盖对比
+│   ├── Q2_pros_cons_analysis.md   # 优缺点分析
+│   └── Q3_reusable_code.md        # 可复用代码分析
 └── archive/                       # 归档（原始文档，供参考）
 ```
 
@@ -136,19 +142,47 @@ R-KV/outputs/repository/sample8_fullkv_aime25_official_qwen/stats/
 
 ## 6. 快速导航
 
+### 核心文档（优先阅读）
+
+| 想了解... | 阅读文档 |
+|----------|---------|
+| ⭐ **关键决策与验证结论** | [project/key_decisions.md](project/key_decisions.md) |
+| 开发阶段与需求清单 | [project/key_decisions.md](project/key_decisions.md) |
+| 实施路线图和开发准则 | [project/roadmap.md](project/roadmap.md) |
+
+### 设计文档
+
 | 想了解... | 阅读文档 |
 |----------|---------|
 | 打分公式和裁剪逻辑 | [design/algorithm.md](design/algorithm.md) |
 | 计算优化（RoPE、三角表） | [design/optimization.md](design/optimization.md) |
+
+### 实现文档
+
+| 想了解... | 阅读文档 |
+|----------|---------|
 | Fill-in-Place 工作流程 | [implementation/fill_in_place.md](implementation/fill_in_place.md) |
 | position_indices 等数据结构 | [implementation/data_structures.md](implementation/data_structures.md) |
 | vLLM PagedAttention 集成 | [implementation/vllm_integration.md](implementation/vllm_integration.md) |
-| 实施路线图和开发准则 | [project/roadmap.md](project/roadmap.md) |
+
+### 项目管理
+
+| 想了解... | 阅读文档 |
+|----------|---------|
 | 待办事项 | [project/todo.md](project/todo.md) |
 | 设计问题澄清记录 | [project/CLARIFICATIONS_NEEDED.md](project/CLARIFICATIONS_NEEDED.md) |
 
+### R-KV 对比分析（详细）
+
+| 想了解... | 阅读文档 |
+|----------|---------|
+| R-KV 分析概述 | [r-kv-analysis/README.md](r-kv-analysis/README.md) |
+| 需求覆盖对比 | [r-kv-analysis/Q1_requirement_coverage.md](r-kv-analysis/Q1_requirement_coverage.md) |
+| 优缺点分析 | [r-kv-analysis/Q2_pros_cons_analysis.md](r-kv-analysis/Q2_pros_cons_analysis.md) |
+| 可复用代码分析 | [r-kv-analysis/Q3_reusable_code.md](r-kv-analysis/Q3_reusable_code.md) |
+
 ---
 
-*文档版本：3.1*
+*文档版本：4.0*
 *创建日期：2025-01-30*
-*更新日期：2025-01-31*
+*更新日期：2025-01-31（重组文档结构，添加关键决策汇总）*
