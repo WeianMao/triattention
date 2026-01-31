@@ -43,24 +43,21 @@ position = i  # 第 i 个 token 的位置就是 i
 
 | 变量 | 形状 | 数据类型 | 说明 | 必需性 |
 |-----|------|---------|------|--------|
-| `position_indices` | `[num_cached_tokens]` | bf16/int32 | 每个 KV 的原始序列位置 | **必需** |
+| `position_indices` | `[num_cached_tokens]` | int64 | 每个 KV 的原始序列位置 | **必需** |
 
 **存储方式**：与 KV cache 一起存储，每个 token 一个位置值。
 
 **数据类型选择**：
-- 支持 bf16 的 GPU（A100, H100 等）：使用 bf16
-- 不支持 bf16 的 GPU（V100 等）：回退到 int32
+- **第一阶段**：使用 `torch.long`（int64），与 R-KV 实现严格对齐
+- **后续优化**（可选）：考虑 bf16/int32 节省显存
 
-**bf16 精度说明**：
-- bf16 可精确表示 0~256 的整数
-- 超过 256 会有舍入误差，但对打分影响可忽略
-- 设备自适应策略：
-  ```python
-  if torch.cuda.is_bf16_supported():
-      position_dtype = torch.bfloat16  # 优先：与 KV cache 对齐
-  else:
-      position_dtype = torch.int32     # 回退：兼容老 GPU
-  ```
+**R-KV 实际实现**：
+```python
+decode_positions = torch.tensor(
+    self.cache_positions[...],
+    dtype=torch.long  # int64
+)
+```
 
 ### 2.2 Per-Request 变量
 
@@ -195,5 +192,6 @@ class TriAttentionKVCache:
 
 ---
 
-*文档版本：1.0*
+*文档版本：1.1*
 *创建日期：2025-01-30*
+*更新日期：2025-01-31（position_indices 类型对齐 R-KV）*

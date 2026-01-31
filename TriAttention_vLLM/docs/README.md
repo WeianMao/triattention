@@ -17,8 +17,9 @@ docs/
 │   ├── data_structures.md         # 数据结构：position_indices、stats
 │   └── vllm_integration.md        # vLLM PagedAttention 集成分析
 ├── project/                       # 项目管理
-│   ├── roadmap.md                 # 实施路线图与阶段规划
-│   └── todo.md                    # 待敲定细节与待办事项
+│   ├── roadmap.md                 # 实施路线图与开发准则
+│   ├── todo.md                    # 待办事项
+│   └── CLARIFICATIONS_NEEDED.md   # 设计问题澄清记录
 └── archive/                       # 归档（原始文档，供参考）
 ```
 
@@ -142,11 +143,12 @@ R-KV/outputs/repository/sample8_fullkv_aime25_official_qwen/stats/
 | Fill-in-Place 工作流程 | [implementation/fill_in_place.md](implementation/fill_in_place.md) |
 | position_indices 等数据结构 | [implementation/data_structures.md](implementation/data_structures.md) |
 | vLLM PagedAttention 集成 | [implementation/vllm_integration.md](implementation/vllm_integration.md) |
-| 实施阶段和路线图 | [project/roadmap.md](project/roadmap.md) |
-| 待办事项和待敲定细节 | [project/todo.md](project/todo.md) |
+| 实施路线图和开发准则 | [project/roadmap.md](project/roadmap.md) |
+| 待办事项 | [project/todo.md](project/todo.md) |
+| 设计问题澄清记录 | [project/CLARIFICATIONS_NEEDED.md](project/CLARIFICATIONS_NEEDED.md) |
 
 ---
 
-*文档版本：3.0*
+*文档版本：3.1*
 *创建日期：2025-01-30*
-*重组：合并整理原始文档*
+*更新日期：2025-01-31*

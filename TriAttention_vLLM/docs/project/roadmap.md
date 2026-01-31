@@ -4,6 +4,44 @@
 
 ---
 
+## 0. 开发准则
+
+### 0.1 最小修改原则
+
+- **复用优先**：尽可能复用 vLLM 官方实现，不自行搭建平行系统
+- **最小侵入**：只在必要处做修改和添加，避免大规模重构
+- **扩展而非替换**：优先通过继承、包装、hook 等方式扩展，而非替换原有代码
+- **Overflow Pages 设计**：
+  - 不大改 vLLM engine，在外面包一层实现 overflow 管理
+  - 复用 vLLM 现有的 block allocator 和 KV cache 管理
+  - 修改量最小，只添加必要的 budget/overflow 跟踪逻辑
+
+### 0.2 第一阶段：严格对齐 R-KV 脚本
+
+第一阶段实现必须**严格对齐**以下三个参考脚本的行为：
+
+| 变种 | 参考脚本 |
+|-----|---------|
+| per-head | `R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_perhead.sh` |
+| per-layer-per-head | `R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_layer_perhead.sh` |
+| per-layer | `R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_perlayer.sh` |
+
+**对齐要求（包括但不限于）**：
+- 打分公式、聚合策略（mean/max）
+- Offsets 几何序列生成
+- 裁剪触发条件（divide_length、budget）
+- Per-head/per-layer 的 token 选择逻辑
+- RoPE 处理方式
+- 所有配置参数的默认值
+
+### 0.3 阶段兼容性
+
+- 第一阶段的实现方案**不得阻碍**后续阶段的开发
+- 不需要刻意预留接口，但要提前考虑扩展点
+- 设计决策要考虑后续功能（如内存触发压缩）的可行性
+
+---
+
 ## 1. 目录结构
 
 ```
@@ -206,5 +244,6 @@ TriAttention_vLLM/
 
 ---
 
-*文档版本：1.0*
+*文档版本：2.0*
 *创建日期：2025-01-30*
+*更新日期：2025-01-31（添加开发准则）*

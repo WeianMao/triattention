@@ -65,4 +65,24 @@
 
 ---
 
-*最后更新：2025-01-30*
+## 7. 阶段 2 待解决（第一阶段暂不处理）
+
+- [ ] **Prefill > Budget 场景处理**：当 prefill 长度超过 budget 时，需要特殊处理。R-KV 没有参考价值（它不面对这个问题）。需要设计 vLLM 下的处理策略：
+  - Prefill 阶段允许超额分配 pages？
+  - 第一个 decode step 后立即压缩？
+  - 还是限制 prefill 长度不能超过 budget？
+
+- [ ] **内存触发压缩（方案 A）**：在 vLLM 触发 preemption 之前，先尝试压缩 KV cache
+  - vLLM 默认行为：blocks 不足时 preempt 整个 request，丢失所有进度
+  - 目标：在 preemption 之前介入，通过压缩释放 blocks，避免重算
+  - 第一阶段要求：设计时考虑此扩展点，不采用会阻碍此功能开发的方案
+
+- [ ] **更灵活的 Budget 策略**：第一阶段采用 per-request 独立 budget，后续可能需要：
+  - 全局 budget 共享策略
+  - 动态 budget 调整
+  - 优先级驱动的 budget 分配
+  - 具体方案待第二阶段决策
+
+---
+
+*最后更新：2025-01-31*
