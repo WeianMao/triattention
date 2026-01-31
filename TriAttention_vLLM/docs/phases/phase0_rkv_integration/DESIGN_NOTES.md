@@ -221,16 +221,218 @@ $$\mathbf{Scores} = \mathbf{A}_{all} \cdot \mathbf{C}^T - \mathbf{B}_{all} \cdot
 
 ---
 
-## 4. GQA 处理
+## 4. 关键设计决策（Review 反馈）
 
-### 4.1 背景
+> 本节针对 review 中指出的关键问题给出明确决策。
+
+### 4.1 模块路径问题
+
+**问题**：文档写 `rkv/compression/speckv_vllm.py`，但 `flash_attn.py` 实际 import 的是：
+```python
+from rkv.modeling import R1KV  # 来自 R-KV/HuggingFace/rkv/modeling.py
+```
+
+**决策**：SpeckV 放入 **HuggingFace rkv 包**，保持 import 一致性。
+
+```
+# 文件位置
+R-KV/HuggingFace/rkv/compression/speckv_vllm.py  ← SpeckV 实现
+R-KV/HuggingFace/rkv/compression/__init__.py     ← 添加 SpeckVvLLM export
+R-KV/HuggingFace/rkv/modeling.py                 ← 添加 SpeckVvLLM import
+
+# flash_attn.py 中的 import
+from rkv.modeling import R1KV, SpeckVvLLM  # 新增 SpeckVvLLM
+```
+
+### 4.2 有状态算法 vs 全局单例问题
+
+**问题**：`FlashAttentionImpl.kvcompressor` 是全局单例，但 SpeckV 需要按 request 跟踪状态（`cache_positions`, `absolute_position`）。
+
+**决策**：使用 **per-request 状态字典**，压缩器本身无状态。
+
+```python
+class SpeckVvLLM:
+    def __init__(self, ...):
+        # 压缩器无状态，所有 request 共享
+        self.stats = self._load_stats(stats_path)
+
+        # 状态由外部管理，通过 request_id 索引
+        # 不在压缩器内部存储 per-request 状态
+
+    def update_kv(
+        self,
+        key_states,
+        query_states,
+        value_states,
+        position_indices,     # 外部传入：当前 KV 的位置信息
+        request_id=None,      # 可选：用于日志/调试
+    ):
+        # 所有状态信息通过参数传入，不依赖内部状态
+        ...
+```
+
+**position_indices 管理责任**：
+- **谁维护**：`flash_attn.py` 或 `attn_metadata`，不是 SpeckV 压缩器
+- **更新时机**：prefill/decode 时写入，prune 时同步更新
+- **存储位置**：与 KV cache 同布局 `[num_blocks, block_size]`
+
+### 4.3 position_indices 在 vLLM 中的维护
+
+**问题**：HF 路径靠 `cache_positions` 跟踪位置，vLLM 没有现成的位置追踪。
+
+**决策**：在 `flash_attn.py` 中显式维护 `position_indices`，与 KV cache 同步。
+
+```python
+# flash_attn.py 修改（伪代码）
+
+class FlashAttentionImpl:
+    def __init__(self, ...):
+        self.kvcompressor = SpeckVvLLM(...) if algo == "speckv" else R1KV(...)
+
+        # 新增：position_indices 存储（与 KV cache 同布局）
+        # 实际实现可能放在 attn_metadata 或单独的数据结构中
+        self.position_indices = None  # [num_blocks, block_size]
+
+    def forward(self, ...):
+        # Prefill: 初始化 position_indices
+        if is_prefill:
+            self.position_indices[block_ids] = torch.arange(prefill_len)
+
+        # Decode: 追加新位置
+        if is_decode:
+            self.position_indices[new_slot] = current_seq_len
+
+        # Prune: 同步更新
+        if need_compress:
+            # 提取当前序列的 position_indices
+            current_positions = self.position_indices[slot_mapping]
+
+            # 调用压缩器，传入 position_indices
+            compressed_k, compressed_v = self.kvcompressor.update_kv(
+                current_key, current_query, current_value,
+                position_indices=current_positions,
+            )
+
+            # 回写时同步更新 position_indices
+            # （保留的 token 位置不变）
+```
+
+### 4.4 Prefill 处理规则
+
+**问题**：HF 路径有 `include_prefill_in_budget` / `allow_prefill_compression`，vLLM 路径未明确。
+
+**决策**：Phase 0 默认 **prefill 不参与压缩**（保护前缀）。
+
+| 配置 | 值 | 说明 |
+|-----|-----|------|
+| `protect_prefill` | `True`（默认） | Prefill token 不参与裁剪 |
+| `prefill_budget` | 与 `budget` 分开 | Prefill 有独立配额（可选） |
+
+**实现方式**：
+```python
+def update_kv(self, key_states, ..., position_indices, prefill_len=0):
+    if prefill_len > 0:
+        # 分离 prefill 和 decode 部分
+        prefill_k = key_states[:, :, :prefill_len, :]
+        decode_k = key_states[:, :, prefill_len:, :]
+
+        # 只对 decode 部分打分和裁剪
+        scores = self._compute_scores(decode_k, position_indices[prefill_len:])
+        keep_indices = self._select_tokens(scores, budget - prefill_len)
+
+        # 拼接：prefill（全保留）+ decode（裁剪后）
+        compressed_k = torch.cat([prefill_k, decode_k.gather(..., keep_indices)], dim=2)
+```
+
+**与 HF 基线对比**：确保使用相同的 prefill 策略，否则结果不可比。
+
+### 4.5 per_head 模式限制（跨层聚合）
+
+**问题**：vLLM 按层调用 `update_kv`，无法实现"全局 per_head"（跨层聚合打分）。
+
+**决策**：Phase 0 仅支持 **per_layer_perhead**（每层独立、每 head 独立）。
+
+| 模式 | HF 路径 | vLLM Phase 0 | 原因 |
+|-----|---------|-------------|------|
+| `per_head` (跨层) | ✓ | ✗ | 需要所有层的 KV 才能聚合打分 |
+| `per_layer` | ✓ | ✗ | 需要同层所有 head 聚合 |
+| `per_layer_perhead` | ✓ | ✓ | 每层每 head 独立，无跨层依赖 |
+
+**配置映射**：
+```python
+# 环境变量
+VLLM_SPECKV_PRUNING_MODE = "per_layer_perhead"  # 唯一支持的模式
+
+# 如果用户指定其他模式，警告并 fallback
+if pruning_mode != "per_layer_perhead":
+    logger.warning(f"vLLM Phase 0 只支持 per_layer_perhead，忽略 {pruning_mode}")
+    pruning_mode = "per_layer_perhead"
+```
+
+### 4.6 Stats 校验与 Model Config
+
+**问题**：Stats 需要与模型配置匹配（RoPE/num_heads/dtype/prompt），但文档只有 `stats_path`。
+
+**决策**：添加 model config 校验，stats 必须包含元数据。
+
+**Stats 文件结构**：
+```python
+stats = {
+    # 核心数据
+    "q_mean_complex": ...,
+    "freq_scale_sq": ...,
+    "sampled_heads": ...,
+
+    # 元数据（用于校验）
+    "metadata": {
+        "model_name": "Qwen/Qwen2.5-7B-Instruct",
+        "num_attention_heads": 28,
+        "num_kv_heads": 4,
+        "head_dim": 128,
+        "rope_theta": 1000000.0,
+        "rope_scaling": None,
+        "dtype": "bfloat16",
+        "prompt_template": "plain",  # plain / chat
+    }
+}
+```
+
+**校验逻辑**：
+```python
+def _load_stats(self, stats_path, model_config=None):
+    stats = torch.load(stats_path)
+
+    if model_config is not None:
+        meta = stats.get("metadata", {})
+
+        # 必须匹配的项
+        assert meta.get("num_kv_heads") == model_config.num_kv_heads
+        assert meta.get("head_dim") == model_config.head_dim
+
+        # 警告但不阻止的项
+        if meta.get("rope_theta") != model_config.rope_theta:
+            logger.warning(f"Stats rope_theta 不匹配: {meta.get('rope_theta')} vs {model_config.rope_theta}")
+
+    return stats
+```
+
+**环境变量补充**：
+```python
+VLLM_SPECKV_MODEL_CONFIG = os.getenv("VLLM_SPECKV_MODEL_CONFIG", None)  # 可选：model config 路径
+```
+
+---
+
+## 5. GQA 处理
+
+### 5.1 背景
 
 Qwen2.5-7B 使用 GQA：
 - `num_attention_heads` = 28
 - `num_key_value_heads` = 4
 - `num_key_value_groups` = 7
 
-### 4.2 vLLM 中的 GQA 处理
+### 5.2 vLLM 中的 GQA 处理
 
 ```python
 # flash_attn.py 中，KV cache 使用 num_kv_heads
@@ -240,7 +442,7 @@ key_states.shape = [batch, num_kv_heads, seq_len, head_dim]  # [1, 4, seq, 128]
 query_states.shape = [batch, num_heads, seq_len, head_dim]   # [1, 28, seq, 128]
 ```
 
-### 4.3 SpeckV 的 GQA 适配
+### 5.3 SpeckV 的 GQA 适配
 
 SpeckV 的 `sampled_heads` 是 attention head 索引，需要映射到 KV heads：
 
@@ -256,9 +458,9 @@ def map_to_kv_head(attn_head, num_kv_groups):
 
 ---
 
-## 5. 环境变量设计
+## 6. 环境变量设计
 
-### 5.1 新增环境变量
+### 6.1 新增环境变量
 
 | 变量名 | 默认值 | 说明 |
 |-------|--------|------|
@@ -266,7 +468,7 @@ def map_to_kv_head(attn_head, num_kv_groups):
 | `VLLM_SPECKV_STATS_PATH` | `None` | SpeckV stats 文件路径 |
 | `VLLM_SPECKV_PRUNING_MODE` | `"per_head"` | pruning 模式 |
 
-### 5.2 在 envs.py 中添加
+### 6.2 在 envs.py 中添加
 
 ```python
 # vLLM/vllm/envs.py
@@ -285,16 +487,16 @@ environment_variables: Dict[str, Callable[[], Any]] = {
 
 ---
 
-## 6. 测试策略
+## 7. 测试策略
 
-### 6.1 单元测试优先级
+### 7.1 单元测试优先级
 
 1. **接口兼容性**：`update_kv()` 输入输出格式正确
 2. **边界条件**：`seq_len <= budget` 时直接返回
 3. **压缩比**：输出长度 <= budget
 4. **数值正确性**：与 HF 路径对比
 
-### 6.2 与 HF 路径对比验证
+### 7.2 与 HF 路径对比验证
 
 ```python
 def test_consistency_with_hf():
@@ -318,49 +520,50 @@ def test_consistency_with_hf():
 
 ---
 
-## 7. 已知限制
+## 8. 已知限制
 
-### 7.1 Phase 0 限制
+### 8.1 Phase 0 限制
 
 | 限制 | 原因 | Phase 1 解决方案 |
 |-----|------|-----------------|
 | 无 Triton 优化 | Phase 0 重点是正确性 | Phase 1 实现 Triton kernel |
-| 仅支持 per_head 模式 | per_layer 需要跨层信息 | Phase 1 重新设计接口 |
+| 仅支持 per_layer_perhead 模式 | vLLM 按层调用，无法跨层聚合 | Phase 1 重新设计接口 |
 
-### 7.2 与 HF 路径的功能差异
+### 8.2 与 HF 路径的功能差异
 
-| 功能 | HF 路径 | vLLM Phase 0 |
-|-----|--------|--------------|
-| per_head pruning | ✓ | ✓ |
-| per_layer pruning | ✓ | ✗（需跨层信息） |
-| per_layer_perhead | ✓ | ✗（需跨层信息） |
-| 位置追踪 | ✓ | ✓（通过 position_indices） |
-| prefill 保护 | ✓ | 待实现 |
-| 打分优化（LUT） | ✗ | ✓（Phase 0 即实现） |
+| 功能 | HF 路径 | vLLM Phase 0 | 说明 |
+|-----|--------|--------------|------|
+| per_head pruning (跨层) | ✓ | ✗ | 需要全局聚合，见 4.5 节 |
+| per_layer pruning | ✓ | ✗ | 需要同层所有 head 聚合 |
+| per_layer_perhead | ✓ | ✓ | **Phase 0 唯一支持的模式** |
+| 位置追踪 | ✓ | ✓ | 通过 position_indices，见 4.3 节 |
+| prefill 保护 | ✓ | ✓ | 默认保护，见 4.4 节 |
+| 打分优化（LUT） | ✗ | ✓ | Phase 0 即实现 |
+| Stats 校验 | ✓ | ✓ | 见 4.6 节 |
 
 ---
 
-## 8. 文件修改检查清单
+## 9. 文件修改检查清单
 
-### 8.1 新建文件
+### 9.1 新建文件
 
-- [ ] `rkv/compression/speckv_vllm.py` - SpeckV vLLM 接口实现
-- [ ] `rkv/compression/position_tracker.py` - position_indices 管理（可选，可合并到 speckv_vllm.py）
+- [ ] `R-KV/HuggingFace/rkv/compression/speckv_vllm.py` - SpeckV vLLM 接口实现
 - [ ] `tests/test_speckv_vllm.py` - 单元测试
 
-### 8.2 修改文件
+### 9.2 修改文件
 
-- [ ] `rkv/compression/__init__.py` - 导出 SpeckVvLLM
-- [ ] `vLLM/vllm/v1/attention/backends/flash_attn.py` - 算法选择分支 + position_indices 更新
-- [ ] `vLLM/vllm/envs.py` - 环境变量
+- [ ] `R-KV/HuggingFace/rkv/compression/__init__.py` - 导出 SpeckVvLLM
+- [ ] `R-KV/HuggingFace/rkv/modeling.py` - 添加 SpeckVvLLM import（保持与 R1KV 一致的 import 方式）
+- [ ] `R-KV/vLLM/vllm/v1/attention/backends/flash_attn.py` - 算法选择分支 + position_indices 更新
+- [ ] `R-KV/vLLM/vllm/envs.py` - 环境变量
 
-### 8.3 关键数据结构
+### 9.3 关键数据结构
 
 - [ ] `position_indices`: `[num_blocks, block_size]` 与 KV cache 对齐
 - [ ] `trig_cos/sin`: `[num_offsets, freq_count]` 共享三角表（~4 KB）
 - [ ] Stats 从文件加载：`q_mean_complex`, `freq_scale_sq`, `omega` 等
 
-### 8.3 验证默认行为不变
+### 9.4 验证默认行为不变
 
 ```bash
 # 不设置 VLLM_COMPRESSION_ALGO，确认使用 R1KV

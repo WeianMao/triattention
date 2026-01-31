@@ -81,7 +81,7 @@ vLLM/vllm/v1/attention/backends/flash_attn.py
 
 | 操作 | 示例 | 说明 |
 |-----|------|------|
-| 新建 SpeckV 压缩类 | `rkv/compression/speckv_vllm.py` | 实现 `update_kv()` 接口 |
+| 新建 SpeckV 压缩类 | `R-KV/HuggingFace/rkv/compression/speckv_vllm.py` | 实现 `update_kv()` 接口 |
 | 在 flash_attn.py 添加算法选择 | `if algo == "speckv": ...` | 参数隔离分支 |
 | 添加环境变量 | `VLLM_COMPRESSION_ALGO` | 控制算法选择 |
 | 添加 SpeckV 特定配置 | `VLLM_SPECKV_STATS_PATH` | SpeckV 需要的额外参数 |
@@ -180,7 +180,8 @@ SpeckV 的核心打分逻辑可以从这里提取：
 > 详细设计见 `docs/implementation/data_structures.md` 和 `docs/design/optimization.md`
 
 ```python
-# rkv/compression/speckv_vllm.py
+# R-KV/HuggingFace/rkv/compression/speckv_vllm.py
+# (import path: from rkv.compression.speckv_vllm import SpeckVvLLM)
 
 class SpeckVvLLM:
     """SpeckV 压缩器 - vLLM 接口版本"""
@@ -273,7 +274,7 @@ class FlashAttentionImpl:
 ### Step 1: 创建 SpeckVvLLM 类
 
 ```bash
-# 文件：rkv/compression/speckv_vllm.py
+# 文件：R-KV/HuggingFace/rkv/compression/speckv_vllm.py
 # 内容：实现 update_kv() 接口的 SpeckV
 ```
 
@@ -384,7 +385,7 @@ curl http://localhost:8000/v1/completions -d '{"prompt": "...", "max_tokens": 10
 
 | 文件 | 说明 |
 |-----|------|
-| `rkv/compression/speckv_vllm.py` | SpeckV vLLM 接口实现 |
+| `R-KV/HuggingFace/rkv/compression/speckv_vllm.py` | SpeckV vLLM 接口实现 |
 | `tests/test_speckv_vllm.py` | 单元测试 |
 
 ### 9.2 修改文件
