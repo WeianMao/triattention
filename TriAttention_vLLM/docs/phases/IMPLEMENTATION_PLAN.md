@@ -4,251 +4,202 @@
 
 本文档定义 Phase 0 和 Phase 1 的具体实现计划和任务分解。
 
+> **重要说明**：HuggingFace/transformers 路径（`apply_speckv_rkv_style_patch`）是**已完成的工作**。
+> 当前 Phase 0 的目标是在 **R-KV/vLLM** 的 vLLM 框架里做快速集成验证。
+
 ---
 
 ## 0. 架构决策
 
-### Phase 0 架构：Monkey Patch Model.forward
+### Phase 0 架构：vLLM attention backend 集成
 
-**决策**：Phase 0 采用 **monkey patch model.forward** 方式，而不是 R-KV 的 `update_kv` 接口。
+**决策**：Phase 0 在 R-KV 的 vLLM fork 中集成 SpeckV，复用 R1KV 已有的 `update_kv()` 接口。
+
+**集成点**：`vLLM/vllm/v1/attention/backends/flash_attn.py`
 
 **原因**：
-- SpeckV 的 per_layer 和 per_layer_perhead 模式需要**跨层信息**
-- R-KV 的 `update_kv` 是 per-layer 接口，压缩器只能看到当前层
-- 为了完整支持三种 pruning mode，必须使用全局压缩器
+- R1KV 已在 vLLM v1 中实现，留有压缩接口
+- 可以复用现有的触发机制和 KV cache 管理
+- 为后续 Phase 1/2 的深度集成打基础
 
 **影响**：
-- Phase 0 **复用现有代码**（`speckv_rkv_style.py`），不重写
-- 不创建新的 `SpeckVRKV` 类
-- 重点是**理解和验证**，而不是重新实现
+- 需要实现 `SpeckVvLLM` 类，提供 `update_kv()` 接口
+- 通过环境变量选择压缩算法（默认仍为 R1KV）
+- Phase 0 仅支持 `per_head` 模式（跨层模式留给 Phase 1）
 
 ---
 
 ## 1. 总体路线图
 
 ```
-Phase 0 (R-KV 集成)          Phase 1 (Triton 实现)
-        ↓                           ↓
-    理解 + 验证              高效独立版本
-  复用现有代码              batch>1, Triton
-  monkey patch               新接口设计
-        ↓                           ↓
-    ┌───────────────────────────────┐
-    │     Phase 2 (高级功能)          │
-    │   vLLM 集成、CUDA Graph        │
-    └───────────────────────────────┘
+已完成 (HF 路径)             Phase 0 (vLLM 集成)         Phase 1 (Triton 实现)
+        ↓                           ↓                           ↓
+  speckv_rkv_style.py        SpeckVvLLM 类               高效独立版本
+  monkey patch HF            update_kv() 接口            batch>1, Triton
+  三种 pruning mode          per_head 模式               新接口设计
+        ↓                           ↓                           ↓
+    ┌─────────────────────────────────────────────────────────────┐
+    │                  Phase 2 (高级功能)                           │
+    │           vLLM PagedAttention 深度集成、CUDA Graph            │
+    └─────────────────────────────────────────────────────────────┘
 ```
 
-**关键决策**：Phase 0 和 Phase 1 可以**并行开发**，因为：
-- Phase 0 是理解和验证，不依赖 Phase 1
-- Phase 1 是独立实现，不依赖 Phase 0
-- Phase 0 为 Phase 1 提供参考基准
+**阶段关系**：
+- **已完成**：HF 路径验证了 SpeckV 算法正确性
+- **Phase 0**：在 vLLM 中快速集成验证，复用 R1KV 接口
+- **Phase 1**：独立 Triton 实现，不依赖 R-KV 框架
 
 ---
 
-## 2. Phase 0 实现计划
+## 2. Phase 0 实现计划（vLLM 集成）
 
 ### 2.1 目标
 
 | 目标 | 验收标准 |
 |-----|---------|
-| 理解现有代码 | 能清晰解释打分公式、三种 pruning mode 的差异 |
-| 验证三种脚本 | 三个脚本全部能正常运行 |
-| 创建使用文档 | README.md 完整记录使用方法 |
-| 准确率验证 | AIME24 准确率与历史结果一致 |
+| 实现 `SpeckVvLLM` 类 | 提供与 R1KV 兼容的 `update_kv()` 接口 |
+| 集成到 flash_attn.py | 可通过环境变量选择 SpeckV |
+| 默认行为不变 | 不设置环境变量时使用 R1KV |
+| 准确率验证 | 与 HF 路径结果差异 < 1% |
 
 ### 2.2 策略说明
 
-**重要**：Phase 0 **不重写代码**，而是：
-1. 复用现有的 `speckv_rkv_style.py` 实现
-2. 理解其工作原理
-3. 验证三种 pruning mode 的正确性
-4. 创建使用文档
+**Phase 0 策略**：
+1. 从 HF 路径（`speckv_rkv_style.py`）提取打分逻辑
+2. 适配 vLLM 的 `update_kv(key, query, value)` 接口
+3. 通过环境变量选择算法，保持隔离开发
+4. 仅支持 `per_head` 模式（最简单，无跨层依赖）
 
 ### 2.3 任务分解
 
-#### Task 0.1: 环境验证
+#### Task 0.1: 理解 R1KV vLLM 集成
 
 ```
 子任务：
-□ 激活 rkv conda 环境
-□ 验证依赖完整（transformers, torch, flash-attn）
-□ 确认 stats 文件存在
-□ 验证 stats 元数据与配置一致（见下方）
-□ 运行一个简单的测试脚本
+□ 阅读 vLLM/vllm/v1/attention/backends/flash_attn.py
+□ 理解 R1KV 的 update_kv() 调用链
+□ 理解 KV cache 的 PagedAttention 布局
+□ 确认 attn_metadata 中可用的信息
 ```
 
-**命令**：
-```bash
-conda activate rkv
-cd /data/rbg/users/weian/project/rl/dc/R-KV
-ls weian_development/speckv/
-ls outputs/repository/sample8_fullkv_aime25_official_qwen/stats/
-```
-
-**Stats 元数据校验（必须）**：
-```python
-# 验证 stats 与当前配置一致
-# 需检查：model_path, prompt_style, attention_impl, dtype, rope_scaling
-from weian_development.speckv.stats_utils import validate_stats_metadata
-# 或手动检查 stats 文件的元数据字段
-```
+**关键代码位置**：
+- 压缩器初始化：`flash_attn.py` 第 431 行
+- 压缩调用：`flash_attn.py` 第 547-588 行
+- 环境变量：`vLLM/vllm/envs.py`
 
 ---
 
-#### Task 0.2: 代码阅读 - 压缩器初始化
+#### Task 0.2: 实现 SpeckVvLLM 类
 
-**目标**：理解 `SpeckVRKVStyle.__init__()` 的流程
-
-```
-阅读文件：weian_development/speckv/speckv_rkv_style.py
-
-关注点：
-□ Config 参数如何解析
-□ Stats 如何加载（load_head_frequency_stats）
-□ RoPE 如何初始化（build_rotary, inv_freq, cos/sin 表）
-□ freq_scale_sq 如何计算
-□ sampled_heads 的过滤逻辑
-```
-
-**输出**：笔记文档，记录关键数据流
-
----
-
-#### Task 0.3: 代码阅读 - 打分函数
-
-**目标**：理解 `score_keys_for_round()` 的数学公式
-
-```
-阅读文件：weian_development/speckv/round_pruning_utils.py
-
-关注点：
-□ invert_rope() - RoPE 反演公式
-□ compute_frequency_statistics_from_means() - amp, phi, extra 计算
-□ score_keys_for_round() - 位置相关打分公式
-□ 聚合方式（mean/max over offsets）
-```
-
-**输出**：打分公式的数学描述
-
----
-
-#### Task 0.4: 代码阅读 - 三种 Pruning Mode
-
-**目标**：理解三种模式的差异
-
-```
-阅读文件：weian_development/speckv/speckv_rkv_style.py
-
-关注点：
-□ _select_union_based() - global 模式
-□ _select_per_head_independent() - per_head 模式
-□ _select_per_layer_independent() - per_layer 模式
-□ _select_per_layer_perhead_independent() - per_layer_perhead 模式
-□ 各模式的 keep_indices 形状
-□ 位置追踪的差异
-```
-
-**输出**：三种模式的对比表
-
----
-
-#### Task 0.5: 代码阅读 - 集成方式
-
-**目标**：理解 monkey patch 的工作方式
-
-```
-阅读文件：weian_development/speckv/rkv_speckv_generate.py
-
-关注点：
-□ apply_speckv_rkv_style_patch() 如何工作
-□ speckv_rkv_forward() 的触发逻辑
-□ should_compress() 的条件
-□ KV cache 如何被压缩
-```
-
-**输出**：调用流程图
-
----
-
-#### Task 0.6: 验证三种脚本
-
-**目标**：确认三种 pruning mode 都能正常运行
+**目标**：创建 `rkv/compression/speckv_vllm.py`
 
 ```
 子任务：
-□ 运行 per_head 脚本，检查输出
-□ 运行 per_layer_perhead 脚本，检查输出
-□ 运行 per_layer 脚本，检查输出
-□ 对比三种模式的准确率
-□ 验证 reset_compression_state 是否在每个样本前被调用
-□ 确认进程名使用 PD-L1_binder 前缀
+□ 从 speckv_rkv_style.py 提取打分逻辑
+□ 实现 __init__(budget, stats_path, ...)
+□ 实现 update_kv(key_states, query_states, value_states)
+□ 添加 stats 加载和验证
+□ 处理 GQA head 映射
 ```
 
-**命令**：
-```bash
-# Per-Head 模式
-bash weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_perhead.sh
-
-# Per-Layer-Per-Head 模式
-bash weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_layer_perhead.sh
-
-# Per-Layer 模式
-bash weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_perlayer.sh
-```
-
-**验证点**：
-- `reset_compression_state()` 必须在每个样本前调用，防止状态泄露
-- 长时间任务通过 `rkv_sharded_runner.py` wrapper 保证进程名规范
-
----
-
-#### Task 0.7: 创建使用文档
-
-**目标**：创建 `weian_development/speckv/README.md`
-
-```
-文档内容：
-□ 快速开始指南
-□ 配置参数完整说明
-□ 三种 pruning mode 的使用场景
-□ 常见问题与解答
-□ 打分公式的简要说明
-```
-
----
-
-#### Task 0.8: GQA 映射验证（建议）
-
-**目标**：验证 sampled_heads 到 KV heads 的映射正确
-
-```
-验证内容：
-□ 统计每个 KV head 覆盖的 sampled heads 数量
-□ 确认映射逻辑与 GQA group_size 一致
-□ 检查是否有 KV head 没有被任何 sampled head 覆盖
-```
-
-**验证代码**：
+**接口要求**：
 ```python
-num_kv_heads = model.config.num_key_value_heads
-group_size = model.config.num_attention_heads // num_kv_heads
-for kv_head in range(num_kv_heads):
-    covered = [h for l, h in sampled_heads if h // group_size == kv_head]
-    print(f"KV head {kv_head}: {len(covered)} sampled heads")
+class SpeckVvLLM:
+    def update_kv(
+        self,
+        key_states: torch.Tensor,      # [batch, num_kv_heads, seq_len, head_dim]
+        query_states: torch.Tensor,    # [batch, num_heads, seq_len, head_dim] (可忽略)
+        value_states: torch.Tensor,    # [batch, num_kv_heads, seq_len, head_dim]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """返回压缩后的 (key_states, value_states)"""
 ```
 
 ---
 
-#### Task 0.9: 边界测试（可选）
+#### Task 0.3: 添加环境变量
 
-**目标**：验证边界情况的处理
+**目标**：在 `vLLM/vllm/envs.py` 中添加 SpeckV 配置
+
+```
+新增变量：
+□ VLLM_COMPRESSION_ALGO (默认 "r1kv")
+□ VLLM_SPECKV_STATS_PATH (默认 None)
+□ VLLM_SPECKV_PRUNING_MODE (默认 "per_head")
+```
+
+---
+
+#### Task 0.4: 修改 flash_attn.py
+
+**目标**：在压缩器初始化处添加算法选择
+
+```
+子任务：
+□ 导入 SpeckVvLLM
+□ 读取 VLLM_COMPRESSION_ALGO 环境变量
+□ 添加 if/else 分支选择压缩器
+□ 确保默认仍为 R1KV
+```
+
+**修改位置**：`vLLM/vllm/v1/attention/backends/flash_attn.py` 第 431 行附近
+
+---
+
+#### Task 0.5: 更新 rkv/compression/__init__.py
+
+**目标**：导出 SpeckVvLLM
+
+```python
+from .speckv_vllm import SpeckVvLLM
+__all__ = [..., "SpeckVvLLM"]
+```
+
+---
+
+#### Task 0.6: 单元测试
+
+**目标**：创建 `tests/test_speckv_vllm.py`
+
+```
+测试用例：
+□ test_update_kv_interface() - 接口兼容性
+□ test_no_compression_when_short() - seq_len <= budget 时不压缩
+□ test_compression_ratio() - 输出长度 <= budget
+□ test_consistency_with_hf() - 与 HF 路径结果对比
+```
+
+---
+
+#### Task 0.7: 集成测试
+
+**目标**：验证端到端功能
 
 ```
 测试场景：
-□ seq_len < budget（不应压缩）
-□ prefill_length > budget（应正确处理）
-□ 多轮压缩（位置追踪正确）
+□ 默认配置下 R1KV 行为不变
+□ 设置 VLLM_COMPRESSION_ALGO=speckv 后使用 SpeckV
+□ vLLM 服务正常启动和响应
+```
+
+**命令**：
+```bash
+# 测试 SpeckV
+export VLLM_COMPRESSION_ALGO=speckv
+export VLLM_SPECKV_STATS_PATH=/path/to/stats.pt
+python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-7B
+```
+
+---
+
+#### Task 0.8: 准确率验证
+
+**目标**：与 HF 路径结果对比
+
+```
+验证内容：
+□ 在 AIME24 上运行 SpeckV vLLM
+□ 与 HF 路径结果对比
+□ 差异应 < 1%
 ```
 
 ---
@@ -256,20 +207,17 @@ for kv_head in range(num_kv_heads):
 ### 2.4 Phase 0 Checklist
 
 ```
-Phase 0 完成标准：
-□ 三个脚本全部能正常运行
-□ 理解打分公式（有笔记）
-□ 理解三种 pruning mode 的差异（有对比表）
-□ 理解 monkey patch 集成方式（有调用流程图）
-□ 创建使用文档 README.md
-□ 准确率与历史结果一致
+Phase 0 完成标准（vLLM 集成）：
+□ SpeckVvLLM 类实现 update_kv() 接口
+□ 集成到 flash_attn.py，通过环境变量选择
+□ 默认配置下 R1KV 行为不变
+□ 单元测试通过
+□ AIME24 准确率与 HF 路径差异 < 1%
 
-验证清单（基于 Review 反馈）：
-□ Stats 元数据校验通过（model/rope/prompt/attn/dtype）
-□ reset_compression_state 调用位置已确认
-□ GQA 映射验证通过（每个 KV head 有对应的 sampled heads）
-□ 进程命名规范（PD-L1_binder）已确认
-□ 输出目录命名不覆盖基线结果
+隔离开发验证：
+□ 不设置环境变量时使用 R1KV
+□ 设置 VLLM_COMPRESSION_ALGO=speckv 时使用 SpeckV
+□ R1KV 的测试/benchmark 结果不变
 ```
 
 ---

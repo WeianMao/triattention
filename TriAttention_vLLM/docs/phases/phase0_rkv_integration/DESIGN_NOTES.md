@@ -1,410 +1,313 @@
-# Phase 0 设计补充说明
+# Phase 0 设计补充说明（vLLM 集成）
 
-基于代码验证发现的补充说明和修正。
-
-> **重要说明**：Phase 0 采用**方案 A（monkey patch model.forward）**，复用现有 `speckv_rkv_style.py` 实现，**不新建 SpeckVRKV 类，不修改 `rkv/` 核心文件**。
-> 本文档中关于 `SpeckVRKV` 类的代码示例仅作为 R-KV 接口机制的参考说明，不代表 Phase 0 的实际实现路径。
+基于 R-KV/vLLM 代码分析的技术细节和设计决策。
 
 ---
 
-## 1. Compression Flag 三态机制（重要补充）
+## 1. R-KV/vLLM 压缩架构详解
 
-R-KV 的压缩触发有**三种状态**，不是简单的 True/False：
+### 1.1 R1KV 在 vLLM v1 中的集成方式
 
-### 1.1 状态定义
-
-| compression 值 | 行为 | 使用场景 |
-|---------------|------|---------|
-| `None` | 总是执行压缩 | 每个 attention call 都压缩 |
-| `True` | 先更新缓存再压缩 | 有条件压缩（step_length 或 newline 触发） |
-| `False` | 不压缩，仅更新缓存 | 非压缩 step |
-
-### 1.2 代码位置
-
-**状态设置**：`modeling.py` CausalLM_forward() 中
+**文件**：`R-KV/vLLM/vllm/v1/attention/backends/flash_attn.py`
 
 ```python
-# 判断是否触发压缩
-if self.config.divide_method == "newline":
-    is_newline = predicted_token_ids[0].cpu().item() in self.newline_token_ids
-elif self.config.divide_method == "step_length":
-    is_newline = self.length % self.config.divide_length == 0
+class FlashAttentionImpl:
+    def __init__(self, ...):
+        # 行 431：初始化压缩器
+        self.kvcompressor = R1KV(budget=VLLM_V1_R_KV_BUDGET)
 
-# 设置所有层的 compression flag
-for layer in self.model.layers:
-    layer.self_attn.config.compression = is_newline  # True or False
+    def forward(self, layer, query, key, value, kv_cache, attn_metadata, ...):
+        # 行 547-588：压缩逻辑
+        for i in range(attn_metadata.num_reqs):
+            if attn_metadata.seq_lens[i] < VLLM_V1_R_KV_BUDGET + VLLM_V1_R_KV_BUFFER:
+                continue  # 序列太短，不压缩
+
+            # 提取当前序列的 KV cache
+            current_key_cache = key_cache.view(...)[occupied_slot_mapping[...], ...]
+            current_value_cache = value_cache.view(...)[occupied_slot_mapping[...], ...]
+
+            # 调用压缩器
+            compressed_key, compressed_value = self.kvcompressor.update_kv(
+                current_key_cache,
+                current_query,
+                current_value_cache,
+            )
+
+            # 回写压缩后的 KV
+            key_cache.view(...)[...] = compressed_key.transpose(0, 1)
+            value_cache.view(...)[...] = compressed_value.transpose(0, 1)
+
+            # 记录压缩统计
+            num_dropped = current_kv_len - compressed_kv_len
+            attn_metadata.num_dropped_tokens_list[i] = num_dropped
 ```
 
-**状态使用**：`modeling.py` Attention.forward() 中
+### 1.2 触发条件
 
 ```python
-if self.config.compression is None:
-    # 路径 A: 总是压缩
-    k_compress, v_compress = self.kv_cluster.update_kv(...)
+# vLLM/vllm/envs.py
+VLLM_V1_R_KV_BUDGET: int = 64   # 保留的 token 数
+VLLM_V1_R_KV_BUFFER: int = 64   # 触发压缩的缓冲区
 
-elif self.config.compression is True:
-    # 路径 B: 先更新缓存再压缩
-    key_states, value_states = past_key_value.update(...)
-    k_compress, v_compress = self.kv_cluster.update_kv(...)
-    past_key_value.key_cache[self.layer_idx] = k_compress
-    past_key_value.value_cache[self.layer_idx] = v_compress
-
-else:  # False
-    # 路径 C: 不压缩
-    key_states, value_states = past_key_value.update(...)
+# 触发条件
+if seq_len >= VLLM_V1_R_KV_BUDGET + VLLM_V1_R_KV_BUFFER:
+    # 执行压缩
 ```
 
-### 1.3 对 SpeckV-RKV 实现的影响
+**含义**：当序列长度 >= 128 (64+64) 时触发压缩，压缩后保留 64 个 token。
 
-SpeckV-RKV 需要正确处理这三种状态：
+### 1.3 KV Cache 布局
 
-```python
-class SpeckVRKV:
-    def update_kv(self, key_states, query_states, value_states):
-        """
-        注意：此方法仅在以下情况被调用：
-        1. config.compression is None（总是）
-        2. config.compression is True（被触发时）
-
-        当 config.compression is False 时，此方法不会被调用
-        """
-        # 检查是否需要压缩
-        if key_states.shape[-2] <= self.config.budget:
-            return key_states, value_states
-
-        # 执行压缩...
-```
-
----
-
-## 2. Query States 来源澄清
-
-### 2.1 文档原描述（不完全准确）
+vLLM 使用 PagedAttention，KV cache 是分块存储的：
 
 ```python
-query_states: torch.Tensor,    # [batch, num_q_heads, window_size, head_dim]
-```
+# kv_cache 形状：[num_blocks, block_size, num_heads, head_dim]
+# 通过 slot_mapping 访问特定序列的 token
 
-### 2.2 实际来源
+# 提取当前序列的 KV
+current_key = key_cache.view(num_blocks * block_size, num_heads, head_dim)
+current_key = current_key[occupied_slot_mapping[start:end], ...]
+# 结果形状：[seq_len, num_heads, head_dim]
 
-`query_states` 不是当前 decode step 的 query，而是**缓存的 queries**：
-
-```python
-# modeling.py L136-143
-# Query cache 初始化（prefill 时）
-if self.layer_idx not in past_key_value.query_cache:
-    past_key_value.query_cache[self.layer_idx] = query_states[
-        :, :, -self.config.method_config["window_size"] :, :
-    ]
-
-# Query cache 更新（decode 时）
-else:
-    past_key_value.query_cache[self.layer_idx] = torch.cat(
-        (past_key_value.query_cache[self.layer_idx], query_states), dim=2
-    )
-    # 裁剪到 window_size
-    if past_key_value.query_cache[self.layer_idx].shape[-2] > window_size:
-        past_key_value.query_cache[self.layer_idx] = past_key_value.query_cache[
-            self.layer_idx
-        ][:, :, -window_size:, :]
-```
-
-### 2.3 对 SpeckV-RKV 的影响
-
-**关键区别**：SpeckV 不使用 query_states 进行打分！
-
-```python
-class SpeckVRKV:
-    def update_kv(self, key_states, query_states, value_states):
-        """
-        SpeckV 与 R1KV 的关键区别：
-
-        R1KV: 使用 query_states 计算 attention scores
-        SpeckV: 使用预计算的 Q 频率统计，忽略 query_states
-
-        参数 query_states 保留在接口中是为了与 R-KV 框架兼容，
-        但 SpeckV 实现中应该忽略它。
-        """
-        # ❌ 不使用 query_states
-        # scores = compute_attention_scores(query_states, key_states)
-
-        # ✅ 使用预计算统计
-        scores = self._compute_frequency_scores(key_states)
-        ...
+# 需要转置为 R1KV 期望的格式
+current_key = current_key.transpose(0, 1).unsqueeze(0)
+# 结果形状：[1, num_heads, seq_len, head_dim]
 ```
 
 ---
 
-## 3. GQA（分组查询注意力）处理
+## 2. R1KV 接口分析
 
-### 3.1 背景
+### 2.1 update_kv() 接口
 
-现代模型（Qwen2.5, LLaMA3）使用 GQA：
-- `num_attention_heads` (Q heads): 28-32
-- `num_key_value_heads` (KV heads): 4-8
-
-### 3.2 R-KV 的 GQA 处理
-
-**位置**：`utils.py` compute_attention_scores()
+**文件**：`R-KV/rkv/compression/r1_kv.py`
 
 ```python
-def compute_attention_scores(query_states, key_states, pooling="max"):
-    batch_size, q_heads, q_len, head_dim = query_states.shape
-    kv_heads = key_states.shape[1]
-    query_group_size = q_heads // kv_heads
-
-    if query_group_size == 1:
-        # 标准 MHA: Q heads == KV heads
-        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3))
-    else:
-        # GQA: Q heads > KV heads
-        # Reshape Q: [batch, kv_heads, group_size, q_len, head_dim]
-        query_states = query_states.view(
-            batch_size, kv_heads, query_group_size, q_len, head_dim
-        )
-        # Expand K: [batch, kv_heads, 1, kv_len, head_dim]
-        key_states = key_states.unsqueeze(2)
-
-        # Compute attention: [batch, kv_heads, group_size, q_len, kv_len]
-        attn_weights = torch.matmul(query_states, key_states.transpose(3, 4))
-
-        # Pool over query groups
-        if pooling == "mean":
-            attn_weights = attn_weights.mean(dim=2)
-        elif pooling == "max":
-            attn_weights = attn_weights.max(dim=2).values
+def update_kv(
+    self,
+    key_states: torch.Tensor,      # [batch, num_kv_heads, seq_len, head_dim]
+    query_states: torch.Tensor,    # [batch, num_heads, seq_len, head_dim]
+    value_states: torch.Tensor,    # [batch, num_kv_heads, seq_len, head_dim]
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    返回压缩后的 (key_states, value_states)
+    输出形状：[batch, num_kv_heads, compressed_len, head_dim]
+    其中 compressed_len <= self.budget
+    """
 ```
 
-### 3.3 对 SpeckV-RKV 的影响
-
-SpeckV 不使用 attention 打分，但**打分结果需要与 KV heads 对齐**：
+### 2.2 R1KV 算法核心
 
 ```python
-class SpeckVRKV:
-    def _compute_frequency_scores(self, key_states):
-        """
-        key_states: [batch, num_kv_heads, seq_len, head_dim]
+# 1. 计算注意力权重
+attn_weights = torch.matmul(query_states, key_states.transpose(-2, -1))
+attn_cache = attn_weights.mean(dim=-2)  # [batch, heads, seq_len]
 
-        SpeckV 的 sampled_heads 是 (layer, attention_head) 对，
-        需要映射到 KV heads。
-        """
-        batch_size, num_kv_heads, seq_len, head_dim = key_states.shape
+# 2. 计算 token 相似度（用于去重）
+similarity = cal_similarity(key_states)
 
-        # 获取 GQA 配置
-        if hasattr(self, 'num_key_value_groups'):
-            group_size = self.num_key_value_groups
-        else:
-            group_size = 1
+# 3. 混合评分
+final_score = attn_cache * mix_lambda - similarity * (1 - mix_lambda)
 
-        scores_per_kv_head = []
-        for kv_head in range(num_kv_heads):
-            # 找到属于这个 KV head 的 sampled attention heads
-            attn_heads = [h for l, h in self.sampled_heads
-                         if h // group_size == kv_head]
+# 4. TopK 选择
+keep_indices = final_score.topk(budget - window_size, dim=-1).indices
 
-            # 计算每个 attention head 的打分
-            head_scores = []
-            for attn_head in attn_heads:
-                score = self._score_single_head(key_states[:, kv_head], attn_head)
-                head_scores.append(score)
-
-            # 聚合（层内取 max，跨层取 mean）
-            aggregated = self._aggregate_head_scores(head_scores)
-            scores_per_kv_head.append(aggregated)
-
-        return torch.stack(scores_per_kv_head, dim=1)  # [batch, num_kv_heads, seq_len]
+# 5. 保留最近 window_size 个 token
+k_past = key_states.gather(dim=2, index=keep_indices)
+k_cur = key_states[:, :, -window_size:, :]
+key_states = torch.cat([k_past, k_cur], dim=2)
 ```
 
 ---
 
-## 4. 现有 SpeckV 实现架构
+## 3. SpeckV vLLM 适配要点
 
-### 4.1 三层架构
+### 3.1 与 R1KV 的关键区别
 
-```
-rkv/compression/speckv.py  (Wrapper)
-    │
-    └──→ weian_development/speckv/rkv_speckv_generate.py  (Generate Patch)
-            │
-            └──→ weian_development/speckv/sparse_round_pruner_prefill_keep.py  (Core Logic)
-```
-
-### 4.2 各层职责
-
-| 层 | 文件 | 职责 |
-|---|------|------|
-| Wrapper | `speckv.py` | 导出 `apply_speckv_generate_patch` |
-| Generate Patch | `rkv_speckv_generate.py` | 修改 model.generate() 流程 |
-| Core Logic | `sparse_round_pruner_prefill_keep.py` | 打分、裁剪、位置追踪 |
-
-### 4.3 Phase 0 的定位（方案 A）
-
-**Phase 0 采用方案 A：复用现有实现，不新建类**。
-
-```
-Phase 0 实现路径：
-  apply_speckv_rkv_style_patch() → SpeckVRKVStyle → round_pruning_utils.py
-
-现有代码位置：
-  weian_development/speckv/speckv_rkv_style.py     # 主压缩器
-  weian_development/speckv/round_pruning_utils.py  # 打分函数
-  weian_development/speckv/rkv_speckv_generate.py  # Generate patch
-```
-
-**Phase 0 目标**：
-- 理解现有代码的工作方式
-- 验证三种 pruning mode 的正确性
-- 创建使用文档
-- **不重写代码，不修改 `rkv/` 核心文件**
-
----
-
-## 5. reset_compression_state 调用点
-
-### 5.1 实际用途
-
-用于多样本评估时重置状态（如 token tracking）。
-
-### 5.2 调用位置
-
-**未在 modeling.py 中调用**，需要在评估脚本中手动调用：
-
-```python
-# 评估脚本示例
-for sample in dataset:
-    # 重置压缩器状态
-    for layer in model.model.layers:
-        if hasattr(layer.self_attn, 'kv_cluster'):
-            if hasattr(layer.self_attn.kv_cluster, 'reset_compression_state'):
-                layer.self_attn.kv_cluster.reset_compression_state()
-
-    # 运行推理
-    output = model.generate(...)
-```
-
-### 5.3 SpeckV-RKV 实现
-
-```python
-class SpeckVRKV:
-    def reset_compression_state(self) -> None:
-        """重置状态用于新样本"""
-        self.prefill_length = 0
-        self.cache_positions = []
-
-        # 如果追踪 token 索引
-        if hasattr(self, 'kept_token_indices'):
-            self.kept_token_indices = []
-            self.evicted_token_num = 0
-```
-
----
-
-## 6. 触发语义对齐问题（重要发现）
-
-### 6.1 问题描述
-
-验证 Agent 发现 SpeckV 的压缩触发机制与 R-KV 的三态 compression flag **完全独立**：
-
-| 维度 | R-KV | SpeckV |
+| 方面 | R1KV | SpeckV |
 |-----|------|--------|
-| **触发判断** | `compression` flag (None/True/False) | `absolute_position % divide_length == 0` |
-| **决策者** | CausalLM.forward 设置标志 | SpeckVRKVStyle 自行判断 |
-| **语义** | 三态：总是/触发时/禁止 | 二态：位置对齐时压缩 |
+| 评分依据 | attention + similarity | 频率统计 |
+| 是否需要 query | 是 | 否（使用预计算统计） |
+| 额外输入 | 无 | stats 文件 |
+| 窗口保留 | 是（window_size） | 可选 |
+| RoPE 处理 | 无 | 需要 RoPE 反演 |
 
-### 6.2 潜在风险
+### 3.2 SpeckV 需要适配的地方
 
-1. **`compression=False` 时 SpeckV 仍可能压缩**
-   - R-KV 明确禁止压缩时，SpeckV 仍在位置对齐点压缩
-   - 违反 R-KV 的设计意图
+1. **Stats 加载**
+   ```python
+   def __init__(self, budget, stats_path, ...):
+       self.stats = torch.load(stats_path)
+       # stats 包含：q_mean_complex, freq_scale_sq, sampled_heads 等
+   ```
 
-2. **压缩时机不可预测**
-   - R-KV 和 SpeckV 可能在不同时间点触发
-   - 缓存大小控制可能与预期不符
+2. **RoPE 反演**
+   - SpeckV 打分需要对 key 做 RoPE 反演
+   - 需要知道当前的位置信息
 
-### 6.3 影响评估
+3. **忽略 query_states**
+   - SpeckV 不使用 query 打分，但接口需要保持兼容
+   ```python
+   def update_kv(self, key_states, query_states, value_states):
+       # query_states 被忽略，保持接口兼容
+       scores = self._compute_scores(key_states)  # 不使用 query
+       ...
+   ```
 
-**对 Phase 0 验证的影响**：
-- 如果只运行 SpeckV 脚本（不混用 R-KV 其他算法），问题不会表现
-- 现有三个脚本应该仍能正常运行
-- 但结论的可信度需要额外验证
+### 3.3 位置信息问题
 
-**建议**：
-- Phase 0 验证时，添加日志记录实际压缩时机
-- 确认压缩仅发生在预期位置
-- 如果发现异常，在 Phase 1 实现中修复
+**挑战**：SpeckV 打分需要知道每个 token 的绝对位置，但 vLLM 的压缩调用点不直接提供位置信息。
 
-### 6.4 Stats 兼容性（已验证通过）
+**解决方案**：
+1. **方案 A**：从 `attn_metadata` 获取位置信息
+2. **方案 B**：跟踪压缩历史，推断当前位置
+3. **方案 C**：简化打分，不依赖绝对位置（可能影响效果）
 
-✓ `stats_utils.py` 包含完整的 `validate_stats_metadata()` 校验
-✓ 校验字段：prompt_template, use_chat_template, dtype, attn_implementation, rope_style/type
-✓ 不匹配时立即抛出 `ValueError`
-✓ `speckv_rkv_style.py` 在初始化时强制调用校验
+**建议**：Phase 0 先尝试方案 A，检查 `attn_metadata` 是否包含所需信息。
 
 ---
 
-## 7. Phase 0 验证清单（基于 Review 反馈）
+## 4. GQA 处理
 
-### 7.1 Stats 元数据校验（✓ 已实现）
+### 4.1 背景
 
-**验证结果**：现有代码已包含完整的 stats 元数据校验机制。
+Qwen2.5-7B 使用 GQA：
+- `num_attention_heads` = 28
+- `num_key_value_heads` = 4
+- `num_key_value_groups` = 7
 
-`validate_stats_metadata()` 在 `speckv_rkv_style.py` 初始化时自动调用，校验：
-- prompt_template, use_chat_template, system_prompt
-- attn_implementation, dtype, rope_style, rope_type
-
-无需额外操作，如果配置不匹配会自动报错。
-
-### 7.2 GQA 映射校验（建议）
-
-验证 sampled_heads 到 KV heads 的映射正确：
+### 4.2 vLLM 中的 GQA 处理
 
 ```python
-# 检查每个 KV head 覆盖的 sampled heads 数量
-for kv_head in range(num_kv_heads):
-    covered_heads = [h for l, h in sampled_heads if h // group_size == kv_head]
-    print(f"KV head {kv_head}: {len(covered_heads)} sampled heads")
+# flash_attn.py 中，KV cache 使用 num_kv_heads
+key_states.shape = [batch, num_kv_heads, seq_len, head_dim]  # [1, 4, seq, 128]
+
+# query 使用 num_attention_heads
+query_states.shape = [batch, num_heads, seq_len, head_dim]   # [1, 28, seq, 128]
 ```
 
-### 7.3 reset_compression_state 调用位置
+### 4.3 SpeckV 的 GQA 适配
 
-**已确认**：在 `rkv_sharded_eval.py` 的评估循环中，每个样本前需重置状态。
-现有脚本应已包含此逻辑，需验证。
+SpeckV 的 `sampled_heads` 是 attention head 索引，需要映射到 KV heads：
 
-### 7.4 进程命名规范
+```python
+# sampled_heads: [(layer, attn_head), ...]
+# 需要映射到 kv_head
 
-长时间任务必须使用 `PD-L1_binder` 进程名前缀：
-- 通过 `rkv_sharded_runner.py` wrapper 自动设置
-- 或在脚本中使用 `setproctitle`
+def map_to_kv_head(attn_head, num_kv_groups):
+    return attn_head // num_kv_groups
 
-### 7.5 输出目录命名
-
-避免覆盖基线结果：
-```bash
---output-dir outputs/speckv_perhead_aime24_$(date +%Y%m%d)
+# 例如：attn_head=14 -> kv_head=14//7=2
 ```
-
-### 7.6 Phase 0 → Phase 1 迁移说明
-
-| 方面 | Phase 0 (R-KV) | Phase 1 (vLLM) | 迁移难度 |
-|-----|----------------|----------------|---------|
-| KV Layout | `[batch, heads, seq, dim]` | PagedAttention blocks | 高 |
-| 压缩触发 | `absolute_position % divide_length` | 需要新设计 | 中 |
-| 位置追踪 | `cache_positions` list | `position_indices` tensor | 中 |
-| 打分算法 | 可复用 | 可复用 | 低 |
 
 ---
 
-## 8. 文件职责（只读参考）
+## 5. 环境变量设计
 
-| 文件 | 用途 | Phase 0 操作 |
-|-----|------|-------------|
-| `weian_development/speckv/speckv_rkv_style.py` | 主压缩器 | 只读、理解 |
-| `weian_development/speckv/round_pruning_utils.py` | 打分函数 | 只读、理解 |
-| `weian_development/speckv/stats_utils.py` | Stats 验证 | 只读、使用 |
-| `weian_development/speckv/rkv_speckv_generate.py` | Generate patch | 只读、理解 |
-| `weian_development/speckv/README.md` | 使用文档 | **新建** |
+### 5.1 新增环境变量
+
+| 变量名 | 默认值 | 说明 |
+|-------|--------|------|
+| `VLLM_COMPRESSION_ALGO` | `"r1kv"` | 压缩算法选择 |
+| `VLLM_SPECKV_STATS_PATH` | `None` | SpeckV stats 文件路径 |
+| `VLLM_SPECKV_PRUNING_MODE` | `"per_head"` | pruning 模式 |
+
+### 5.2 在 envs.py 中添加
+
+```python
+# vLLM/vllm/envs.py
+
+VLLM_COMPRESSION_ALGO: str = "r1kv"
+VLLM_SPECKV_STATS_PATH: Optional[str] = None
+VLLM_SPECKV_PRUNING_MODE: str = "per_head"
+
+environment_variables: Dict[str, Callable[[], Any]] = {
+    ...
+    "VLLM_COMPRESSION_ALGO": lambda: os.getenv("VLLM_COMPRESSION_ALGO", "r1kv"),
+    "VLLM_SPECKV_STATS_PATH": lambda: os.getenv("VLLM_SPECKV_STATS_PATH", None),
+    "VLLM_SPECKV_PRUNING_MODE": lambda: os.getenv("VLLM_SPECKV_PRUNING_MODE", "per_head"),
+}
+```
+
+---
+
+## 6. 测试策略
+
+### 6.1 单元测试优先级
+
+1. **接口兼容性**：`update_kv()` 输入输出格式正确
+2. **边界条件**：`seq_len <= budget` 时直接返回
+3. **压缩比**：输出长度 <= budget
+4. **数值正确性**：与 HF 路径对比
+
+### 6.2 与 HF 路径对比验证
+
+```python
+def test_consistency_with_hf():
+    """验证 vLLM 路径与 HF 路径结果一致"""
+    # 准备相同的输入
+    key = torch.randn(1, 4, 1000, 128)
+    value = torch.randn(1, 4, 1000, 128)
+
+    # HF 路径
+    hf_compressor = SpeckVRKVStyle(...)
+    hf_key, hf_value = hf_compressor.compress(key, value)
+
+    # vLLM 路径
+    vllm_compressor = SpeckVvLLM(...)
+    vllm_key, vllm_value = vllm_compressor.update_kv(key, None, value)
+
+    # 对比
+    assert torch.allclose(hf_key, vllm_key, rtol=1e-4)
+    assert torch.allclose(hf_value, vllm_value, rtol=1e-4)
+```
+
+---
+
+## 7. 已知限制
+
+### 7.1 Phase 0 限制
+
+| 限制 | 原因 | Phase 1 解决方案 |
+|-----|------|-----------------|
+| 无 Triton 优化 | Phase 0 重点是正确性 | Phase 1 实现 Triton kernel |
+| 仅支持 per_head 模式 | per_layer 需要跨层信息 | Phase 1 重新设计接口 |
+| 位置追踪可能不完整 | vLLM 接口限制 | 与 vLLM 团队协调 |
+
+### 7.2 与 HF 路径的功能差异
+
+| 功能 | HF 路径 | vLLM Phase 0 |
+|-----|--------|--------------|
+| per_head pruning | ✓ | ✓ |
+| per_layer pruning | ✓ | ✗（需跨层信息） |
+| per_layer_perhead | ✓ | ✗（需跨层信息） |
+| 位置追踪 | ✓ | 待验证 |
+| prefill 保护 | ✓ | 待实现 |
+
+---
+
+## 8. 文件修改检查清单
+
+### 8.1 新建文件
+
+- [ ] `rkv/compression/speckv_vllm.py` - SpeckV vLLM 接口实现
+- [ ] `tests/test_speckv_vllm.py` - 单元测试
+
+### 8.2 修改文件
+
+- [ ] `rkv/compression/__init__.py` - 导出 SpeckVvLLM
+- [ ] `vLLM/vllm/v1/attention/backends/flash_attn.py` - 算法选择分支
+- [ ] `vLLM/vllm/envs.py` - 环境变量
+
+### 8.3 验证默认行为不变
+
+```bash
+# 不设置 VLLM_COMPRESSION_ALGO，确认使用 R1KV
+python -c "from vllm.envs import VLLM_COMPRESSION_ALGO; print(VLLM_COMPRESSION_ALGO)"
+# 应输出: r1kv
+```
 
 ---
 
 *创建日期：2025-01-31*
-*更新日期：2025-01-31（基于 Review 反馈修正，移除与方案 A 矛盾的内容）*
+*更新日期：2025-01-31（重写为 vLLM 集成路径）*
