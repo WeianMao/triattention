@@ -32,14 +32,16 @@ vLLM/vllm/v1/attention/backends/flash_attn.py
 vLLM/vllm/v1/attention/backends/flash_attn.py
     │
     ├── FlashAttentionImpl.__init__()
-    │   └── if compression_algo == "speckv":
-    │           self.kvcompressor = SpeckV(budget=..., stats_path=...)
-    │       else:
-    │           self.kvcompressor = R1KV(budget=...)
+    │   ├── self.kvcompressor = SpeckVvLLM(...) or R1KV(...)  # 根据配置选择
+    │   └── self.position_indices = None  # SpeckV 需要的位置追踪（统一管理）
     │
     └── FlashAttentionImpl.forward()
-        └── [复用现有压缩调用逻辑，无需修改]
+        ├── [复用现有压缩触发逻辑]
+        └── [SpeckV 需额外维护 position_indices：压缩时同步更新]
 ```
+
+> **注意**：SpeckV 与 R1KV 的区别在于需要维护 `position_indices` 来追踪 token 的原始位置。
+> 这个追踪由 `FlashAttentionImpl` 统一管理，压缩器本身无状态。
 
 ### 1.3 与 HF 路径的关键区别
 
@@ -114,7 +116,7 @@ python -m vllm.entrypoints.openai.api_server --model xxx
 
 ### 3.1 R1KV 实现参考
 
-**文件**：`R-KV/rkv/compression/r1_kv.py`
+**文件**：`R-KV/HuggingFace/rkv/compression/r1_kv.py`
 
 ```python
 class R1KV:
@@ -184,58 +186,106 @@ SpeckV 的核心打分逻辑可以从这里提取：
 # (统一导入：from rkv.modeling import SpeckVvLLM，不要直接从 compression 导入)
 
 class SpeckVvLLM:
-    """SpeckV 压缩器 - vLLM 接口版本"""
+    """SpeckV 压缩器 - vLLM 接口版本
+
+    设计原则：
+    1. update_kv() 接口与 R1KV 完全一致，只返回 (K, V)
+    2. position_indices 由 FlashAttentionImpl 维护，通过参数传入打分
+    3. 保留索引通过 get_last_keep_indices() 暴露，供外部更新位置表
+    4. layer_idx 采用 lazy init（首次 forward 时初始化）
+    """
+
+    _shared_stats = None  # 类级别 stats 缓存（避免重复加载）
 
     def __init__(
         self,
         budget: int = 128,
         stats_path: str = None,           # 预计算统计文件
-        pruning_mode: str = "per_head",   # per_head / per_layer / per_layer_perhead
+        pruning_mode: str = "per_layer_perhead",  # Phase 0 仅支持 per_layer_perhead
         **kwargs,
     ):
         self.budget = budget
-        self.stats = self._load_stats(stats_path)
+        self.stats_path = stats_path
         self.pruning_mode = pruning_mode
 
-        # 位置追踪（与 KV cache 同步）
-        self.position_indices = None  # [num_blocks, block_size]
+        # lazy init：首次 forward 时从 layer.layer_idx 获取
+        self.layer_idx = None
+        self._initialized = False
 
-        # 共享三角函数表（每轮打分时更新）
-        self.trig_cos = None  # [num_offsets, freq_count]
+        # 本次压缩保留的索引（供外部获取）
+        self._last_keep_indices = None
+
+        # 共享三角函数表（惰性初始化）
+        self.trig_cos = None
         self.trig_sin = None
+
+    def _lazy_init(self, layer_idx: int):
+        """首次 forward 时调用，初始化 layer 相关状态"""
+        if self._initialized:
+            return
+
+        self.layer_idx = layer_idx
+        full_stats = self._load_shared_stats(self.stats_path)
+
+        # 只索引当前层的 stats
+        self.q_mean = full_stats["q_mean_complex"][layer_idx]
+        self.freq_scale_sq = full_stats["freq_scale_sq"][layer_idx]
+        self._initialized = True
+
+    @classmethod
+    def _load_shared_stats(cls, stats_path):
+        """类级别 stats 加载（所有层共享，避免重复 I/O）"""
+        if cls._shared_stats is None:
+            cls._shared_stats = torch.load(stats_path)
+        return cls._shared_stats
 
     def update_kv(
         self,
         key_states: torch.Tensor,
         query_states: torch.Tensor,
         value_states: torch.Tensor,
-        position_indices: torch.Tensor = None,  # 可选：外部传入位置
+        position_indices: torch.Tensor = None,  # 打分用，由 FlashAttentionImpl 传入
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        SpeckV 压缩逻辑（优化版，无 RoPE 反演）：
-        1. 直接用 K_rot 计算打分系数（避免 RoPE 反演）
-        2. 使用共享三角表计算多位置得分
-        3. TopK 选择
-        4. 返回压缩后的 K/V（同步更新 position_indices）
+        SpeckV 压缩逻辑。
+
+        接口与 R1KV 完全一致：只返回 (compressed_key, compressed_value)。
+        保留索引通过 get_last_keep_indices() 获取。
+
+        Args:
+            key_states: [batch, num_kv_heads, seq_len, head_dim]
+            query_states: [batch, num_heads, seq_len, head_dim]
+            value_states: [batch, num_kv_heads, seq_len, head_dim]
+            position_indices: [seq_len] 原始位置（打分用）
+
+        Returns:
+            (compressed_key, compressed_value) - 与 R1KV 接口一致
         """
+        self._last_keep_indices = None  # 重置
+
         if key_states.shape[2] <= self.budget:
             return key_states, value_states
 
         scores = self._compute_scores_optimized(key_states, position_indices)
         keep_indices = self._select_tokens(scores)
 
+        # 保存保留索引，供外部更新 position_indices
+        self._last_keep_indices = keep_indices
+
         compressed_key = self._gather(key_states, keep_indices)
         compressed_value = self._gather(value_states, keep_indices)
 
         return compressed_key, compressed_value
 
+    def get_last_keep_indices(self) -> torch.Tensor:
+        """获取上一次压缩保留的索引（只读）
+
+        用途：FlashAttentionImpl 调用此方法更新 position_indices
+        """
+        return self._last_keep_indices
+
     def _compute_scores_optimized(self, key_states, position_indices):
-        """
-        优化的打分计算（无三角函数调用）：
-        1. 计算位置无关系数 A_coef, B_coef（只需乘法加法）
-        2. 使用预计算的共享三角表 C, S
-        3. score = A_coef · C - B_coef · S + extra_term
-        """
+        """优化的打分计算（无三角函数调用）"""
         ...
 
     def _select_tokens(self, scores):
@@ -243,15 +293,16 @@ class SpeckVvLLM:
         ...
 ```
 
-### 4.2 vLLM 集成修改
+### 4.2 vLLM 集成修改（occupied_slot_mapping 方案）
+
+> **注意**：flash_attn.py 中没有 `request_ids` 可用，使用 `occupied_slot_mapping` 实现 per-request 隔离。
+> `seq_starts_ends_indices` 由 `seq_lens` 的前缀和得到（长度 = `num_reqs + 1`），用于切分每个请求的 slot 区间。
 
 ```python
 # vLLM/vllm/v1/attention/backends/flash_attn.py
 
-# 统一从 rkv.modeling 导入（不要直接从 rkv.compression 导入）
 from rkv.modeling import R1KV, SpeckVvLLM
 
-# 环境变量
 VLLM_COMPRESSION_ALGO = os.getenv("VLLM_COMPRESSION_ALGO", "r1kv")
 VLLM_SPECKV_STATS_PATH = os.getenv("VLLM_SPECKV_STATS_PATH", None)
 
@@ -265,7 +316,72 @@ class FlashAttentionImpl:
             )
         else:  # 默认 r1kv
             self.kvcompressor = R1KV(budget=VLLM_V1_R_KV_BUDGET)
+
+        # SpeckV 专用：全局 position_indices（与 KV cache 同布局）
+        self.position_indices = None  # [num_blocks, block_size]，惰性初始化
+        self.prefill_lens = {}        # slot_key -> prefill_len
+
+    def forward(self, layer, ...):
+        # SpeckV lazy init
+        if isinstance(self.kvcompressor, SpeckVvLLM):
+            self.kvcompressor._lazy_init(layer.layer_idx)
+            if self.position_indices is None:
+                self.position_indices = torch.full(
+                    (num_blocks, block_size), -1, dtype=torch.long, device=device
+                )
+
+        # 压缩循环（与现有 R1KV 结构一致）
+        for i in range(attn_metadata.num_reqs):
+            seq_len = seq_lens[i]
+
+            if seq_len < VLLM_V1_R_KV_BUDGET + VLLM_V1_R_KV_BUFFER:
+                continue
+
+            # 通过 occupied_slot_mapping 获取当前序列的 slots
+            slots = occupied_slot_mapping[seq_starts_ends_indices[i]:seq_starts_ends_indices[i+1]]
+            slot_key = slots[0].item()  # 用起始 slot 作为序列标识
+
+            # 首次压缩：记录 prefill_len，初始化 position_indices
+            if slot_key not in self.prefill_lens:
+                self.prefill_lens[slot_key] = seq_len
+                self._write_positions(slots, torch.arange(seq_len, device=device))
+
+            # 提取当前序列的位置
+            current_positions = self._read_positions(slots)
+
+            # 压缩（接口与 R1KV 一致，只返回 K, V）
+            compressed_key, compressed_value = self.kvcompressor.update_kv(
+                current_key,
+                current_query,
+                current_value,
+                position_indices=current_positions,  # 打分用
+            )
+
+            # SpeckV：用保留索引更新位置表
+            if isinstance(self.kvcompressor, SpeckVvLLM):
+                keep_indices = self.kvcompressor.get_last_keep_indices()
+                if keep_indices is not None:
+                    kept_positions = current_positions[keep_indices]
+                    # 更新（需配合 vLLM block 管理）
+
+            # 回写 KV cache
+            key_cache[...] = compressed_key
+            value_cache[...] = compressed_value
+
+    def _read_positions(self, slots):
+        """从全局 position_indices 读取当前序列的位置"""
+        ...
+
+    def _write_positions(self, slots, positions):
+        """写入全局 position_indices"""
+        ...
 ```
+
+**清理策略**：
+- `position_indices`：全局张量，block 回收后下次使用时覆盖，无需显式清理
+- `prefill_lens`：以 `slot_key` 作为 key，**必须在 slot 复用时重置**，避免复用旧请求的 prefill_len
+  - 最小实现：当检测到该 slot 尚未初始化（如 `position_indices` 为 -1）时，覆盖 `prefill_lens[slot_key]` 并重写位置表
+  - 可选：在 scheduler 通知 request 完成时清理（hook 回调）
 
 ---
 
@@ -302,17 +418,50 @@ __all__ = [..., "SpeckVvLLM"]
 
 ```python
 # R-KV/vLLM/tests/test_speckv_vllm.py
+
 def test_update_kv_interface():
-    """验证接口兼容性"""
+    """验证接口兼容性（与 R1KV 一致）"""
     compressor = SpeckVvLLM(budget=128, stats_path="...")
-    k, v = compressor.update_kv(key, query, value)
+    compressor._lazy_init(layer_idx=0)  # 必须先初始化
+
+    # 准备测试数据
+    seq_len = 256
+    key = torch.randn(1, 8, seq_len, 64)
+    query = torch.randn(1, 8, seq_len, 64)
+    value = torch.randn(1, 8, seq_len, 64)
+    position_indices = torch.arange(seq_len)  # 显式传入
+
+    # 测试：传入 position_indices
+    k, v = compressor.update_kv(key, query, value, position_indices=position_indices)
     assert k.shape[2] <= 128
     assert v.shape[2] <= 128
 
+    # 验证 keep_indices 可获取
+    keep_indices = compressor.get_last_keep_indices()
+    assert keep_indices is not None
+    assert len(keep_indices) == k.shape[2]
+
+def test_update_kv_fallback():
+    """验证 position_indices=None 时的 fallback 行为"""
+    compressor = SpeckVvLLM(budget=128, stats_path="...")
+    compressor._lazy_init(layer_idx=0)
+
+    key = torch.randn(1, 8, 256, 64)
+    query = torch.randn(1, 8, 256, 64)
+    value = torch.randn(1, 8, 256, 64)
+
+    # position_indices=None 时，内部 fallback 到 torch.arange(seq_len)
+    k, v = compressor.update_kv(key, query, value, position_indices=None)
+    assert k.shape[2] <= 128
+
 def test_compression_quality():
-    """验证压缩质量"""
-    # 对比 HF 路径结果
+    """验证压缩质量（与 HF 路径对比）"""
+    # 对比 HF 路径结果，需相同 stats、相同输入
 ```
+
+> **position_indices 行为说明**：
+> - 传入 `position_indices`：使用传入的位置进行打分（生产环境）
+> - 传入 `None`：fallback 到 `torch.arange(seq_len)`（测试/debug 用）
 
 ### Step 5: 端到端验证
 
@@ -353,6 +502,20 @@ curl http://localhost:8000/v1/completions -d '{"prompt": "...", "max_tokens": 10
 | SpeckV vLLM vs HF | AIME24 | 差异 < 1% |
 | SpeckV vs R1KV | AIME24 | 记录对比 |
 
+**测试条件（确保可复现）**：
+
+| 条件 | 值 | 说明 |
+|-----|-----|------|
+| Prompt 模板 | plain（无 chat wrapper） | 与 stats 采样时一致 |
+| temperature | 0.0 | 确定性输出 |
+| top_p | 1.0 | 不做 nucleus sampling |
+| seed | 固定值（如 42） | 随机种子一致 |
+| budget | 相同值 | vLLM 与 HF 路径使用相同 budget |
+| 模型 | 同一 checkpoint | 避免版本差异 |
+
+> **注意**：若 HF 路径用 chat 模板（如 Qwen2.5-Chat）而 vLLM 用 plain 模板，
+> 结果差异可能超过 1%，这是模板差异而非算法差异。
+
 ---
 
 ## 7. 风险与缓解
@@ -392,7 +555,7 @@ curl http://localhost:8000/v1/completions -d '{"prompt": "...", "max_tokens": 10
 
 | 文件 | 修改内容 |
 |-----|---------|
-| `rkv/compression/__init__.py` | 导出 SpeckVvLLM |
+| `R-KV/HuggingFace/rkv/compression/__init__.py` | 导出 SpeckVvLLM |
 | `vLLM/vllm/v1/attention/backends/flash_attn.py` | 添加算法选择分支 |
 | `vLLM/vllm/envs.py` | 添加 SpeckV 相关环境变量 |
 
@@ -400,7 +563,7 @@ curl http://localhost:8000/v1/completions -d '{"prompt": "...", "max_tokens": 10
 
 | 文件 | 用途 |
 |-----|------|
-| `rkv/compression/r1_kv.py` | R1KV 实现参考 |
+| `R-KV/HuggingFace/rkv/compression/r1_kv.py` | R1KV 实现参考 |
 | `weian_development/speckv/speckv_rkv_style.py` | SpeckV 打分逻辑参考 |
 | `weian_development/speckv/round_pruning_utils.py` | 打分函数参考 |
 

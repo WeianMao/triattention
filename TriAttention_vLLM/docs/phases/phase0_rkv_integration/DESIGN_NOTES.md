@@ -62,7 +62,7 @@ vLLM 使用 PagedAttention，KV cache 是分块存储的：
 
 ```python
 # kv_cache 形状：[num_blocks, block_size, num_heads, head_dim]
-# 通过 slot_mapping 访问特定序列的 token
+# 通过 occupied_slot_mapping 访问特定序列的 token
 
 # 提取当前序列的 KV
 current_key = key_cache.view(num_blocks * block_size, num_heads, head_dim)
@@ -250,117 +250,251 @@ from rkv.modeling import R1KV, SpeckVvLLM
 
 **禁止**：直接 `from rkv.compression.speckv_vllm import SpeckVvLLM`（绕过 modeling.py）
 
-### 4.2 状态管理：全局 position_indices（非 per-request 字典）
+### 4.2 状态管理：全局 position_indices + occupied_slot_mapping
 
 **问题**：SpeckV 需要位置信息，但 `kvcompressor` 是全局单例。
 
-**决策**：使用**全局 `position_indices` 张量**，与 KV cache 同布局。**不使用** per-request 状态字典。
+**决策**：使用**全局 `position_indices` 张量**，与 KV cache 同布局，通过 `occupied_slot_mapping` 实现 per-request 隔离。
+
+> **重要**：不使用 `req_id` 字典，因为 flash_attn.py 中没有 `request_ids` 可用。
+> vLLM 的 `occupied_slot_mapping` 已提供原生的 per-request 隔离机制。
 
 ```python
-# position_indices 存储位置：与 KV cache 对齐
-# 形状：[num_blocks, block_size]（与 PagedAttention 一致）
+# position_indices 存储布局：与 KV cache 完全对齐
+# 形状：[num_blocks, block_size]（PagedAttention 布局）
+# 隔离机制：通过 occupied_slot_mapping 索引，天然 per-request 隔离
 
 # 谁维护：flash_attn.py（不是 SpeckV 压缩器）
 # 何时更新：
-#   - Prefill: 初始化为 [0, 1, 2, ..., prefill_len-1]
-#   - Decode: 追加新位置
-#   - Prune: 保留的 token 位置不变
+#   - Prefill: position_indices[slots] = torch.arange(prefill_len)
+#   - Decode: position_indices[new_slot] = current_seq_len
+#   - Prune: position_indices[slots] = position_indices[slots][keep_indices]
 
-# SpeckV 压缩器：无状态，position_indices 作为参数传入
+# 清理策略：position_indices 无需显式清理，prefill_lens 需要在 slot 复用时重置
+# - 当 request 完成时，其 block 被 vLLM 回收
+# - 新 request 分配时，会重新初始化对应 slot 的 position_indices
+# - 若 slot 被复用，必须覆盖 prefill_lens[slot_key]，避免复用旧 prefill_len
+
+# SpeckV 压缩器设计原则：
+# 1. update_kv() 接口与 R1KV 完全一致，只返回 (K, V)
+# 2. 保留索引通过 get_last_keep_indices() 暴露
+# 3. layer_idx 采用 lazy init（首次 forward 时初始化）
+# 4. position_indices=None 时，fallback 到 torch.arange(seq_len)
+
 class SpeckVvLLM:
-    def __init__(self, budget, stats_path, layer_idx, ...):
-        self.stats = self._load_stats(stats_path)
-        self.layer_idx = layer_idx  # 必须传入，用于选择正确的 stats
+    _shared_stats = None  # 类级别缓存
 
-    def update_kv(
-        self,
-        key_states,
-        query_states,
-        value_states,
-        position_indices,  # 从 flash_attn.py 传入，形状 [seq_len]
-        prefill_len=0,     # 从 attn_metadata 获取
-    ):
-        # 无内部状态，所有信息通过参数传入
-        ...
+    def __init__(self, budget, stats_path, ...):
+        self.budget = budget
+        self.stats_path = stats_path
+        self.layer_idx = None  # lazy init
+        self._initialized = False
+        self._last_keep_indices = None  # 本次压缩保留的索引
+
+    def _lazy_init(self, layer_idx: int):
+        """首次 forward 时调用"""
+        if self._initialized:
+            return
+        self.layer_idx = layer_idx
+        full_stats = self._load_shared_stats(self.stats_path)
+        self.q_mean = full_stats["q_mean_complex"][layer_idx]
+        self._initialized = True
+
+    def update_kv(self, key_states, query_states, value_states, position_indices=None):
+        """接口与 R1KV 一致，只返回 (K, V)"""
+        self._last_keep_indices = None
+        if key_states.shape[2] <= self.budget:
+            return key_states, value_states
+
+        # Fallback: position_indices 为空时用序列位置
+        if position_indices is None:
+            position_indices = torch.arange(key_states.shape[2], device=key_states.device)
+
+        scores = self._compute_scores(key_states, position_indices)
+        keep_indices = self._select_tokens(scores)
+        self._last_keep_indices = keep_indices  # 保存供外部获取
+
+        return self._gather(key_states, keep_indices), self._gather(value_states, keep_indices)
+
+    def get_last_keep_indices(self):
+        """供 FlashAttentionImpl 更新 position_indices"""
+        return self._last_keep_indices
 ```
 
 **为什么不用 per-request 字典**：
-- vLLM 的 position_indices 已经按 request 隔离（通过 `slot_mapping`）
-- 全局张量 + slot_mapping 天然实现了 per-request 隔离
+- vLLM 的 position_indices 已经按 request 隔离（通过 `occupied_slot_mapping`）
+- 全局张量 + occupied_slot_mapping 天然实现了 per-request 隔离
 - 避免压缩器内部维护状态，简化实现
 
-### 4.3 layer_idx 传递
+### 4.3 layer_idx 传递（Lazy Init 方案）
 
-**问题**：SpeckV stats 是按层采样的，vLLM 的 `update_kv` 是按层调用。需要让 SpeckV 知道当前是哪一层。
+**问题**：SpeckV stats 是按层采样的，需要知道当前层索引。但 vLLM 的 `FlashAttentionImpl.__init__` 不一定能拿到 `layer_idx`。
 
-**决策**：在 `FlashAttentionImpl.__init__` 中传入 `layer_idx`，创建 **per-layer 的压缩器实例**。
+**决策**：采用 **Lazy Init**，在首次 `forward` 时从 `layer.layer_idx` 获取。
 
+**实现方式**：
 ```python
 # flash_attn.py
 
 class FlashAttentionImpl:
-    def __init__(self, ..., layer_idx: int):  # vLLM 已有 layer_idx 参数
+    def __init__(self, ...):
+        # 不在构造时传入 layer_idx
         if VLLM_COMPRESSION_ALGO == "speckv":
             self.kvcompressor = SpeckVvLLM(
                 budget=VLLM_V1_R_KV_BUDGET,
                 stats_path=VLLM_SPECKV_STATS_PATH,
-                layer_idx=layer_idx,  # 传入 layer_idx
+                # 注意：不传 layer_idx
             )
         else:
             self.kvcompressor = R1KV(budget=VLLM_V1_R_KV_BUDGET)
 
-# SpeckVvLLM 使用 layer_idx 选择正确的 stats
-class SpeckVvLLM:
-    def __init__(self, budget, stats_path, layer_idx, ...):
-        self.layer_idx = layer_idx
-        full_stats = torch.load(stats_path)
+    def forward(self, layer, ...):
+        # Lazy init：首次 forward 时初始化 layer_idx
+        if isinstance(self.kvcompressor, SpeckVvLLM):
+            self.kvcompressor._lazy_init(layer.layer_idx)
+        ...
 
-        # 只加载当前层的 stats
-        self.q_mean = full_stats["q_mean_complex"][layer_idx]  # [num_heads, freq_count]
+# SpeckVvLLM 的 lazy init
+class SpeckVvLLM:
+    _shared_stats = None  # 类级别缓存（所有层共享）
+
+    def __init__(self, budget, stats_path, ...):
+        self.budget = budget
+        self.stats_path = stats_path
+        self.layer_idx = None  # 延迟初始化
+        self._initialized = False
+
+    def _lazy_init(self, layer_idx: int):
+        if self._initialized:
+            return
+        self.layer_idx = layer_idx
+        full_stats = self._load_shared_stats(self.stats_path)
+        self.q_mean = full_stats["q_mean_complex"][layer_idx]
         self.freq_scale_sq = full_stats["freq_scale_sq"][layer_idx]
-        self.sampled_heads = [h for (l, h) in full_stats["sampled_heads"] if l == layer_idx]
+        self._initialized = True
+
+    @classmethod
+    def _load_shared_stats(cls, stats_path):
+        if cls._shared_stats is None:
+            cls._shared_stats = torch.load(stats_path)
+        return cls._shared_stats
 ```
 
-### 4.4 position_indices 在 vLLM 中的维护
+**优点**：
+- 不依赖 `FlashAttentionImpl.__init__` 的参数（vLLM 不一定传 layer_idx）
+- Stats 文件只加载一次（类级别缓存）
+- 每层压缩器只初始化一次（`_initialized` 保护）
+
+### 4.4 position_indices 在 vLLM 中的维护（occupied_slot_mapping 方案）
 
 **问题**：HF 路径靠 `cache_positions` 跟踪位置，vLLM 没有现成的位置追踪。
 
-**决策**：在 `flash_attn.py` 中显式维护 `position_indices`，与 KV cache 同步。
+**决策**：
+1. `position_indices` 使用**全局张量**，形状 `[num_blocks, block_size]`，与 KV cache 对齐
+2. 通过 `occupied_slot_mapping` 索引，实现 per-request 隔离（**无需 `req_id`**）
+3. **绝不**作为 `update_kv()` 返回值
+4. 压缩后用 `get_last_keep_indices()` 获取保留索引，更新位置表
+
+> **为什么不用 req_id 字典**：flash_attn.py 中没有 `request_ids` 可用，
+> 而 `occupied_slot_mapping` 是 vLLM 原生的 per-request 隔离机制。
 
 ```python
-# flash_attn.py 修改（伪代码）
+# flash_attn.py 修改
 
 class FlashAttentionImpl:
-    def __init__(self, ..., layer_idx):
-        self.kvcompressor = SpeckVvLLM(layer_idx=layer_idx, ...) if algo == "speckv" else R1KV(...)
+    def __init__(self, ...):
+        if VLLM_COMPRESSION_ALGO == "speckv":
+            self.kvcompressor = SpeckVvLLM(budget=..., stats_path=...)
+        else:
+            self.kvcompressor = R1KV(budget=...)
 
-        # 新增：position_indices 存储（与 KV cache 同布局）
-        # 实际实现可能放在 attn_metadata 或单独的数据结构中
-        self.position_indices = None  # [num_blocks, block_size]
+        # SpeckV 专用：全局 position_indices（与 KV cache 同布局）
+        # 形状：[num_blocks, block_size]
+        self.position_indices = None  # 惰性初始化
 
-    def forward(self, ...):
-        # Prefill: 初始化 position_indices
-        if is_prefill:
-            self.position_indices[block_ids] = torch.arange(prefill_len)
+        # prefill_len 记录：用 (layer_idx, slot_start) 作为 key
+        self.prefill_lens = {}
 
-        # Decode: 追加新位置
-        if is_decode:
-            self.position_indices[new_slot] = current_seq_len
-
-        # Prune: 同步更新
-        if need_compress:
-            # 提取当前序列的 position_indices
-            current_positions = self.position_indices[slot_mapping]
-
-            # 调用压缩器，传入 position_indices
-            compressed_k, compressed_v = self.kvcompressor.update_kv(
-                current_key, current_query, current_value,
-                position_indices=current_positions,
+    def _init_position_indices(self, num_blocks, block_size, device):
+        """惰性初始化 position_indices"""
+        if self.position_indices is None:
+            self.position_indices = torch.full(
+                (num_blocks, block_size), -1, dtype=torch.long, device=device
             )
 
-            # 回写时同步更新 position_indices
-            # （保留的 token 位置不变）
+    def forward(self, layer, ...):
+        # Lazy init
+        if isinstance(self.kvcompressor, SpeckVvLLM):
+            self.kvcompressor._lazy_init(layer.layer_idx)
+            self._init_position_indices(num_blocks, block_size, device)
+
+        # 压缩循环（与现有 R1KV 代码结构一致）
+        for i in range(attn_metadata.num_reqs):
+            seq_len = seq_lens[i]
+
+            if seq_len < BUDGET + BUFFER:
+                continue
+
+            # 通过 occupied_slot_mapping 获取当前序列的 slots
+            slots = occupied_slot_mapping[seq_starts_ends_indices[i]:seq_starts_ends_indices[i+1]]
+            slot_key = slots[0].item()  # 用起始 slot 作为序列标识
+
+            # 首次压缩：初始化 position_indices
+            if slot_key not in self.prefill_lens:
+                self.prefill_lens[slot_key] = seq_len
+                # 写入全局 position_indices
+                self._write_positions(slots, torch.arange(seq_len, device=device))
+
+            # 提取当前序列的 position_indices
+            current_positions = self._read_positions(slots)
+
+            # 压缩（接口与 R1KV 完全一致）
+            compressed_k, compressed_v = self.kvcompressor.update_kv(
+                current_key, current_query, current_value,
+                position_indices=current_positions,  # 打分用
+            )
+
+            # 用保留索引更新 position_indices
+            if isinstance(self.kvcompressor, SpeckVvLLM):
+                keep_indices = self.kvcompressor.get_last_keep_indices()
+                if keep_indices is not None:
+                    kept_positions = current_positions[keep_indices]
+                    # 压缩后 slots 数量减少，需配合 vLLM block 管理
+                    # （这里简化，实际需要与 block 回收逻辑配合）
+
+            # 回写 KV cache
+            key_cache[...] = compressed_k
+            value_cache[...] = compressed_v
+
+    def _read_positions(self, slots):
+        """从全局 position_indices 读取"""
+        positions = torch.empty(len(slots), dtype=torch.long, device=self.position_indices.device)
+        for j, slot in enumerate(slots):
+            block_idx = slot // self.block_size
+            offset = slot % self.block_size
+            positions[j] = self.position_indices[block_idx, offset]
+        return positions
+
+    def _write_positions(self, slots, positions):
+        """写入全局 position_indices"""
+        for j, slot in enumerate(slots):
+            block_idx = slot // self.block_size
+            offset = slot % self.block_size
+            self.position_indices[block_idx, offset] = positions[j]
 ```
+
+**清理策略**：
+- `position_indices`：全局张量，block 被回收后下次使用时会被覆盖，无需显式清理
+- `prefill_lens`：使用 `slot_key` 作为 key，**必须在 slot 复用时重置**
+  - **可选方案 A**：在 scheduler 通知 request 完成时清理（需要 hook）
+  - **可选方案 B**：惰性清理，当 `prefill_lens` 大小超过阈值时清理不活跃的 key
+  - **Phase 0 最小实现**：当检测到该 slot 尚未初始化（如 `position_indices` 为 -1）时，覆盖 `prefill_lens[slot_key]` 并重写位置表
+
+**关键点**：
+- `update_kv()` 只返回 `(K, V)`，与 R1KV 接口完全一致
+- 位置表更新逻辑在 `FlashAttentionImpl` 中，不在压缩器内
+- 保留索引通过 `get_last_keep_indices()` 只读获取
+- **无需 `request_ids`**，使用 `occupied_slot_mapping` 的起始 slot 作为序列标识
 
 ### 4.5 Prefill 处理规则与 prefill_len 来源
 
@@ -375,29 +509,49 @@ class FlashAttentionImpl:
 
 **prefill_len 在 vLLM 中的来源**：
 
+> **隔离原则**：Phase 0 不修改 `attn_metadata` 结构，避免影响其他模块。
+
 ```python
-# 方案 1：从 attn_metadata 获取（推荐）
-# vLLM v1 的 FlashAttentionMetadata 包含：
+# 方案 1：从 attn_metadata 获取（不采用）
+# vLLM v1 的 FlashAttentionMetadata 只有 batch 级别信息：
 #   - num_prefill_tokens: int  # 当前 batch 的 prefill token 总数
 #   - num_decode_tokens: int   # 当前 batch 的 decode token 总数
-# 但这是 batch 级别的，不是 per-request 的
+# 无法直接获取 per-request prefill_len，且添加新字段违反隔离原则
 
-# 方案 2：从 request 信息推断
-# 在压缩循环中（for i in range(attn_metadata.num_reqs)）：
-#   - 首次压缩时：prefill_len = 当前 seq_len（整个序列都是 prefill）
-#   - 后续压缩时：prefill_len 保持不变（需要记录）
+# 方案 2（推荐）：首次压缩时记录
+# 首次触发压缩时（seq_len >= budget + buffer），当前 seq_len 就是 prefill_len
+# 将其存储在 FlashAttentionImpl 的实例变量中（不修改 attn_metadata）
+# 其中 seq_starts_ends_indices 由 seq_lens 的前缀和得到（长度 = num_reqs + 1）
+class FlashAttentionImpl:
+    def __init__(self, ...):
+        self.prefill_lens = {}  # slot_key -> prefill_len，本地维护
 
-# 方案 3：使用 position_indices 推断
-# prefill_len = min(position_indices)  # 位置 0~prefill_len-1 是 prefill
-# 但压缩后 position_indices 可能乱序，需要额外记录
+    def forward(self, ...):
+        for i in range(attn_metadata.num_reqs):
+            slots = occupied_slot_mapping[seq_starts_ends_indices[i]:seq_starts_ends_indices[i+1]]
+            slot_key = slots[0].item()
+            if slot_key not in self.prefill_lens:
+                # 首次压缩：记录 prefill_len
+                self.prefill_lens[slot_key] = seq_lens[i]
 
-# 推荐方案：在 attn_metadata 中添加 per-request prefill_len
-# attn_metadata.prefill_lens: torch.Tensor  # [num_reqs]
+            prefill_len = self.prefill_lens[slot_key]
+            ...
+
+# 方案 3（备选）：使用 position_indices 推断
+# prefill 阶段的 token 位置是连续的 [0, 1, 2, ..., prefill_len-1]
+# 找到位置 0 所在的索引，其之后连续位置的 token 就是 prefill 部分
+# 优点：无需额外存储；缺点：逻辑较复杂
 ```
 
-**实现方式**：
+**推荐方案**：使用方案 2（本地记录），简单且不侵入现有结构。
+
+**实现方式**（SpeckVvLLM.update_kv）：
 ```python
 def update_kv(self, key_states, ..., position_indices, prefill_len=0):
+    """
+    prefill_len 由调用方（flash_attn.py）从本地 prefill_lens dict 获取后传入，
+    不依赖 attn_metadata 结构变更。
+    """
     if prefill_len > 0:
         # 分离 prefill 和 decode 部分
         prefill_k = key_states[:, :, :prefill_len, :]
