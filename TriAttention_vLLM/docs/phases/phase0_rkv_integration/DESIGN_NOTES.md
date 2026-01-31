@@ -2,6 +2,9 @@
 
 基于代码验证发现的补充说明和修正。
 
+> **重要说明**：Phase 0 采用**方案 A（monkey patch model.forward）**，复用现有 `speckv_rkv_style.py` 实现，**不新建 SpeckVRKV 类，不修改 `rkv/` 核心文件**。
+> 本文档中关于 `SpeckVRKV` 类的代码示例仅作为 R-KV 接口机制的参考说明，不代表 Phase 0 的实际实现路径。
+
 ---
 
 ## 1. Compression Flag 三态机制（重要补充）
@@ -234,21 +237,25 @@ rkv/compression/speckv.py  (Wrapper)
 | Generate Patch | `rkv_speckv_generate.py` | 修改 model.generate() 流程 |
 | Core Logic | `sparse_round_pruner_prefill_keep.py` | 打分、裁剪、位置追踪 |
 
-### 4.3 Phase 0 的定位
+### 4.3 Phase 0 的定位（方案 A）
 
-Phase 0 的 `speckv_rkv.py` 是**新的平行实现**：
+**Phase 0 采用方案 A：复用现有实现，不新建类**。
 
 ```
-现有实现（generate wrapper 模式）:
-  speckv.py → rkv_speckv_generate.py → sparse_round_pruner
+Phase 0 实现路径：
+  apply_speckv_rkv_style_patch() → SpeckVRKVStyle → round_pruning_utils.py
 
-Phase 0 实现（R-KV update_kv 模式）:
-  speckv_rkv.py → 复用 round_pruning_utils.py
+现有代码位置：
+  weian_development/speckv/speckv_rkv_style.py     # 主压缩器
+  weian_development/speckv/round_pruning_utils.py  # 打分函数
+  weian_development/speckv/rkv_speckv_generate.py  # Generate patch
 ```
 
-**关键区别**：
-- 现有：在 generate loop 外部压缩
-- Phase 0：在 attention forward 内部压缩（符合 R-KV 接口）
+**Phase 0 目标**：
+- 理解现有代码的工作方式
+- 验证三种 pruning mode 的正确性
+- 创建使用文档
+- **不重写代码，不修改 `rkv/` 核心文件**
 
 ---
 
@@ -292,29 +299,112 @@ class SpeckVRKV:
 
 ---
 
-## 6. 需要修改的文件清单
+## 6. 触发语义对齐问题（重要发现）
 
-### 6.1 新建文件
+### 6.1 问题描述
 
-| 文件 | 内容 |
-|-----|------|
-| `rkv/compression/speckv_rkv.py` | SpeckV-RKV 实现 |
+验证 Agent 发现 SpeckV 的压缩触发机制与 R-KV 的三态 compression flag **完全独立**：
 
-### 6.2 修改文件
+| 维度 | R-KV | SpeckV |
+|-----|------|--------|
+| **触发判断** | `compression` flag (None/True/False) | `absolute_position % divide_length == 0` |
+| **决策者** | CausalLM.forward 设置标志 | SpeckVRKVStyle 自行判断 |
+| **语义** | 三态：总是/触发时/禁止 | 二态：位置对齐时压缩 |
 
-| 文件 | 修改内容 |
-|-----|---------|
-| `rkv/compression/__init__.py` | 添加 `from .speckv_rkv import SpeckVRKV` |
-| `rkv/modeling.py` | KV_COMPRESSION_MAP 添加 `"speckv_rkv": SpeckVRKV` |
-| `run_math.py` | 添加 SpeckV 相关命令行参数 |
+### 6.2 潜在风险
 
-### 6.3 复用文件（不修改）
+1. **`compression=False` 时 SpeckV 仍可能压缩**
+   - R-KV 明确禁止压缩时，SpeckV 仍在位置对齐点压缩
+   - 违反 R-KV 的设计意图
 
-| 文件 | 用途 |
-|-----|------|
-| `weian_development/speckv/round_pruning_utils.py` | 打分函数、RoPE 处理 |
-| `weian_development/speckv/stats_utils.py` | Stats 加载验证 |
+2. **压缩时机不可预测**
+   - R-KV 和 SpeckV 可能在不同时间点触发
+   - 缓存大小控制可能与预期不符
+
+### 6.3 影响评估
+
+**对 Phase 0 验证的影响**：
+- 如果只运行 SpeckV 脚本（不混用 R-KV 其他算法），问题不会表现
+- 现有三个脚本应该仍能正常运行
+- 但结论的可信度需要额外验证
+
+**建议**：
+- Phase 0 验证时，添加日志记录实际压缩时机
+- 确认压缩仅发生在预期位置
+- 如果发现异常，在 Phase 1 实现中修复
+
+### 6.4 Stats 兼容性（已验证通过）
+
+✓ `stats_utils.py` 包含完整的 `validate_stats_metadata()` 校验
+✓ 校验字段：prompt_template, use_chat_template, dtype, attn_implementation, rope_style/type
+✓ 不匹配时立即抛出 `ValueError`
+✓ `speckv_rkv_style.py` 在初始化时强制调用校验
+
+---
+
+## 7. Phase 0 验证清单（基于 Review 反馈）
+
+### 7.1 Stats 元数据校验（✓ 已实现）
+
+**验证结果**：现有代码已包含完整的 stats 元数据校验机制。
+
+`validate_stats_metadata()` 在 `speckv_rkv_style.py` 初始化时自动调用，校验：
+- prompt_template, use_chat_template, system_prompt
+- attn_implementation, dtype, rope_style, rope_type
+
+无需额外操作，如果配置不匹配会自动报错。
+
+### 7.2 GQA 映射校验（建议）
+
+验证 sampled_heads 到 KV heads 的映射正确：
+
+```python
+# 检查每个 KV head 覆盖的 sampled heads 数量
+for kv_head in range(num_kv_heads):
+    covered_heads = [h for l, h in sampled_heads if h // group_size == kv_head]
+    print(f"KV head {kv_head}: {len(covered_heads)} sampled heads")
+```
+
+### 7.3 reset_compression_state 调用位置
+
+**已确认**：在 `rkv_sharded_eval.py` 的评估循环中，每个样本前需重置状态。
+现有脚本应已包含此逻辑，需验证。
+
+### 7.4 进程命名规范
+
+长时间任务必须使用 `PD-L1_binder` 进程名前缀：
+- 通过 `rkv_sharded_runner.py` wrapper 自动设置
+- 或在脚本中使用 `setproctitle`
+
+### 7.5 输出目录命名
+
+避免覆盖基线结果：
+```bash
+--output-dir outputs/speckv_perhead_aime24_$(date +%Y%m%d)
+```
+
+### 7.6 Phase 0 → Phase 1 迁移说明
+
+| 方面 | Phase 0 (R-KV) | Phase 1 (vLLM) | 迁移难度 |
+|-----|----------------|----------------|---------|
+| KV Layout | `[batch, heads, seq, dim]` | PagedAttention blocks | 高 |
+| 压缩触发 | `absolute_position % divide_length` | 需要新设计 | 中 |
+| 位置追踪 | `cache_positions` list | `position_indices` tensor | 中 |
+| 打分算法 | 可复用 | 可复用 | 低 |
+
+---
+
+## 8. 文件职责（只读参考）
+
+| 文件 | 用途 | Phase 0 操作 |
+|-----|------|-------------|
+| `weian_development/speckv/speckv_rkv_style.py` | 主压缩器 | 只读、理解 |
+| `weian_development/speckv/round_pruning_utils.py` | 打分函数 | 只读、理解 |
+| `weian_development/speckv/stats_utils.py` | Stats 验证 | 只读、使用 |
+| `weian_development/speckv/rkv_speckv_generate.py` | Generate patch | 只读、理解 |
+| `weian_development/speckv/README.md` | 使用文档 | **新建** |
 
 ---
 
 *创建日期：2025-01-31*
+*更新日期：2025-01-31（基于 Review 反馈修正，移除与方案 A 矛盾的内容）*

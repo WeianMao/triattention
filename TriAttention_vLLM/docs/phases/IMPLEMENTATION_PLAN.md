@@ -74,6 +74,7 @@ Phase 0 (R-KV 集成)          Phase 1 (Triton 实现)
 □ 激活 rkv conda 环境
 □ 验证依赖完整（transformers, torch, flash-attn）
 □ 确认 stats 文件存在
+□ 验证 stats 元数据与配置一致（见下方）
 □ 运行一个简单的测试脚本
 ```
 
@@ -83,6 +84,14 @@ conda activate rkv
 cd /data/rbg/users/weian/project/rl/dc/R-KV
 ls weian_development/speckv/
 ls outputs/repository/sample8_fullkv_aime25_official_qwen/stats/
+```
+
+**Stats 元数据校验（必须）**：
+```python
+# 验证 stats 与当前配置一致
+# 需检查：model_path, prompt_style, attention_impl, dtype, rope_scaling
+from weian_development.speckv.stats_utils import validate_stats_metadata
+# 或手动检查 stats 文件的元数据字段
 ```
 
 ---
@@ -172,6 +181,8 @@ ls outputs/repository/sample8_fullkv_aime25_official_qwen/stats/
 □ 运行 per_layer_perhead 脚本，检查输出
 □ 运行 per_layer 脚本，检查输出
 □ 对比三种模式的准确率
+□ 验证 reset_compression_state 是否在每个样本前被调用
+□ 确认进程名使用 PD-L1_binder 前缀
 ```
 
 **命令**：
@@ -185,6 +196,10 @@ bash weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligne
 # Per-Layer 模式
 bash weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_perlayer.sh
 ```
+
+**验证点**：
+- `reset_compression_state()` 必须在每个样本前调用，防止状态泄露
+- 长时间任务通过 `rkv_sharded_runner.py` wrapper 保证进程名规范
 
 ---
 
@@ -203,7 +218,29 @@ bash weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligne
 
 ---
 
-#### Task 0.8: 边界测试（可选）
+#### Task 0.8: GQA 映射验证（建议）
+
+**目标**：验证 sampled_heads 到 KV heads 的映射正确
+
+```
+验证内容：
+□ 统计每个 KV head 覆盖的 sampled heads 数量
+□ 确认映射逻辑与 GQA group_size 一致
+□ 检查是否有 KV head 没有被任何 sampled head 覆盖
+```
+
+**验证代码**：
+```python
+num_kv_heads = model.config.num_key_value_heads
+group_size = model.config.num_attention_heads // num_kv_heads
+for kv_head in range(num_kv_heads):
+    covered = [h for l, h in sampled_heads if h // group_size == kv_head]
+    print(f"KV head {kv_head}: {len(covered)} sampled heads")
+```
+
+---
+
+#### Task 0.9: 边界测试（可选）
 
 **目标**：验证边界情况的处理
 
@@ -226,6 +263,13 @@ Phase 0 完成标准：
 □ 理解 monkey patch 集成方式（有调用流程图）
 □ 创建使用文档 README.md
 □ 准确率与历史结果一致
+
+验证清单（基于 Review 反馈）：
+□ Stats 元数据校验通过（model/rope/prompt/attn/dtype）
+□ reset_compression_state 调用位置已确认
+□ GQA 映射验证通过（每个 KV head 有对应的 sampled heads）
+□ 进程命名规范（PD-L1_binder）已确认
+□ 输出目录命名不覆盖基线结果
 ```
 
 ---
