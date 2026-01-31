@@ -80,7 +80,8 @@ current_key = current_key.transpose(0, 1).unsqueeze(0)
 
 ### 2.1 update_kv() 接口
 
-**文件**：`R-KV/rkv/compression/r1_kv.py`
+**文件**：`R-KV/HuggingFace/rkv/compression/r1_kv.py`
+> 注意：vLLM 通过 `from rkv.modeling import R1KV` 导入，而 `rkv.modeling` 再从 `rkv.compression` 导入。
 
 ```python
 def update_kv(
@@ -227,56 +228,100 @@ $$\mathbf{Scores} = \mathbf{A}_{all} \cdot \mathbf{C}^T - \mathbf{B}_{all} \cdot
 
 ### 4.1 模块路径问题
 
-**问题**：文档写 `rkv/compression/speckv_vllm.py`，但 `flash_attn.py` 实际 import 的是：
-```python
-from rkv.modeling import R1KV  # 来自 R-KV/HuggingFace/rkv/modeling.py
-```
+**问题**：文档中 import 路径不一致。
 
-**决策**：SpeckV 放入 **HuggingFace rkv 包**，保持 import 一致性。
+**决策**：统一使用 `rkv.modeling` 作为**唯一导入入口**。
 
 ```
-# 文件位置
+# 1. 文件位置
 R-KV/HuggingFace/rkv/compression/speckv_vllm.py  ← SpeckV 实现
-R-KV/HuggingFace/rkv/compression/__init__.py     ← 添加 SpeckVvLLM export
-R-KV/HuggingFace/rkv/modeling.py                 ← 添加 SpeckVvLLM import
 
-# flash_attn.py 中的 import
-from rkv.modeling import R1KV, SpeckVvLLM  # 新增 SpeckVvLLM
+# 2. 导出链（内部实现，用户不直接用）
+R-KV/HuggingFace/rkv/compression/__init__.py:
+    from .speckv_vllm import SpeckVvLLM
+
+# 3. 统一导入入口（flash_attn.py 使用这个）
+R-KV/HuggingFace/rkv/modeling.py:
+    from .compression import R1KV, SpeckVvLLM
+
+# 4. flash_attn.py 中的 import（唯一正确写法）
+from rkv.modeling import R1KV, SpeckVvLLM
 ```
 
-### 4.2 有状态算法 vs 全局单例问题
+**禁止**：直接 `from rkv.compression.speckv_vllm import SpeckVvLLM`（绕过 modeling.py）
 
-**问题**：`FlashAttentionImpl.kvcompressor` 是全局单例，但 SpeckV 需要按 request 跟踪状态（`cache_positions`, `absolute_position`）。
+### 4.2 状态管理：全局 position_indices（非 per-request 字典）
 
-**决策**：使用 **per-request 状态字典**，压缩器本身无状态。
+**问题**：SpeckV 需要位置信息，但 `kvcompressor` 是全局单例。
+
+**决策**：使用**全局 `position_indices` 张量**，与 KV cache 同布局。**不使用** per-request 状态字典。
 
 ```python
-class SpeckVvLLM:
-    def __init__(self, ...):
-        # 压缩器无状态，所有 request 共享
-        self.stats = self._load_stats(stats_path)
+# position_indices 存储位置：与 KV cache 对齐
+# 形状：[num_blocks, block_size]（与 PagedAttention 一致）
 
-        # 状态由外部管理，通过 request_id 索引
-        # 不在压缩器内部存储 per-request 状态
+# 谁维护：flash_attn.py（不是 SpeckV 压缩器）
+# 何时更新：
+#   - Prefill: 初始化为 [0, 1, 2, ..., prefill_len-1]
+#   - Decode: 追加新位置
+#   - Prune: 保留的 token 位置不变
+
+# SpeckV 压缩器：无状态，position_indices 作为参数传入
+class SpeckVvLLM:
+    def __init__(self, budget, stats_path, layer_idx, ...):
+        self.stats = self._load_stats(stats_path)
+        self.layer_idx = layer_idx  # 必须传入，用于选择正确的 stats
 
     def update_kv(
         self,
         key_states,
         query_states,
         value_states,
-        position_indices,     # 外部传入：当前 KV 的位置信息
-        request_id=None,      # 可选：用于日志/调试
+        position_indices,  # 从 flash_attn.py 传入，形状 [seq_len]
+        prefill_len=0,     # 从 attn_metadata 获取
     ):
-        # 所有状态信息通过参数传入，不依赖内部状态
+        # 无内部状态，所有信息通过参数传入
         ...
 ```
 
-**position_indices 管理责任**：
-- **谁维护**：`flash_attn.py` 或 `attn_metadata`，不是 SpeckV 压缩器
-- **更新时机**：prefill/decode 时写入，prune 时同步更新
-- **存储位置**：与 KV cache 同布局 `[num_blocks, block_size]`
+**为什么不用 per-request 字典**：
+- vLLM 的 position_indices 已经按 request 隔离（通过 `slot_mapping`）
+- 全局张量 + slot_mapping 天然实现了 per-request 隔离
+- 避免压缩器内部维护状态，简化实现
 
-### 4.3 position_indices 在 vLLM 中的维护
+### 4.3 layer_idx 传递
+
+**问题**：SpeckV stats 是按层采样的，vLLM 的 `update_kv` 是按层调用。需要让 SpeckV 知道当前是哪一层。
+
+**决策**：在 `FlashAttentionImpl.__init__` 中传入 `layer_idx`，创建 **per-layer 的压缩器实例**。
+
+```python
+# flash_attn.py
+
+class FlashAttentionImpl:
+    def __init__(self, ..., layer_idx: int):  # vLLM 已有 layer_idx 参数
+        if VLLM_COMPRESSION_ALGO == "speckv":
+            self.kvcompressor = SpeckVvLLM(
+                budget=VLLM_V1_R_KV_BUDGET,
+                stats_path=VLLM_SPECKV_STATS_PATH,
+                layer_idx=layer_idx,  # 传入 layer_idx
+            )
+        else:
+            self.kvcompressor = R1KV(budget=VLLM_V1_R_KV_BUDGET)
+
+# SpeckVvLLM 使用 layer_idx 选择正确的 stats
+class SpeckVvLLM:
+    def __init__(self, budget, stats_path, layer_idx, ...):
+        self.layer_idx = layer_idx
+        full_stats = torch.load(stats_path)
+
+        # 只加载当前层的 stats
+        self.q_mean = full_stats["q_mean_complex"][layer_idx]  # [num_heads, freq_count]
+        self.freq_scale_sq = full_stats["freq_scale_sq"][layer_idx]
+        self.sampled_heads = [h for (l, h) in full_stats["sampled_heads"] if l == layer_idx]
+```
+
+### 4.4 position_indices 在 vLLM 中的维护
 
 **问题**：HF 路径靠 `cache_positions` 跟踪位置，vLLM 没有现成的位置追踪。
 
@@ -286,8 +331,8 @@ class SpeckVvLLM:
 # flash_attn.py 修改（伪代码）
 
 class FlashAttentionImpl:
-    def __init__(self, ...):
-        self.kvcompressor = SpeckVvLLM(...) if algo == "speckv" else R1KV(...)
+    def __init__(self, ..., layer_idx):
+        self.kvcompressor = SpeckVvLLM(layer_idx=layer_idx, ...) if algo == "speckv" else R1KV(...)
 
         # 新增：position_indices 存储（与 KV cache 同布局）
         # 实际实现可能放在 attn_metadata 或单独的数据结构中
@@ -317,9 +362,9 @@ class FlashAttentionImpl:
             # （保留的 token 位置不变）
 ```
 
-### 4.4 Prefill 处理规则
+### 4.5 Prefill 处理规则与 prefill_len 来源
 
-**问题**：HF 路径有 `include_prefill_in_budget` / `allow_prefill_compression`，vLLM 路径未明确。
+**问题**：HF 路径有 `include_prefill_in_budget` / `allow_prefill_compression`，vLLM 路径未明确 prefill_len 从哪里获取。
 
 **决策**：Phase 0 默认 **prefill 不参与压缩**（保护前缀）。
 
@@ -327,6 +372,28 @@ class FlashAttentionImpl:
 |-----|-----|------|
 | `protect_prefill` | `True`（默认） | Prefill token 不参与裁剪 |
 | `prefill_budget` | 与 `budget` 分开 | Prefill 有独立配额（可选） |
+
+**prefill_len 在 vLLM 中的来源**：
+
+```python
+# 方案 1：从 attn_metadata 获取（推荐）
+# vLLM v1 的 FlashAttentionMetadata 包含：
+#   - num_prefill_tokens: int  # 当前 batch 的 prefill token 总数
+#   - num_decode_tokens: int   # 当前 batch 的 decode token 总数
+# 但这是 batch 级别的，不是 per-request 的
+
+# 方案 2：从 request 信息推断
+# 在压缩循环中（for i in range(attn_metadata.num_reqs)）：
+#   - 首次压缩时：prefill_len = 当前 seq_len（整个序列都是 prefill）
+#   - 后续压缩时：prefill_len 保持不变（需要记录）
+
+# 方案 3：使用 position_indices 推断
+# prefill_len = min(position_indices)  # 位置 0~prefill_len-1 是 prefill
+# 但压缩后 position_indices 可能乱序，需要额外记录
+
+# 推荐方案：在 attn_metadata 中添加 per-request prefill_len
+# attn_metadata.prefill_lens: torch.Tensor  # [num_reqs]
+```
 
 **实现方式**：
 ```python
@@ -346,7 +413,7 @@ def update_kv(self, key_states, ..., position_indices, prefill_len=0):
 
 **与 HF 基线对比**：确保使用相同的 prefill 策略，否则结果不可比。
 
-### 4.5 per_head 模式限制（跨层聚合）
+### 4.6 per_head 模式限制（跨层聚合）
 
 **问题**：vLLM 按层调用 `update_kv`，无法实现"全局 per_head"（跨层聚合打分）。
 
@@ -369,7 +436,7 @@ if pruning_mode != "per_layer_perhead":
     pruning_mode = "per_layer_perhead"
 ```
 
-### 4.6 Stats 校验与 Model Config
+### 4.7 Stats 校验与 Model Config
 
 **问题**：Stats 需要与模型配置匹配（RoPE/num_heads/dtype/prompt），但文档只有 `stats_path`。
 
@@ -420,6 +487,51 @@ def _load_stats(self, stats_path, model_config=None):
 ```python
 VLLM_SPECKV_MODEL_CONFIG = os.getenv("VLLM_SPECKV_MODEL_CONFIG", None)  # 可选：model config 路径
 ```
+
+### 4.8 优化策略：正确性优先
+
+**问题**：文档要求 Phase 0 直接实现"优化版（无 RoPE 反演 + LUT）"，但这可能导致与 HF 基线结果偏离，难以验证正确性。
+
+**决策**：**两阶段实现**，先正确性后优化。
+
+```
+Phase 0a: 等价实现（正确性验证）
+    ├── 直接移植 HF 路径的打分逻辑
+    ├── 与 HF 基线做 bit-exact 对比
+    └── 确认准确率差异 < 0.1%
+
+Phase 0b: 优化实现（可选，在正确性验证通过后）
+    ├── 应用"避免 RoPE 反演"优化
+    ├── 应用"共享三角函数表（LUT）"优化
+    └── 再次与 HF 基线对比，确认等价性
+```
+
+**验证步骤**：
+```python
+def test_equivalence_with_hf():
+    """Phase 0a 完成后必须通过此测试"""
+    # 准备相同输入
+    key = torch.randn(1, 4, 1000, 128)
+    value = torch.randn(1, 4, 1000, 128)
+    position_indices = torch.arange(1000)
+
+    # HF 路径（基准）
+    hf_compressor = SpeckVRKVStyle(...)
+    hf_key, hf_value = hf_compressor.compress(key, value)
+
+    # vLLM 路径（待验证）
+    vllm_compressor = SpeckVvLLM(...)
+    vllm_key, vllm_value = vllm_compressor.update_kv(key, None, value, position_indices)
+
+    # bit-exact 对比（相同随机种子下）
+    assert torch.allclose(hf_key, vllm_key, rtol=1e-5, atol=1e-5)
+    assert torch.allclose(hf_value, vllm_value, rtol=1e-5, atol=1e-5)
+```
+
+**文档中"优化"章节（3.4 打分函数优化）的定位**：
+- 描述的是**目标优化方案**（Phase 0b 或 Phase 1）
+- Phase 0a 可以先**不实现**这些优化，直接用 HF 逻辑
+- 优化是**可选的性能改进**，不是 Phase 0 的硬性要求
 
 ---
 
@@ -548,7 +660,7 @@ def test_consistency_with_hf():
 ### 9.1 新建文件
 
 - [ ] `R-KV/HuggingFace/rkv/compression/speckv_vllm.py` - SpeckV vLLM 接口实现
-- [ ] `tests/test_speckv_vllm.py` - 单元测试
+- [ ] `R-KV/vLLM/tests/test_speckv_vllm.py` - 单元测试（放在 vLLM 测试目录）
 
 ### 9.2 修改文件
 

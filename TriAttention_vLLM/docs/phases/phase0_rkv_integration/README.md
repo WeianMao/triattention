@@ -181,7 +181,7 @@ SpeckV 的核心打分逻辑可以从这里提取：
 
 ```python
 # R-KV/HuggingFace/rkv/compression/speckv_vllm.py
-# (import path: from rkv.compression.speckv_vllm import SpeckVvLLM)
+# (统一导入：from rkv.modeling import SpeckVvLLM，不要直接从 compression 导入)
 
 class SpeckVvLLM:
     """SpeckV 压缩器 - vLLM 接口版本"""
@@ -248,8 +248,8 @@ class SpeckVvLLM:
 ```python
 # vLLM/vllm/v1/attention/backends/flash_attn.py
 
-from rkv.compression import R1KV
-from rkv.compression.speckv_vllm import SpeckVvLLM  # 新增
+# 统一从 rkv.modeling 导入（不要直接从 rkv.compression 导入）
+from rkv.modeling import R1KV, SpeckVvLLM
 
 # 环境变量
 VLLM_COMPRESSION_ALGO = os.getenv("VLLM_COMPRESSION_ALGO", "r1kv")
@@ -301,7 +301,7 @@ __all__ = [..., "SpeckVvLLM"]
 ### Step 4: 单元测试
 
 ```python
-# tests/test_speckv_vllm.py
+# R-KV/vLLM/tests/test_speckv_vllm.py
 def test_update_kv_interface():
     """验证接口兼容性"""
     compressor = SpeckVvLLM(budget=128, stats_path="...")
@@ -386,7 +386,7 @@ curl http://localhost:8000/v1/completions -d '{"prompt": "...", "max_tokens": 10
 | 文件 | 说明 |
 |-----|------|
 | `R-KV/HuggingFace/rkv/compression/speckv_vllm.py` | SpeckV vLLM 接口实现 |
-| `tests/test_speckv_vllm.py` | 单元测试 |
+| `R-KV/vLLM/tests/test_speckv_vllm.py` | 单元测试 |
 
 ### 9.2 修改文件
 
