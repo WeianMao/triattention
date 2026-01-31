@@ -141,9 +141,17 @@ key_states = torch.cat([k_past, k_cur], dim=2)
        # stats 包含：q_mean_complex, freq_scale_sq, sampled_heads 等
    ```
 
-2. **RoPE 反演**
-   - SpeckV 打分需要对 key 做 RoPE 反演
-   - 需要知道当前的位置信息
+2. **避免 RoPE 反演**（重要优化）
+   - **不需要**对 key 做 RoPE 反演
+   - 直接用存储的 $K_{rot}$ 计算，通过相位校正等价
+   - 详见 `docs/design/optimization.md` 第 2 节
+   ```python
+   # 优化后：直接用 K_rot 计算
+   Re = q_r * k_r + q_i * k_i
+   Im = q_i * k_r - q_r * k_i
+   A_coef = freq_scale_sq * Re  # 无需三角函数
+   B_coef = freq_scale_sq * Im
+   ```
 
 3. **忽略 query_states**
    - SpeckV 不使用 query 打分，但接口需要保持兼容
@@ -154,16 +162,62 @@ key_states = torch.cat([k_past, k_cur], dim=2)
        ...
    ```
 
-### 3.3 位置信息问题
+### 3.3 位置信息解决方案
 
-**挑战**：SpeckV 打分需要知道每个 token 的绝对位置，但 vLLM 的压缩调用点不直接提供位置信息。
+> 详细设计见 `docs/implementation/data_structures.md` 和 `docs/implementation/fill_in_place.md`
 
-**解决方案**：
-1. **方案 A**：从 `attn_metadata` 获取位置信息
-2. **方案 B**：跟踪压缩历史，推断当前位置
-3. **方案 C**：简化打分，不依赖绝对位置（可能影响效果）
+**问题**：SpeckV 打分需要知道每个 token 的绝对位置，但 KV cache 压缩后 token 变成乱序。
 
-**建议**：Phase 0 先尝试方案 A，检查 `attn_metadata` 是否包含所需信息。
+**解决方案**：维护 `position_indices` tensor
+
+```python
+# 与 KV cache 同步存储，形状与 PagedAttention 对齐
+position_indices: torch.Tensor  # [num_blocks, block_size]
+
+# 每个 token 一个位置值，记录其原始序列位置
+# 例如压缩后：position_indices = [0, 1, 16385, 4, 32769, ...]
+#                                  ↑  ↑  ↑      ↑  ↑
+#                                  原始位置（可能乱序）
+```
+
+**更新时机**：
+| 事件 | position_indices 操作 |
+|-----|----------------------|
+| Prefill | 初始化为 `[0, 1, 2, ..., prefill_len-1]` |
+| Decode | 追加新位置 `append(current_seq_len)` |
+| Prune（回填） | 保留的 token 位置不变，新位置填入空槽 |
+
+**显存开销**：极小（< 0.04% of KV cache），详见 `docs/implementation/data_structures.md` 第 3 节
+
+### 3.4 打分函数优化
+
+> 详细设计见 `docs/design/optimization.md`
+
+Phase 0 应实现以下优化（PyTorch 版本），为 Phase 1 Triton 实现打基础：
+
+**优化 1：避免 RoPE 反演**（已在 3.2 说明）
+
+**优化 2：单次读取多位置打分**
+```python
+# 只加载 K 一次，在寄存器中迭代所有 offset
+k = load_from_memory()  # 只读取一次
+A_coef, B_coef = compute_coefficients(k)
+
+for offset in offsets:  # 在寄存器中迭代，无显存访问
+    score[offset] = dot(A_coef, C[offset]) - dot(B_coef, S[offset]) + extra_term
+```
+
+**优化 3：共享三角函数查找表（LUT）**
+```python
+# 每轮打分开始时预计算（所有 token 共享）
+C = cos(offsets * omega)  # [num_offsets, freq_count]
+S = sin(offsets * omega)  # [num_offsets, freq_count]
+
+# 显存占用仅 ~4 KB
+```
+
+**批量矩阵形式**（GPU 友好）：
+$$\mathbf{Scores} = \mathbf{A}_{all} \cdot \mathbf{C}^T - \mathbf{B}_{all} \cdot \mathbf{S}^T + \mathbf{E}$$
 
 ---
 
@@ -272,7 +326,6 @@ def test_consistency_with_hf():
 |-----|------|-----------------|
 | 无 Triton 优化 | Phase 0 重点是正确性 | Phase 1 实现 Triton kernel |
 | 仅支持 per_head 模式 | per_layer 需要跨层信息 | Phase 1 重新设计接口 |
-| 位置追踪可能不完整 | vLLM 接口限制 | 与 vLLM 团队协调 |
 
 ### 7.2 与 HF 路径的功能差异
 
@@ -281,8 +334,9 @@ def test_consistency_with_hf():
 | per_head pruning | ✓ | ✓ |
 | per_layer pruning | ✓ | ✗（需跨层信息） |
 | per_layer_perhead | ✓ | ✗（需跨层信息） |
-| 位置追踪 | ✓ | 待验证 |
+| 位置追踪 | ✓ | ✓（通过 position_indices） |
 | prefill 保护 | ✓ | 待实现 |
+| 打分优化（LUT） | ✗ | ✓（Phase 0 即实现） |
 
 ---
 
@@ -291,13 +345,20 @@ def test_consistency_with_hf():
 ### 8.1 新建文件
 
 - [ ] `rkv/compression/speckv_vllm.py` - SpeckV vLLM 接口实现
+- [ ] `rkv/compression/position_tracker.py` - position_indices 管理（可选，可合并到 speckv_vllm.py）
 - [ ] `tests/test_speckv_vllm.py` - 单元测试
 
 ### 8.2 修改文件
 
 - [ ] `rkv/compression/__init__.py` - 导出 SpeckVvLLM
-- [ ] `vLLM/vllm/v1/attention/backends/flash_attn.py` - 算法选择分支
+- [ ] `vLLM/vllm/v1/attention/backends/flash_attn.py` - 算法选择分支 + position_indices 更新
 - [ ] `vLLM/vllm/envs.py` - 环境变量
+
+### 8.3 关键数据结构
+
+- [ ] `position_indices`: `[num_blocks, block_size]` 与 KV cache 对齐
+- [ ] `trig_cos/sin`: `[num_offsets, freq_count]` 共享三角表（~4 KB）
+- [ ] Stats 从文件加载：`q_mean_complex`, `freq_scale_sq`, `omega` 等
 
 ### 8.3 验证默认行为不变
 

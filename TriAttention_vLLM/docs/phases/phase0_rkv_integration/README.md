@@ -177,6 +177,8 @@ SpeckV 的核心打分逻辑可以从这里提取：
 
 ### 4.1 SpeckV vLLM 类设计
 
+> 详细设计见 `docs/implementation/data_structures.md` 和 `docs/design/optimization.md`
+
 ```python
 # rkv/compression/speckv_vllm.py
 
@@ -194,23 +196,31 @@ class SpeckVvLLM:
         self.stats = self._load_stats(stats_path)
         self.pruning_mode = pruning_mode
 
+        # 位置追踪（与 KV cache 同步）
+        self.position_indices = None  # [num_blocks, block_size]
+
+        # 共享三角函数表（每轮打分时更新）
+        self.trig_cos = None  # [num_offsets, freq_count]
+        self.trig_sin = None
+
     def update_kv(
         self,
         key_states: torch.Tensor,
         query_states: torch.Tensor,
         value_states: torch.Tensor,
+        position_indices: torch.Tensor = None,  # 可选：外部传入位置
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        SpeckV 压缩逻辑：
-        1. RoPE 反演得到原始 key
-        2. 基于预计算统计打分
+        SpeckV 压缩逻辑（优化版，无 RoPE 反演）：
+        1. 直接用 K_rot 计算打分系数（避免 RoPE 反演）
+        2. 使用共享三角表计算多位置得分
         3. TopK 选择
-        4. 返回压缩后的 K/V
+        4. 返回压缩后的 K/V（同步更新 position_indices）
         """
         if key_states.shape[2] <= self.budget:
             return key_states, value_states
 
-        scores = self._compute_scores(key_states)
+        scores = self._compute_scores_optimized(key_states, position_indices)
         keep_indices = self._select_tokens(scores)
 
         compressed_key = self._gather(key_states, keep_indices)
@@ -218,8 +228,13 @@ class SpeckVvLLM:
 
         return compressed_key, compressed_value
 
-    def _compute_scores(self, key_states):
-        """基于频率统计的打分（从 round_pruning_utils.py 提取）"""
+    def _compute_scores_optimized(self, key_states, position_indices):
+        """
+        优化的打分计算（无三角函数调用）：
+        1. 计算位置无关系数 A_coef, B_coef（只需乘法加法）
+        2. 使用预计算的共享三角表 C, S
+        3. score = A_coef · C - B_coef · S + extra_term
+        """
         ...
 
     def _select_tokens(self, scores):
