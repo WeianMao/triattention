@@ -43,13 +43,13 @@ position = i  # 第 i 个 token 的位置就是 i
 
 | 变量 | 形状 | 数据类型 | 说明 | 必需性 |
 |-----|------|---------|------|--------|
-| `position_indices` | `[num_cached_tokens]` | int64 | 每个 KV 的原始序列位置 | **必需** |
+| `position_indices` | `[num_cached_tokens]` | bf16/int32 | 每个 KV 的原始序列位置 | **必需** |
 
 **存储方式**：与 KV cache 一起存储，每个 token 一个位置值。
 
 **数据类型选择**：
-- **第一阶段**：使用 `torch.long`（int64），与 R-KV 实现严格对齐
-- **后续优化**（可选）：考虑 bf16/int32 节省显存
+- **第一阶段**：使用 bf16 或 int32（推荐 int32），与显存与带宽约束对齐
+- **说明**：不再强制使用 `torch.long`（int64）；int64 仅用于对齐验证或调试
 
 **R-KV 实际实现**：
 ```python
@@ -58,6 +58,10 @@ decode_positions = torch.tensor(
     dtype=torch.long  # int64
 )
 ```
+
+**Phase 1 决策**：
+在 TriAttention 实现中，`position_indices` 采用 **bf16 或 int32**（优先 int32）。
+int64 仅作为对齐验证或调试路径存在。
 
 ### 2.2 Per-Request 变量
 
@@ -164,7 +168,7 @@ class TriAttentionKVCache:
         # 与 kv_cache 的前两维对齐
         self.position_indices = torch.zeros(
             num_blocks, block_size,
-            dtype=torch.bfloat16 if bf16_supported else torch.int32
+            dtype=torch.int32
         )
 
     def write_kv(self, block_id, slot_offset, k, v, position):

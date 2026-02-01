@@ -134,10 +134,10 @@ output = softmax(Q @ K^T / sqrt(d)) @ V
 
 ### 5.3 解决方案
 
-**Prefill 时不触发压缩**：
+**Prefill 时不触发压缩**（Phase 1）：
 1. Prefill 阶段 KV 顺序写入
 2. 压缩只在 decode 阶段触发
-3. Prefill 完成后如果超过 budget，才触发一次压缩
+3. **Prefill > budget 的处理放到 Phase 2**
 
 ---
 

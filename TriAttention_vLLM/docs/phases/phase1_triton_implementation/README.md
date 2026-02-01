@@ -12,7 +12,7 @@
 
 | 目标 | 说明 | 优先级 |
 |-----|------|--------|
-| **Triton 级别效率** | 2-3x 于 PyTorch（Phase 2 评估 Triton TopK/Gather 后达成） | P0 |
+| **Triton 级别效率** | Phase 1 以正确性为主；2-3x 目标留到 Phase 2（引入 Triton TopK/Gather 后评估） | P0 |
 | **Batch Size > 1** | 支持批量推理，提高吞吐量 | P0 |
 | **独立开发** | 不依赖 R-KV 框架，独立代码库 | P0 |
 | vLLM 集成 | 与 vLLM 0.15.x 非侵入式集成 | P1 |
@@ -78,8 +78,8 @@ Phase 1 的实现必须对齐以下文档中的需求与方案：
   - **打分使用 Triton**；TopK/Gather 阶段 1 先用 `torch.topk/torch.gather`。
   - 不使用 query cache；不使用 noise injection。
   - 提供状态重置接口（与 R-KV 行为对齐）。
-- **数据结构**（`implementation/data_structures.md`）：
-  - `position_indices` 必需，阶段 1 使用 `torch.long`。
+**数据结构**（`implementation/data_structures.md`）：
+  - `position_indices` 必需，阶段 1 使用 bf16/int32（优先 int32）。
   - per-head 需要 2D 位置表（按 head 维度）。
   - 额外数据结构需按 page/block 组织，以便后续 vLLM 集成。
 - **集成约束**（`implementation/vllm_integration.md` / `fill_in_place.md`）：
@@ -568,7 +568,7 @@ def fused_topk_gather(
                        device=key_states.device, dtype=key_states.dtype)
     v_out = torch.empty_like(k_out)
     positions_out = torch.empty(batch_size, k,
-                               device=key_states.device, dtype=torch.long)
+                               device=key_states.device, dtype=torch.int32)
 
     # 计算 grid
     grid = (batch_size, num_heads)
