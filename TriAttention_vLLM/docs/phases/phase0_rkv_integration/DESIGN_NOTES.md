@@ -27,9 +27,17 @@
 kv_head = attn_head // num_kv_groups  # 28 heads → 4 kv_heads
 ```
 
-### 2.3 全局模式约束
+### 2.3 模式选择 [已确认]
 
-vLLM PagedAttention 要求所有层共享相同 KV 布局 → **只能用全局模式**（所有层、所有 head 保留相同 token）
+**三种模式都可支持**，直接按 HF 实现即可：
+
+| 模式 | 说明 | 可行性 |
+|-----|------|--------|
+| per_head | 每个 head 独立选 token | ✓ R-KV 已证明 |
+| per_layer | 每层选同样的 token | ✓ per_head 的简化版 |
+| per_layer_perhead | 每层每 head 独立选 | ✓ 和 per_head 本质相同 |
+
+**原理**：R-KV 在 vLLM 里已实现 per-head 选择。KV cache 布局 `[batch, num_kv_heads, seq_len, head_dim]` 天然支持每个 head 用不同的 indices，通过 `gather(dim=2, index=indices)` 实现。
 
 ---
 
@@ -51,33 +59,48 @@ layer_idx 在首次 forward 时从 `layer.layer_idx` 获取，stats 使用类级
 
 ### 3.4 prefill_len 来源
 
-首次压缩时的 seq_len 作为 prefill_len（假设：prefill >= budget + buffer）。
-
-**局限**：若 prefill 未达阈值，会高估 prefill_len。影响：略保守，不影响正确性。
-
----
-
-## 4. Stats 文件格式
-
-```python
-{
-    "metadata": {
-        "sampled_heads": [(layer, attn_head), ...],
-        "num_attention_heads": 28,
-        "num_kv_heads": 4,
-        "head_dim": 128,
-    },
-    "stats": {
-        "layer00_head05": {
-            "q_mean_real": Tensor,
-            "q_mean_imag": Tensor,
-            "q_abs_mean": Tensor,
-        },
-        ...
-    }
-}
-```
+通过 `FlashAttentionMetadata.prefill_lens` 传递真实的 prefill_len：
+- 数据来源：`req_states.prefill_len`（vLLM 已有）
+- 传递方式：在 metadata builder 中填充，压缩时通过 `attach_prefill_length()` 设置
+- 隔离保证：R1KV 等现有算法不使用此字段，不受影响
 
 ---
 
-*更新日期：2025-01-31*
+## 4. Stats 文件（关键字段）
+
+最少需包含：
+- 统计数据：`q_mean_complex` / `freq_scale_sq` / `sampled_heads`
+- 元信息：`num_attention_heads` / `num_kv_heads` / `head_dim` / `rope` / `prompt_template`
+
+具体字段以现有 `stats_utils` 为准，避免硬编码假格式。
+
+---
+
+## 5. 待确认 / 待验证
+
+- ~~模式选择：global vs per_layer_perhead~~ [已解决：三种模式都可支持]
+- ~~优化版打分与 HF 原版数学等价性~~ [已验证 ✓]
+- ~~prefill_len 的真实获取方式~~ [已解决：通过 AttentionMetadata 传递]
+- ~~position_indices 的 reset 机制~~ [已解决：双重保险，见下文]
+- stats 字段完整性与加载校验规则
+
+### 5.1 position_indices reset 机制 [已确定]
+
+采用**双重保险**策略，两种机制同时生效：
+
+**机制 1：Slot 复用时 reset**
+- 在分配 slot 给新 request 时，清零对应的 position_indices
+- 实现位置：slot 分配逻辑中
+
+**机制 2：Scheduler hook**
+- 在 request 结束时，通过回调通知 attention 层
+- 主动清理该 request 占用的 position_indices
+
+**双重保险的好处：**
+- 任一机制失效，另一机制兜底
+- 防止边界情况（如 request 异常终止）导致状态泄漏
+- 调试时更容易定位问题
+
+---
+
+*更新日期：2026-01-31*

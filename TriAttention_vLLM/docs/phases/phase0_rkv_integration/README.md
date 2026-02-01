@@ -27,8 +27,8 @@ vLLM/vllm/v1/attention/backends/flash_attn.py
 | 方面 | HF 路径 | vLLM 路径 |
 |-----|--------|----------|
 | 触发条件 | `pos % divide_length == 0` | `seq_len >= budget + buffer` |
-| 支持模式 | per_head, per_layer, global | **仅 global** |
-| RoPE 处理 | 反演后计算 | **优化版（直接用 K_rot）** |
+| 支持模式 | per_head / per_layer / per_layer_perhead | 三种模式都可支持 ✓ |
+| RoPE 处理 | 反演后计算 | 优化版（直接用 K_rot）✓ |
 
 ---
 
@@ -45,20 +45,18 @@ class SpeckVvLLM:
 **关键点**：
 - 接口与 R1KV 一致，只返回 `(K, V)`
 - `position_indices` 由 `FlashAttentionImpl` 维护
-- **全局模式**：所有层共享相同 keep_indices（PagedAttention 约束）
+- 三种模式（per_head / per_layer / per_layer_perhead）都可支持
 
 ### 3.2 打分算法（优化版）
 
 **核心优化**（详见 `docs/design/optimization.md`）：
-1. **避免 RoPE 反演**：直接用 K_rot，通过相位校正等价
-2. **位置无关系数**：A = s²·Re, B = s²·Im（无需 atan2/sqrt）
-3. **共享三角表**：C = cos(t·ω), S = sin(t·ω)
-4. **批量矩阵乘法**：`scores = A @ C.T - B @ S.T`
+- 避免 RoPE 反演，直接用 K_rot
+- 共享三角表 + 批量矩阵乘法
 
-**与 HF 对齐**：
-- Union-based selection（每个 head 独立选 top-k → 并集 → 从并集选 top-k）
-- Score normalization（per-head z-score）
-- Tie-breaking noise（1e-6 量级，TODO: 未来移除）
+**与 HF 对齐**（需明确保留以下行为）：
+- Union-based selection
+- per-head z-score normalization
+- tie-breaking noise（如 1e-6 级别）
 
 ### 3.3 Position Indices 追踪
 
@@ -67,7 +65,11 @@ class SpeckVvLLM:
 | Prefill | 写入 `[0, 1, ..., prefill_len-1]` |
 | Decode | 写入新 token 位置 |
 | 压缩后 | 保留 `kept_positions` |
-| Request 结束 | 置为 -1 |
+| Request 结束 | **双重保险 reset**（见下文） |
+
+**Reset 机制（双重保险）**：
+1. **Slot 复用时 reset**：分配 slot 给新 request 时清零
+2. **Scheduler hook**：request 结束时回调通知 attention 层
 
 ---
 
@@ -78,8 +80,6 @@ class SpeckVvLLM:
 | `VLLM_COMPRESSION_ALGO` | `r1kv` | 算法选择 |
 | `VLLM_SPECKV_STATS_PATH` | - | Stats 文件路径 |
 | `VLLM_SPECKV_MODEL_PATH` | - | 模型路径（RoPE 配置） |
-
-**Conda 环境**：`rkv_vllm`
 
 **Stats 文件**：`R-KV/outputs/repository/sample8_fullkv_aime25_official_qwen/stats/`
 
@@ -99,16 +99,18 @@ class SpeckVvLLM:
 | 类型 | 文件 |
 |-----|------|
 | 新建 | `rkv/compression/speckv_vllm.py` |
-| 修改 | `flash_attn.py`, `rkv/__init__.py` |
+| 修改 | `flash_attn.py`, `rkv/compression/__init__.py`, `rkv/modeling.py`, `vllm/envs.py` |
 | 参考 | `speckv_rkv_style.py`, `round_pruning_utils.py` |
 
 ---
 
 ## 7. 待验证事项
 
-- [ ] 优化版打分与 HF 原版的数学等价性（需单元测试）
-- [ ] prefill_len 的获取准确性（当前假设：首次压缩时 seq_len = prefill_len）
+- [x] 模式选择 ✓（三种模式都可支持，R-KV 已证明 per-head 可行）
+- [x] 优化版打分与 HF 原版的数学等价性 ✓
+- [x] prefill_len 的获取准确性 ✓（通过 AttentionMetadata 传递）
+- [x] position_indices 的 reset 机制 ✓（双重保险：slot 复用 + scheduler hook）
 
 ---
 
-*更新日期：2025-01-31*
+*更新日期：2026-01-31*
