@@ -90,94 +90,47 @@ TriAttention_vLLM/
 
 ## 2. 实施阶段
 
-### 阶段 1：基础实现
+### 阶段 1：核心实现（常见场景）
 
-**目标**：CPU 参考实现，验证正确性
+**目标**：在 TriAttention_vLLM 框架内完成 Triton 版本的核心实现，并覆盖最常见推理路径。  
+**范围**：只处理主路径（稳定、常见场景）；边界情况明确推迟到阶段 2。
 
 | 任务 | 描述 | 依赖 |
 |-----|------|-----|
 | 1.1 | 建立目录结构 | - |
 | 1.2 | 实现 `TriAttentionConfig` | 1.1 |
-| 1.3 | 移植打分逻辑到 `scoring.py` | 1.2 |
-| 1.4 | 实现基本压缩器 `compressor.py` | 1.3 |
-| 1.5 | 实现 `protect_prefill` 参数 | 1.4 |
-| 1.6 | 创建正确性测试 | 1.4 |
+| 1.3 | 实现状态/统计加载（`CompressionState`、stats loader） | 1.2 |
+| 1.4 | 实现 Triton 打分 kernel（基础版本） | 1.3 |
+| 1.5 | 使用 `torch.topk/torch.gather` 跑通 TopK/Gather | 1.4 |
+| 1.6 | 集成到 `compressor.py` 并完成正确性测试 | 1.5 |
+| 1.7 | vLLM 基础集成（PagedAttention 主路径） | 1.6 |
+| 1.8 | 基线性能验证（非极限优化） | 1.7 |
 
 **交付物**：
-- 可运行的 Python 参考实现
-- 与 R-KV 输出对比的测试
+- 可运行的 Triton 版本（GPU）
+- vLLM 主路径可用（常见场景）
+- 与 R-KV 输出对比的正确性测试
 
 ---
 
-### 阶段 2：Triton Kernel
+### 阶段 2：边界情况与鲁棒性
 
-**目标**：高效的 GPU kernel 实现
-
-| 任务 | 描述 | 依赖 |
-|-----|------|-----|
-| 2.1 | 实现 `scoring_kernel.py`（单次读取多位置） | 1.4 |
-| 2.2 | 实现 `pruning_kernel.py`（topk 选择） | 2.1 |
-| 2.3 | 实现 `fill_in_place_kernel.py`（KV 填充） | 2.2 |
-| 2.4 | Kernel 正确性测试 | 2.3 |
-| 2.5 | Kernel 性能 benchmark | 2.4 |
-| 2.6 | `triton.autotune` 优化 | 2.5 |
-
-**交付物**：
-- 优化的 Triton kernel
-- 性能 benchmark 报告
-
----
-
-### 阶段 3：vLLM 集成
-
-**目标**：与 vLLM 0.15.x 集成
+**目标**：覆盖实际部署中的边界情况与稳定性问题。  
+**原则**：阶段 1 不覆盖的情况在此阶段统一处理。
 
 | 任务 | 描述 | 依赖 |
 |-----|------|-----|
-| 3.1 | 实现 `attention_wrapper.py` | 2.3 |
-| 3.2 | 实现 `paged_kv_manager.py` | 3.1 |
-| 3.3 | 与 PagedAttention 集成 | 3.2 |
-| 3.4 | CUDA Graph 兼容处理 | 3.3 |
-| 3.5 | vLLM serving 测试 | 3.4 |
+| 2.1 | Prefill > budget 处理策略 | 1.7 |
+| 2.2 | 混合 prefill/decode（含 chunked prefill） | 1.7 |
+| 2.3 | request 取消 / slot 复用 / position_indices 重置 | 1.7 |
+| 2.4 | 内存触发压缩（preemption 之前介入） | 1.7 |
+| 2.5 | CUDA Graph 兼容性处理 | 1.7 |
+| 2.6 | 评估 Triton TopK/Gather 性能收益（可选） | 1.8 |
+| 2.7 | 长时间运行与多 request 稳定性测试 | 2.1 |
 
 **交付物**：
-- 可用的 vLLM 插件
-- 集成测试
-
----
-
-### 阶段 4：高级功能
-
-**目标**：内存触发、计算优化
-
-| 任务 | 描述 | 依赖 |
-|-----|------|-----|
-| 4.1 | 实现 `memory_monitor.py` | 3.3 |
-| 4.2 | 内存触发压缩逻辑 | 4.1 |
-| 4.3 | 避免 RoPE 反转优化 | 2.1 |
-| 4.4 | 位置索引存储 | 4.3 |
-
-**交付物**：
-- 内存触发压缩功能
-- 优化的打分实现
-
----
-
-### 阶段 5：Benchmark 与完善
-
-**目标**：完整测试，文档完善
-
-| 任务 | 描述 | 依赖 |
-|-----|------|-----|
-| 5.1 | 完整 benchmark 套件 | 4.2 |
-| 5.2 | 多模型测试（LLaMA/Qwen/DeepSeek） | 5.1 |
-| 5.3 | 边界情况处理 | 5.2 |
-| 5.4 | 文档完善 | 5.3 |
-| 5.5 | 性能调优 | 5.4 |
-
-**交付物**：
-- Benchmark 报告
-- 完整文档
+- 边界情况处理完备
+- 稳定性测试报告
 
 ---
 

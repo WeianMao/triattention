@@ -11,8 +11,8 @@
 | 阶段 | 复用策略 | 原因 |
 |-----|---------|------|
 | **阶段 0** | 直接在 R-KV 框架上开发 | 不需要复用，直接用他们的框架 |
-| **阶段 1** | **不复用，Triton 重写** | R-KV 代码无法达到 Triton 级别效率 |
-| 阶段 2 | 同阶段 1 | 继续使用 Triton 实现 |
+| **阶段 1** | 打分 Triton，TopK/Gather 先用 PyTorch | 先保证主路径正确性 |
+| 阶段 2 | 边界情况与鲁棒性 + 评估 Triton TopK/Gather | 视性能收益决定 |
 
 ---
 
@@ -58,7 +58,7 @@ v_compressed = value_states.gather(dim=2, index=indices) # 原生 gather
 2. 所有中间结果在寄存器/共享内存中处理
 ```
 
-**结论**：阶段 1 必须用 Triton 重写核心操作，不能复用 R-KV 代码。
+**结论**：阶段 1 仅要求打分使用 Triton；TopK/Gather 先用 PyTorch，Phase 2 再评估是否 Triton 化。
 
 ---
 
@@ -97,15 +97,15 @@ R-KV/
 
 ---
 
-## 3. 阶段 1：Triton 重写
+## 3. 阶段 1：核心实现（打分 Triton）
 
 ### 3.1 必须重写的操作
 
 | 操作 | 原因 | Triton 实现要点 |
 |-----|------|----------------|
 | **打分** | SpeckV 特有 | 三角函数表查找 + 向量乘法 |
-| **TopK** | 性能瓶颈 | 分块 partial sort |
-| **Gather K,V** | 可融合 | 与 TopK 融合 |
+| **TopK** | 先保证正确性 | Phase 1 使用 `torch.topk` |
+| **Gather K,V** | 先保证正确性 | Phase 1 使用 `torch.gather` |
 
 ### 3.2 Triton Kernel 设计
 
@@ -124,7 +124,7 @@ def speckv_compress_kernel(
     BLOCK_SIZE: tl.constexpr,
 ):
     """
-    融合操作：TopK 选择 + K,V Gather + 位置更新
+    融合操作（Phase 2 评估）：TopK 选择 + K,V Gather + 位置更新
     """
     # 1. 分块读取 scores
     # 2. 块内 partial sort 找 top-k
@@ -202,8 +202,8 @@ class CompressionState:
 |---------|-------|-------|
 | 压缩器框架 | R-KV 原生 | 独立实现 |
 | 打分函数 | PyTorch | **Triton** |
-| TopK 选择 | `torch.topk` | **Triton** |
-| K,V Gather | `torch.gather` | **Triton** |
+| TopK 选择 | `torch.topk` | `torch.topk`（Phase 1） |
+| K,V Gather | `torch.gather` | `torch.gather`（Phase 1） |
 | 位置追踪 | R-KV 原生 | 参考逻辑重写 |
 | 配置类 | R-KV 原生 | 参考设计重写 |
 | RoPE 检查 | R-KV 原生 | 参考逻辑重写 |
@@ -234,7 +234,7 @@ TriAttention_vLLM/
 │   ├── scoring.py                     # 打分逻辑
 │   └── kernels/
 │       ├── scoring_kernel.py          # Triton 打分
-│       ├── topk_gather_kernel.py      # Triton TopK+Gather
+│       ├── topk_gather_kernel.py      # Triton TopK+Gather（Phase 2 评估）
 │       └── fill_in_place_kernel.py    # Triton 填充
 ```
 
@@ -250,15 +250,15 @@ TriAttention_vLLM/
 
 ### 阶段 1
 
-- **策略**：Triton 从头实现
-- **代码复用**：0%（核心操作），参考设计模式
-- **效率**：必须达到 Triton 级别（2-3x 于 R-KV）
+- **策略**：打分 Triton，TopK/Gather 先用 PyTorch
+- **代码复用**：核心操作不复用，逻辑参考设计模式
+- **效率**：先以正确性与主路径可用为先，性能在 Phase 2 再优化
 
 ### 关键原则
 
 1. **阶段 0**：怎么方便怎么来，快速验证
-2. **阶段 1**：效率优先，Triton 重写所有核心操作
-3. **不复用低效代码**：R-KV 的 TopK/Gather 效率不达标，不复用
+2. **阶段 1**：先跑通主路径（打分 Triton，TopK/Gather PyTorch）
+3. **阶段 2**：评估 Triton TopK/Gather 是否有足够性能收益
 
 ---
 

@@ -11,8 +11,8 @@
 | 阶段 | 目标 | 框架 | Batch Size | 说明 |
 |-----|------|------|------------|------|
 | **阶段 0** | 快速验证 | 在 R-KV 框架内 | = 1 | 最简单方式实现，复用 R-KV 代码 |
-| **阶段 1** | 高效无侵入版本 | TriAttention 独立 | > 1 | Triton kernel，从头开发 |
-| **阶段 2** | 高级功能 | TriAttention 独立 | > 1 | 内存触发、CUDA Graph 等 |
+| **阶段 1** | 高效无侵入版本 | TriAttention 独立 | > 1 | Triton 打分 + PyTorch TopK/Gather |
+| **阶段 2** | 边界情况与鲁棒性 | TriAttention 独立 | > 1 | 内存触发、CUDA Graph 等 |
 
 ---
 
@@ -271,7 +271,8 @@ similarity_cos = torch.matmul(k_norm, k_norm.transpose(-1, -2))
 ### 阶段 1（独立高效版本）
 
 **必须**：
-- [ ] Triton kernel 实现打分、TopK、Gather
+- [ ] Triton kernel 实现打分
+- [ ] TopK/Gather 使用 PyTorch（Phase 1），Phase 2 再评估 Triton 化
 - [ ] **Batch Size > 1 支持**
 - [ ] RoPE 一致性检查
 - [ ] 状态重置接口
@@ -284,7 +285,7 @@ similarity_cos = torch.matmul(k_norm, k_norm.transpose(-1, -2))
 
 ---
 
-### 阶段 2（高级功能）
+### 阶段 2（边界情况与鲁棒性）
 
 **计划**：
 - [ ] 内存触发压缩

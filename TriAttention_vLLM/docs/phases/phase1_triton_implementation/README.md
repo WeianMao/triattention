@@ -12,7 +12,7 @@
 
 | 目标 | 说明 | 优先级 |
 |-----|------|--------|
-| **Triton 级别效率** | 核心操作使用 Triton kernel，2-3x 于 PyTorch | P0 |
+| **Triton 级别效率** | 2-3x 于 PyTorch（Phase 2 评估 Triton TopK/Gather 后达成） | P0 |
 | **Batch Size > 1** | 支持批量推理，提高吞吐量 | P0 |
 | **独立开发** | 不依赖 R-KV 框架，独立代码库 | P0 |
 | vLLM 集成 | 与 vLLM 0.15.x 非侵入式集成 | P1 |
@@ -34,7 +34,66 @@
 | Batch Size | = 1 | > 1 |
 | 核心操作 | PyTorch 原生 | Triton kernel |
 | 效率 | 不追求 | 2-3x 于 R-KV |
-| 集成 | HuggingFace generate | vLLM（预留） |
+| 集成 | HuggingFace generate | vLLM 主路径 |
+
+---
+
+## 1.4 阶段范围定义（核心 vs 边界）
+
+**Phase 1 = 核心实现（常见场景）**：
+- 在 TriAttention_vLLM 目录内完成 Triton 版本核心实现
+- 覆盖最常见的推理路径（稳定、常见场景）
+- 不处理复杂边界情况（见 Phase 2）
+
+**Phase 2 = 边界情况与鲁棒性**：
+- prefill > budget
+- 混合 prefill/decode（含 chunked prefill）
+- request 取消 / slot 复用 / position_indices 重置
+- 内存触发压缩（preemption 之前介入）
+- CUDA Graph 兼容性与长时间稳定性
+
+---
+
+## 1.5 关键文档依赖（必须遵守）
+
+Phase 1 的实现必须对齐以下文档中的需求与方案：
+
+- `TriAttention_vLLM/docs/README.md`（总体目标与范围）
+- `TriAttention_vLLM/docs/design/algorithm.md`（算法逻辑）
+- `TriAttention_vLLM/docs/design/optimization.md`（打分优化必须应用）
+- `TriAttention_vLLM/docs/implementation/`（数据结构与集成细节）
+- `TriAttention_vLLM/docs/project/`（项目级规划与关键决策）
+- `TriAttention_vLLM/docs/r-kv-analysis/`（可复用内容与约束对齐）
+
+若 Phase 1 计划与上述内容冲突，以上述文档为准，并在本计划中显式记录偏差与理由。
+
+---
+
+## 1.6 与关键文档对齐的要点（摘要）
+
+- **架构约束**（`docs/README.md`）：非侵入式、命名为 TriAttention、目标 vLLM 0.15.x。
+- **对齐基线**（`project/roadmap.md`）：严格对齐 3 个 R-KV 脚本（打分公式、offsets、divide_length、默认参数）。
+- **阶段 1 必须项**（`project/key_decisions.md` / `r-kv-analysis/`）：
+  - batch > 1 必须支持（或显式报错）。
+  - **打分使用 Triton**；TopK/Gather 阶段 1 先用 `torch.topk/torch.gather`。
+  - 不使用 query cache；不使用 noise injection。
+  - 提供状态重置接口（与 R-KV 行为对齐）。
+- **数据结构**（`implementation/data_structures.md`）：
+  - `position_indices` 必需，阶段 1 使用 `torch.long`。
+  - per-head 需要 2D 位置表（按 head 维度）。
+  - 额外数据结构需按 page/block 组织，以便后续 vLLM 集成。
+- **集成约束**（`implementation/vllm_integration.md` / `fill_in_place.md`）：
+  - prefill 阶段不压缩，prefill 结束后再裁剪。
+  - 预算/overflow 的填充遵循 Fill-in-Place 思路。
+  - RoPE 使用真实序列位置（`actual_seq_len`）。
+
+---
+
+## 1.7 已记录的偏差（需确认）
+
+**Prefill > Budget 处理**：`docs/README.md` 要求 prefill 结束后立即裁剪；  
+但 `project/CLARIFICATIONS_NEEDED.md` 将该场景标记为“阶段 2 处理”。  
+**处理方式**：需明确阶段 1 是否覆盖该场景；若不覆盖，需同步更新需求文档。
 
 ---
 
@@ -54,15 +113,15 @@ TriAttention_vLLM/
 │   │
 │   ├── kernels/                # Triton kernels
 │   │   ├── __init__.py
-│   │   ├── scoring_kernel.py   # 打分 kernel
-│   │   ├── topk_kernel.py      # TopK 选择 kernel
-│   │   ├── gather_kernel.py    # K,V Gather kernel
-│   │   └── fused_kernel.py     # 融合 kernel（TopK + Gather）
+│   │   ├── scoring_kernel.py   # 打分 kernel（Phase 1 必需）
+│   │   ├── topk_kernel.py      # TopK kernel（Phase 2 评估）
+│   │   ├── gather_kernel.py    # Gather kernel（Phase 2 评估）
+│   │   └── fused_kernel.py     # 融合 kernel（Phase 2 评估）
 │   │
 │   └── integration/            # 框架集成
 │       ├── __init__.py
 │       ├── hf_integration.py   # HuggingFace 集成
-│       └── vllm_integration.py # vLLM 集成（Phase 2）
+│       └── vllm_integration.py # vLLM 基础集成（Phase 1 主路径）
 │
 ├── stats/                      # 预计算统计
 │   └── loader.py               # Stats 加载器
@@ -432,7 +491,9 @@ def compute_scores_triton(
     return scores
 ```
 
-### 3.3 融合 TopK + Gather Kernel
+### 3.3 候选 Triton TopK + Gather Kernel（Phase 2 评估）
+
+> 说明：Phase 1 采用 PyTorch TopK/Gather，这里的 Triton 融合方案作为 Phase 2 的性能优化备选。
 
 ```python
 # triattention/kernels/fused_kernel.py
@@ -525,7 +586,10 @@ def fused_topk_gather(
     return k_out, v_out, positions_out
 ```
 
-### 3.4 TopK 选择策略
+### 3.4 TopK 选择策略（Phase 1 决策）
+
+**当前明确决策**：Phase 1 **TopK/Gather 使用 PyTorch（`torch.topk` / `torch.gather`）**。  
+Triton TopK/Gather 是否实现，放到 Phase 2，根据性能收益再决定。
 
 由于 Triton 没有内置的高效 TopK，需要实现自定义方案：
 
@@ -577,7 +641,7 @@ def hybrid_topk(scores: torch.Tensor, k: int) -> torch.Tensor:
     混合 TopK 策略
 
     - 小规模 (seq_len < 4096): 使用 torch.topk
-    - 大规模 (seq_len >= 4096): 使用 Triton 分块排序
+    - 大规模 (seq_len >= 4096): 使用 Triton 分块排序（Phase 2 决定）
     """
     if scores.shape[-1] < 4096:
         return torch.topk(scores, k, dim=-1).indices
@@ -645,11 +709,15 @@ v_out = V.gather(indices)                    # 读 V, indices，写 v_out
 # Kernel 1: 打分（读 K, stats，写 scores）
 scores = speckv_scoring_kernel(K, stats, ...)
 
-# Kernel 2: 融合 TopK + Gather（读 scores, K, V，写 k_out, v_out）
-k_out, v_out, pos_out = fused_topk_gather_kernel(K, V, scores, k)
+# Kernel 2: PyTorch TopK + Gather
+indices = torch.topk(scores, k, dim=-1).indices
+k_out = K.gather(dim=2, index=indices)
+v_out = V.gather(dim=2, index=indices)
 ```
 
-### 5.3 预期加速
+### 5.3 预期加速（Phase 2 目标）
+
+> 说明：Phase 1 使用 PyTorch TopK/Gather，以下 2-3x 目标是引入 Triton TopK/Gather 后的预期。
 
 | 操作 | PyTorch | Triton | 加速比 |
 |-----|---------|--------|-------|
@@ -718,7 +786,7 @@ def test_hf_integration():
     # 加载模型，执行生成，验证输出质量
 
 def test_vllm_integration():
-    """vLLM 集成测试（Phase 2）"""
+    """vLLM 集成测试（Phase 1 主路径）"""
     pass
 ```
 
@@ -733,33 +801,27 @@ def test_vllm_integration():
 3. 实现状态管理 `CompressionState`
 4. 实现 Stats 加载器
 
-### Step 2: PyTorch 参考实现
-
-1. 用 PyTorch 实现完整的 `compress()` 流程
-2. 作为 Triton 实现的对照
-3. 作为 fallback（Triton 不可用时）
-
-### Step 3: Triton 打分 Kernel
+### Step 2: Triton 打分 Kernel
 
 1. 实现 RoPE 反演（in-kernel）
 2. 实现频率统计计算
 3. 实现位置相关打分
 4. 添加自动调优
 
-### Step 4: Triton TopK + Gather Kernel
+### Step 3: PyTorch TopK + Gather（Phase 1）
 
-1. 实现分块 partial sort
-2. 实现融合 gather
+1. `torch.topk` 选择（保证正确性）
+2. `torch.gather` 先跑通
 3. 处理 window_size 保护
-4. 支持 per-head 模式
+4. 与打分 kernel 联调
 
-### Step 5: 集成与优化
+### Step 4: 集成与优化
 
 1. 集成到主压缩器
 2. 性能调优（autotune 参数）
 3. HuggingFace 集成
 
-### Step 6: 测试与验证
+### Step 5: 测试与验证
 
 1. 正确性测试
 2. 性能 benchmark
@@ -773,24 +835,24 @@ def test_vllm_integration():
 
 | 风险 | 影响 | 缓解措施 |
 |-----|------|---------|
-| Triton TopK 效率不理想 | 加速比不达预期 | 混合策略：小规模用 PyTorch |
+| TopK/Gather 性能不理想 | 加速比不达预期 | Phase 2 再评估 Triton TopK/Gather |
 | RoPE in-kernel 复杂 | 开发周期延长 | 先用预计算表，后续优化 |
 | 数值精度问题 | 结果不一致 | FP32 打分 + 详细测试 |
 
 ### 8.2 备选方案
 
-1. **打分 Kernel**：如果 Triton 太复杂，先用 PyTorch + `torch.compile`
-2. **TopK**：使用 `torch.topk` + Triton Gather 的混合方案
+1. **打分 Kernel**：先实现简化版本，再逐步引入优化
+2. **TopK/Gather**：Phase 1 用 PyTorch；Phase 2 评估是否 Triton 化
 3. **融合 Kernel**：如果融合效果不好，分离为独立 kernels
 
 ---
 
-## 9. 与 Phase 2 的接口预留
+## 9. 与 Phase 2（边界情况）的接口预留
 
 ### 9.1 vLLM 集成点
 
 ```python
-# triattention/integration/vllm_integration.py (Phase 2)
+# triattention/integration/vllm_integration.py (Phase 1 基础集成，Phase 2 扩展边界处理)
 
 class TriAttentionVLLMBackend:
     """vLLM Attention Backend 集成"""

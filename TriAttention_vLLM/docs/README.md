@@ -104,7 +104,7 @@ R-KV/outputs/repository/sample8_fullkv_aime25_official_qwen/stats/
 
 ### 3.4 Prefill 处理
 
-- **Prefill > budget**：Prefill 完成后立即触发裁剪
+- **Prefill > budget**：阶段 2 才处理（阶段 1 不覆盖）
 - **`protect_prefill` 参数**（默认 `False`）：
   - `False`：prefill token 参与裁剪竞争
   - `True`：prefill token 被保护不参与裁剪

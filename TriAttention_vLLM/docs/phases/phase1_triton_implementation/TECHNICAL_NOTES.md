@@ -12,6 +12,8 @@
 | **性能预期调整** | ⚠️ 需修正 | 原 2-3x → 实际 1.3-1.7x |
 | **Triton API 限制** | ⚠️ 需 workaround | 无 atan2、topk、complex |
 
+**对齐要求**：打分实现必须遵循 `TriAttention_vLLM/docs/design/optimization.md` 中的三项优化（避免 RoPE 反转、单次读取多位置打分、共享三角函数表）。
+
 ---
 
 ## 2. Triton API 限制与解决方案
@@ -108,7 +110,7 @@ def topk_sort(scores_ptr, indices_ptr, k, seq_len, BLOCK_SIZE: tl.constexpr):
 # 3. 处理边界情况
 ```
 
-**推荐**：混合方案
+**推荐**：混合方案（Phase 1 先用 PyTorch TopK）
 ```python
 def topk_hybrid(scores, k):
     if scores.shape[-1] < 4096:
@@ -116,6 +118,8 @@ def topk_hybrid(scores, k):
     else:
         return triton_block_topk(scores, k)  # Triton
 ```
+
+**Phase 1 决策**：TopK/Gather 使用 PyTorch；Triton TopK/Gather 是否实现留到 Phase 2 决定。
 
 ### 2.3 无 `tl.complex`
 
@@ -222,9 +226,9 @@ cos(delta*omega + phi) = cos(delta*omega)*cos(phi) - sin(delta*omega)*sin(phi)
 
 ### 4.1 两阶段 Kernel 策略
 
-**Stage 1: 打分 + TopK**（~0.3-0.4ms）
+**Stage 1: 打分（Triton） + TopK（PyTorch）**（~0.3-0.4ms）
 - 输入：K [batch, heads, seq_len, dim]
-- 操作：RoPE 反演 → 频率打分 → TopK
+- 操作：RoPE 反演 → 频率打分（Triton）→ TopK（`torch.topk`）
 - 输出：indices [batch, heads, k]
 
 **Stage 2: Gather + Attention**（~1.1-1.5ms）
@@ -243,11 +247,11 @@ cos(delta*omega + phi) = cos(delta*omega)*cos(phi) - sin(delta*omega)*sin(phi)
 ```python
 class TriAttentionCompressor:
     def compress(self, key_states, value_states, positions):
-        # Stage 1: Triton 打分 + TopK
+        # Stage 1: Triton 打分 + TopK（PyTorch）
         scores = scoring_kernel(key_states, self.stats, self.omega, ...)
         indices = topk_kernel(scores, k=self.config.budget)
 
-        # Stage 2: PyTorch Gather（或 Triton Gather）
+        # Stage 2: PyTorch Gather
         k_compressed = key_states.gather(dim=2, index=indices)
         v_compressed = value_states.gather(dim=2, index=indices)
 
@@ -260,11 +264,11 @@ class TriAttentionCompressor:
 
 | 风险 | 概率 | 影响 | 缓解措施 | 残余风险 |
 |-----|------|------|---------|---------|
-| Triton TopK 效率不足 | 中 | 中 | 混合策略 | 低 |
+| TopK/Gather 性能不足 | 中 | 中 | Phase 2 再评估 Triton 化 | 低 |
 | 复数运算误差累积 | 低 | 高 | FP32 中间计算 | 低 |
 | 内存布局不优 | 中 | 中 | 预 Gather 或转置 | 低 |
 | Per-head warp 发散 | 中 | 低 | 批量多 head | 低 |
-| 性能不达 1.3x | 低 | 高 | 调优或降级 PyTorch | 中 |
+| 性能不达 1.3x | 低 | 高 | Phase 2 再评估 Triton TopK/Gather | 中 |
 
 ---
 
@@ -272,9 +276,9 @@ class TriAttentionCompressor:
 
 ### 6.1 分阶段实现
 
-1. **Week 1**：PyTorch 参考实现 + 打分 Triton kernel
-2. **Week 2**：TopK Triton kernel + 融合测试
-3. **Week 3**：集成 + 性能调优
+1. **Week 1**：Triton 打分 + PyTorch TopK/Gather baseline
+2. **Week 2**：集成与正确性测试
+3. **Week 3**：性能评估（决定是否引入 Triton TopK/Gather）
 
 ### 6.2 测试优先级
 
@@ -285,9 +289,9 @@ class TriAttentionCompressor:
 ### 6.3 备选方案
 
 如果 Triton 性能不达预期：
-- 使用 `torch.compile` 优化 PyTorch 实现
-- 仅 TopK + Gather 使用 Triton，打分用 PyTorch
-- 考虑 CUDA kernel（复杂度更高）
+- Phase 2 再评估是否引入 Triton TopK/Gather
+- 逐步引入优化（autotune、融合）
+- 必要时考虑 CUDA kernel（复杂度更高）
 
 ---
 

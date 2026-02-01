@@ -34,15 +34,15 @@
 | 不用 noise injection | 不优雅，R-KV 也没实现 |
 | 不用 Query cache | SpeckV 不依赖实时 Query |
 | 阶段 1 必须 batch > 1 | R-KV 是静默失败 |
-| 阶段 1 必须 Triton 重写 | R-KV 效率慢 1.8-2.8x |
+| 阶段 1 打分 Triton | 先保证主路径正确性 |
 
 ### 三阶段策略
 
 | 阶段 | 复用策略 | 效率目标 |
 |-----|---------|---------|
 | 阶段 0 | 直接用 R-KV 框架 | 不追求 |
-| 阶段 1 | Triton 重写核心操作 | 2-3x 于 R-KV |
-| 阶段 2 | 同阶段 1 | 同阶段 1 |
+| 阶段 1 | 打分 Triton，TopK/Gather PyTorch | 先跑通主路径 |
+| 阶段 2 | 边界情况 + 评估 Triton TopK/Gather | 视收益决定 |
 
 ---
 

@@ -10,7 +10,7 @@
 |-----|------|------|------------|----------|
 | **阶段 0** | 快速验证 | R-KV 框架内 | = 1 | 不追求 |
 | **阶段 1** | 高效独立版本 | TriAttention 独立 | > 1 | Triton 级别 |
-| **阶段 2** | 高级功能 | TriAttention 独立 | > 1 | Triton 级别 |
+| **阶段 2** | 边界情况与鲁棒性 | TriAttention 独立 | > 1 | Triton 级别 |
 
 ---
 
@@ -79,13 +79,13 @@
 
 **实现要求**：要么支持 batch > 1，要么在 batch > 1 时抛出明确错误
 
-### 3.4 阶段 1 必须 Triton 重写 ✅
+### 3.4 阶段 1 打分 Triton，TopK/Gather 先用 PyTorch ✅
 
-**决策**：阶段 1 不复用 R-KV 的 TopK/Gather 代码
+**决策**：阶段 1 仅要求打分使用 Triton；TopK/Gather 先用 PyTorch，Phase 2 再评估是否 Triton 化
 
-**理由**：R-KV 代码效率比 Triton 慢 1.8-2.8x
+**理由**：先保证正确性与主路径可用，再根据性能收益决定是否投入 Triton TopK/Gather
 
-**重写范围**：打分、TopK、Gather 三个核心操作
+**重写范围**：阶段 1 仅打分；TopK/Gather 视 Phase 2 性能收益再决定
 
 ---
 
@@ -108,7 +108,8 @@
 ### 阶段 1（独立高效版本）
 
 **必须**：
-- [ ] Triton kernel 实现打分、TopK、Gather
+- [ ] Triton kernel 实现打分
+- [ ] TopK/Gather 先用 PyTorch 跑通
 - [ ] **Batch Size > 1 支持**
 - [ ] RoPE 一致性检查
 - [ ] 状态重置接口
@@ -119,7 +120,7 @@
 - [ ] Union-based 选择
 - [ ] 多种聚合策略（mean/max）
 
-### 阶段 2（高级功能）
+### 阶段 2（边界情况与鲁棒性）
 
 **计划**：
 - [ ] 内存触发压缩
@@ -201,7 +202,7 @@ TriAttention_vLLM/triattention/
 ├── scoring.py                 # 打分逻辑
 └── kernels/
     ├── scoring_kernel.py      # Triton 打分
-    ├── topk_gather_kernel.py  # Triton TopK+Gather
+    ├── topk_gather_kernel.py  # Triton TopK+Gather（Phase 2 评估）
     └── fill_in_place_kernel.py
 ```
 
