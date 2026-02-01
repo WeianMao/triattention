@@ -12,7 +12,7 @@
 
 | 目标 | 说明 | 优先级 |
 |-----|------|--------|
-| **Triton 级别效率** | Phase 1 以正确性为主；2-3x 目标留到 Phase 2（引入 Triton TopK/Gather 后评估） | P0 |
+| **Triton 级别效率** | Phase 1 做基础 Triton 优化，先保证可用与正确；2-3x 目标留到 Phase 2（引入 Triton TopK/Gather 后评估） | P0 |
 | **Batch Size > 1** | 支持批量推理，提高吞吐量 | P0 |
 | **独立开发** | 不依赖 R-KV 框架，独立代码库 | P0 |
 | vLLM 集成 | 与 vLLM 0.15.x 非侵入式集成 | P1 |
@@ -33,7 +33,7 @@
 | 框架 | R-KV/HuggingFace | TriAttention 独立 |
 | Batch Size | = 1 | > 1 |
 | 核心操作 | PyTorch 原生 | Triton kernel |
-| 效率 | 不追求 | 2-3x 于 R-KV |
+| 效率 | 不追求 | 基础 Triton 优化（2-3x 目标在 Phase 2 评估） |
 | 集成 | HuggingFace generate | vLLM 主路径 |
 
 ---

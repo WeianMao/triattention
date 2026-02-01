@@ -14,7 +14,7 @@
 | 4. 内存触发压缩 | ⏸️ 阶段 2 | 采用方案 A，第一阶段不实现 |
 | 5. 多 Request 场景 | ✅ 已解决 | Per-request 独立，与 vLLM 一致 |
 | 6. 打分聚合策略 | ✅ 已解决 | 严格对齐 R-KV 脚本 |
-| 7. Position Indices 类型 | ✅ 已解决 | 使用 torch.long，对齐 R-KV |
+| 7. Position Indices 类型 | ✅ 已解决 | Phase 1 使用 bf16/int32（优先 int32） |
 
 ---
 
@@ -88,11 +88,11 @@
 
 ## 问题 7：Position Indices 类型 ✅
 
-**结论**：使用 `torch.long`（int64），对齐 R-KV
+**结论**：Phase 1 使用 **bf16 或 int32（优先 int32）**
 
-- R-KV 实际实现：`dtype=torch.long`
-- bf16 优化是后续可选项，不是第一阶段要求
-- 第一阶段严格对齐 R-KV 行为
+- R-KV 实际实现：`dtype=torch.long`（仅用于对齐验证/调试）
+- Phase 1 不强制 int64，优先内存与带宽友好的类型
+- 若需要对齐验证，可临时切换为 int64
 
 ---
 

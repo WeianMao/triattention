@@ -49,7 +49,7 @@ monkey patch HF           update_kv() 接口           batch>1, Triton
 | TopK/Gather（PyTorch） | 先跑通主路径 | □ |
 | batch > 1 支持 | 生产环境需求 | □ |
 | PagedAttention 完整支持 | 多 request 并发场景 | □ |
-| 性能优化 | 目标 1.3-1.7x 加速 | □ |
+| 基础 Triton 优化 | 不追求极限，保证主路径可用 | □ |
 
 **完成标准**：
 - 正确性与 Phase 0 一致
