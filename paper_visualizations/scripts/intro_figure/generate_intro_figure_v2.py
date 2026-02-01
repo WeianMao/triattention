@@ -611,7 +611,7 @@ def main() -> None:
     ax_d.set_xlim(1, 5000)
     ax_d.set_xticks([1, 10, 100, 1000, 5000])
     ax_d.set_xticklabels(['1', '10', '100', '1k', '5k'])
-    ax_d.set_xlabel(r'Query-Key Distance $\Delta$', fontsize=FONT_SIZE)
+    ax_d.set_xlabel(r'Q-K Distance $\Delta$', fontsize=FONT_SIZE)
     ax_d.set_ylabel('Attention Logit', fontsize=FONT_SIZE, labelpad=2)
     ax_d.set_box_aspect(1)
     ax_d.set_yticks([0, 25, 50, 75, 100, 125])

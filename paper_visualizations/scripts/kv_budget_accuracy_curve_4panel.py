@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--step-accuracy-csv",
         type=Path,
-        default=Path("paper_visualizations/Materials/step_accuracy_is_correct_sample8.csv"),
+        default=Path("paper_visualizations/Materials/step_accuracy_is_correct-0128.csv"),
         help="Path to the step accuracy CSV file",
     )
     parser.add_argument(
@@ -125,6 +125,7 @@ def main() -> None:
 
     # Markers
     markers = {
+        'Full Attention': 'D',
         'R-KV': 'o',
         'TriAttention': 's',
         'SnapKV': '^',
@@ -208,7 +209,10 @@ def main() -> None:
     ax_d.set_box_aspect(1)
     style_ax_combined(ax_d)
 
-    # Plot R-KV and TriAttention step accuracy
+    # Plot Full Attention, R-KV and TriAttention step accuracy
+    ax_d.plot(df_step['step'], df_step['fullkv_accuracy'] * 100,
+             color=colors['Full Attention'], linestyle='-', marker=markers['Full Attention'],
+             markersize=9, linewidth=2.5, label='Full Attention', alpha=0.9)
     ax_d.plot(df_step['step'], df_step['rkv_accuracy'] * 100,
              color=colors['R-KV'], linestyle='-', marker=markers['R-KV'],
              markersize=9, linewidth=2.5, label='R-KV', alpha=0.9)
@@ -216,7 +220,7 @@ def main() -> None:
              color=colors['TriAttention'], linestyle='-', marker=markers['TriAttention'],
              markersize=9, linewidth=2.5, label='TriAttention', alpha=0.9)
 
-    ax_d.set_xlabel('Step', fontsize=FONT_SIZE)
+    ax_d.set_xlabel('Memory Pressure (Depth)', fontsize=FONT_SIZE)
     ax_d.set_title('Memory Retention Benchmark', fontsize=FONT_SIZE + 2, fontweight='bold', pad=10)
 
     # X-axis ticks
