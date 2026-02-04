@@ -57,4 +57,15 @@ paper_visualizations/Materials/
 *.safetensors
 *.bin
 *.ckpt
+*.jar
 .DS_Store
+
+# TriAttention_vLLM evaluation artifacts
+TriAttention_vLLM/evaluation/results/
+TriAttention_vLLM/evaluation/**/default-*_math_eval*.jsonl
+TriAttention_vLLM/evaluation/**/default-*_metrics.json
+TriAttention_vLLM/evaluation/*.log
+
+# Build artifacts
+*.egg-info/
+.deps/
