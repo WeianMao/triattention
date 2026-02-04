@@ -1,188 +1,257 @@
-# TriAttention for vLLM
+# 文档维护指南
 
-将 SpeckV KV cache 压缩算法移植到 vLLM，使用 Triton kernel 优化。
+> **重要**：开发前请先阅读本文档，理解文档结构和维护原则。
 
 ---
 
-## 文档结构
+## ⚠️ 废弃目录说明
+
+| 目录 | 状态 | 说明 |
+|------|------|------|
+| `V0/` | **已废弃** | 旧版文档，仅保留历史参考，**不再维护** |
+| `archive/` | 归档 | 历史文档归档 |
+
+**新内容请维护在 `interface/` 和 `backend/` 目录中。**
+
+---
+
+## 文档架构
 
 ```
 docs/
-├── README.md                      # 本文档：项目概述与索引
-├── design/                        # 设计文档
-│   ├── algorithm.md               # 算法设计：打分公式、裁剪逻辑
-│   └── optimization.md            # 优化设计：RoPE 优化、三角表共享
-├── implementation/                # 实现文档
-│   ├── fill_in_place.md           # Fill-in-Place 策略详解
-│   ├── data_structures.md         # 数据结构：position_indices、stats
-│   └── vllm_integration.md        # vLLM PagedAttention 集成分析
-├── project/                       # 项目管理
-│   ├── key_decisions.md           # ⭐ 关键决策与验证结论汇总
-│   ├── roadmap.md                 # 实施路线图与开发准则
-│   ├── todo.md                    # 待办事项
-│   └── CLARIFICATIONS_NEEDED.md   # 设计问题澄清记录
-├── r-kv-analysis/                 # R-KV/vLLM 对比分析（详细）
-│   ├── README.md                  # 分析文档索引与核心结论速查
-│   ├── Q1_requirement_coverage.md # 需求覆盖对比
-│   ├── Q2_pros_cons_analysis.md   # 优缺点分析
-│   └── Q3_reusable_code.md        # 可复用代码分析
-└── archive/                       # 归档（原始文档，供参考）
+├── README.md                  # 本文档（入口，维护原则）
+├── interface/                 # 用户接口层（面向项目负责人）
+│   ├── PROJECT_GOAL.md        # 终极目标（只读）
+│   ├── CURRENT_STATUS.md      # 当前状态（持续更新）
+│   ├── PENDING_DECISIONS.md   # 待决策问题（决策后删除）
+│   └── OPEN_ISSUES.md         # 待解决问题（解决后删除）
+├── backend/                   # 后端层（面向开发同事）
+│   ├── DESIGN_DECISIONS.md    # 已确定的设计决策
+│   ├── DEVELOPMENT_PRINCIPLES.md  # 开发原则
+│   ├── REVIEW_CHECKLIST.md    # 审查清单
+│   └── reference/             # 参考资料（历史分析、技术细节）
+├── V0/                        # ⚠️ 已废弃，不再维护
+└── archive/                   # 历史归档
 ```
 
 ---
 
-## 1. 项目概述
+## 两层设计理念
 
-### 1.1 背景
+### Interface 层（用户接口）
+- **面向**：项目负责人（你）
+- **目的**：快速了解项目状态、做出决策
+- **原则**：保持精简，只展示需要关注的信息
 
-在 torch 和 HuggingFace 的 backend 下实现了 KV cache 压缩算法（原名 SpeckV），现需移植到 vLLM 并用 Triton 实现。
+| 文档 | 用途 | 维护频率 |
+|------|------|----------|
+| `PROJECT_GOAL.md` | 终极目标 | **不可修改** |
+| `CURRENT_STATUS.md` | 最新进度 | 每次开发后更新 |
+| `PENDING_DECISIONS.md` | 需要你决策的问题 | 决策后删除 |
+| `OPEN_ISSUES.md` | 待解决的问题 | 解决后删除 |
 
-### 1.2 目标
+### Backend 层（后端）
+- **面向**：开发同事
+- **目的**：提供开发规范、技术细节、历史记录
+- **原则**：详尽但有组织
 
-- 将 KV 压缩算法在 vLLM 0.15.x 上实现
-- 使用 Triton kernel 优化打分和裁剪
-- 重命名为 "TriAttention"
-
-### 1.3 架构约束
-
-| ID | 约束 | 描述 |
-|----|-----|------|
-| A-01 | 非侵入式 | 所有代码在 `TriAttention_vLLM/` 文件夹，不修改其他文件夹 |
-| A-02 | 算法命名 | 重命名为 "TriAttention" |
-| A-03 | 目标版本 | vLLM 0.15.x |
+| 文档 | 用途 |
+|------|------|
+| `DESIGN_DECISIONS.md` | 已确定的设计决策（永久记录） |
+| `DEVELOPMENT_PRINCIPLES.md` | 开发规范（所有同事必读） |
+| `REVIEW_CHECKLIST.md` | Review 时使用的检查清单 |
+| `reference/` | 技术分析、历史文档（按需查阅） |
 
 ---
 
-## 2. 源代码位置
+## 三种工作场景
 
-### 2.1 原始实现（R-KV）
+### 场景 1：继续执行任务
 
-**三种算法变种**：
+**同事需要做的**：
+1. 阅读 `interface/CURRENT_STATUS.md` 了解当前进度
+2. 阅读 `interface/OPEN_ISSUES.md` 了解待解决问题
+3. 阅读 `backend/DEVELOPMENT_PRINCIPLES.md` 了解开发规范
+4. 按优先级完成任务
+5. **任务完成后**：
+   - 从 `OPEN_ISSUES.md` 删除已解决的问题
+   - 更新 `CURRENT_STATUS.md` 反映最新状态
 
-| 变种 | 脚本路径 |
-|-----|---------|
-| per-head（默认） | `R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_perhead.sh` |
-| per-layer-per-head | `R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_layer_perhead.sh` |
-| per-layer | `R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_perlayer.sh` |
+### 场景 2：Review 项目状态
 
-**核心实现文件**：
+**同事需要做的**：
+1. 运行测试，检查代码状态
+2. 使用 `backend/REVIEW_CHECKLIST.md` 逐项检查
+3. **发现新问题** → 添加到 `interface/OPEN_ISSUES.md`
+4. **确认问题已解决** → 从 `OPEN_ISSUES.md` 删除
+5. 更新 `interface/CURRENT_STATUS.md`
 
-| 文件 | 用途 |
-|------|-----|
-| `R-KV/weian_development/speckv/speckv_rkv_style.py` | 主实现 |
-| `R-KV/weian_development/speckv/round_pruning_utils.py` | 打分、RoPE |
-| `R-KV/weian_development/tests/` | 测试套件 |
+### 场景 3：需要用户决策
 
-### 2.2 Stats 文件位置
+**同事发现需要决策的问题时**：
+1. 添加到 `interface/PENDING_DECISIONS.md`
+2. 提供选项和建议
+3. **用户决策后**：
+   - 从 `PENDING_DECISIONS.md` 删除该问题
+   - 将决策结果添加到 `backend/DESIGN_DECISIONS.md`
 
+---
+
+## 维护原则
+
+### 原则 1：及时清理
+- 问题解决后 → **立即从 `OPEN_ISSUES.md` 删除**
+- 决策完成后 → **立即从 `PENDING_DECISIONS.md` 删除**
+- 不要让已完成的事项堆积
+
+### 原则 2：持续更新状态
+- `CURRENT_STATUS.md` 应反映**最新状态**
+- 旧信息应被**替换**而非累积
+- 每次开发后检查是否需要更新
+
+### 原则 3：保持 Interface 精简
+- Interface 层文档应**一眼能看完**
+- 详细技术分析放在 `backend/reference/`
+- 只在 Interface 中放必要信息
+
+### 原则 4：Backend 详尽但有组织
+- 技术细节、历史分析放在 `backend/reference/`
+- `DESIGN_DECISIONS.md` 是永久记录，不删除内容
+- 新的参考文档放在 `reference/` 目录下
+
+### 原则 5：不重复
+- 同一信息只在一个地方维护
+- Interface 可以引用 Backend，但不复制内容
+
+---
+
+## 文档模板
+
+### 新增待解决问题（OPEN_ISSUES.md）
+
+```markdown
+### N. 问题标题
+- **位置**：文件路径:行号
+- **影响**：简述影响
+- **修复方案**：简述方案（如已知）
+- **工作量**：预估时间
 ```
-R-KV/outputs/repository/sample8_fullkv_aime25_official_qwen/stats/
+
+### 新增待决策问题（PENDING_DECISIONS.md）
+
+```markdown
+## 问题标题
+
+### 背景
+[问题描述]
+
+### 选项
+- **选项 A**：[描述] （工作量：xxx）
+- **选项 B**：[描述] （工作量：xxx）
+
+### 建议
+[如有建议]
+```
+
+### 记录已确定决策（DESIGN_DECISIONS.md）
+
+```markdown
+### 决策 N: 标题
+- **日期**：YYYY-MM-DD
+- **问题**：[问题描述]
+- **决策**：[选择的方案]
+- **理由**：[决策理由]
+- **状态**：待执行/已完成
 ```
 
 ---
 
-## 3. 核心功能
+## 检查清单：开发前
 
-### 3.1 KV Cache 压缩
+- [ ] 阅读本 README
+- [ ] 阅读 `interface/CURRENT_STATUS.md`
+- [ ] 阅读 `interface/OPEN_ISSUES.md`
+- [ ] 阅读 `backend/DEVELOPMENT_PRINCIPLES.md`
 
-基于频率统计的打分机制，保留 top-k token 的 KV cache。
+## 检查清单：开发后
 
-### 3.2 三种裁剪粒度
-
-| 变种 | 参数 | 描述 |
-|-----|------|------|
-| per-head | `pruning_mode="per_head"` | 每个 KV head 全局独立选择 token |
-| per-layer-per-head | `pruning_mode="per_layer_per_head"` | 每个 (layer, head) 独立选择 |
-| per-layer | `pruning_mode="per_layer"` | 同层所有 head 共享 token 选择 |
-
-### 3.3 裁剪触发条件
-
-1. Overflow 满了（达到 `divide_length`）
-2. **且** 当前 KV 总量超过 `budget`
-
-如果 budget 还没满，不触发裁剪，直接合并 overflow 到 budget。
-
-### 3.4 Prefill 处理
-
-- **Prefill > budget**：阶段 2 才处理（阶段 1 不覆盖）
-- **`protect_prefill` 参数**（默认 `False`）：
-  - `False`：prefill token 参与裁剪竞争
-  - `True`：prefill token 被保护不参与裁剪
+- [ ] 已解决的问题从 `OPEN_ISSUES.md` 删除
+- [ ] `CURRENT_STATUS.md` 已更新
+- [ ] 如有新问题，已添加到 `OPEN_ISSUES.md`
+- [ ] 如有待决策问题，已添加到 `PENDING_DECISIONS.md`
 
 ---
 
-## 4. 模型支持
+## 快速导航
 
-**仅支持 RoPE 位置编码模型**：
+### Interface Layer（优先阅读）
 
-| 模型系列 | 具体模型 | 优先级 |
-|---------|---------|-------|
-| Qwen | Qwen2, Qwen2.5, Qwen3 | P0 |
-| LLaMA | LLaMA2, LLaMA3, CodeLlama | P0 |
-| DeepSeek | DeepSeek-V2, DeepSeek-R1 | P0 |
-| Mistral | Mistral, Mixtral | P1 |
+| 想了解... | 阅读文档 |
+|----------|---------|
+| ⭐ **项目终极目标** | [interface/PROJECT_GOAL.md](interface/PROJECT_GOAL.md) |
+| ⭐ **当前状态** | [interface/CURRENT_STATUS.md](interface/CURRENT_STATUS.md) |
+| 待决策问题 | [interface/PENDING_DECISIONS.md](interface/PENDING_DECISIONS.md) |
+| 待解决问题 | [interface/OPEN_ISSUES.md](interface/OPEN_ISSUES.md) |
 
-**RoPE 风格**：
-- **half**（主要）：前后两半配对（Qwen, LLaMA）
-- **interleaved**（次要）：奇偶交替配对
+### Backend Layer（开发参考）
+
+| 想了解... | 阅读文档 |
+|----------|---------|
+| 已确定的设计决策 | [backend/DESIGN_DECISIONS.md](backend/DESIGN_DECISIONS.md) |
+| 开发原则 | [backend/DEVELOPMENT_PRINCIPLES.md](backend/DEVELOPMENT_PRINCIPLES.md) |
+| 审查清单 | [backend/REVIEW_CHECKLIST.md](backend/REVIEW_CHECKLIST.md) |
+
+### Reference Materials（详细技术文档）
+
+#### 实施规划
+- [实施路线图](backend/reference/roadmap.md)
+- [Phase1 状态报告](backend/reference/PHASE1_STATUS_REPORT.md)
+- [总体路线图](backend/reference/ROADMAP.md)
+
+#### 修复记录
+- [Triton BF16 编译错误修复](backend/reference/fixes/BF16_TRITON_FIX.md) ⭐ **最新**
+- [相位计算公式修正](backend/reference/fixes/RKV_EQUIVALENCE_FIX.md)
+- [MLR 公式修正](backend/reference/fixes/MLR_FIX.md)
+- [Triton-PyTorch 等价性修正](backend/reference/fixes/FP32_EQUIVALENCE_FIX.md)
+- [序列长度同步修正](backend/reference/fixes/FIX_SEQ_LEN_SYNC.md)
+- [位置索引修正](backend/reference/fixes/POSITION_INDICES_FIX.md)
+- [Per-Request 隔离修正](backend/reference/fixes/PER_REQUEST_ISOLATION_FIX.md)
+- [KV Cache 格式修正](backend/reference/fixes/KV_CACHE_FORMAT_FIX.md)
+- [Kernel 接口变更](backend/reference/fixes/KERNEL_INTERFACE_CHANGES.md)
+- [API 变更（Per-Request）](backend/reference/fixes/API_CHANGES_PER_REQUEST.md)
+- [vLLM 集成审查](backend/reference/fixes/VLLM_INTEGRATION_REVIEW.md)
+
+#### 实现总结
+- [实现状态](backend/reference/summaries/IMPLEMENTATION_STATUS.md)
+- [结构总结](backend/reference/summaries/STRUCTURE_SUMMARY.md)
+- [快速开始](backend/reference/summaries/QUICK_START.md)
+- [运行推理](backend/reference/summaries/RUNNING_INFERENCE.md)
+- [调试总结](backend/reference/summaries/DEBUG_SUMMARY.md)
+- [vLLM Hook 总结](backend/reference/summaries/VLLM_HOOK_SUMMARY.md)
+- [Agent2 总结](backend/reference/summaries/AGENT2_SUMMARY.md)
+
+#### 实现细节
+- [Fill-in-Place 策略](backend/reference/implementation/fill_in_place.md)
+- [数据结构](backend/reference/implementation/data_structures.md)
+- [vLLM 集成](backend/reference/implementation/vllm_integration.md)
+- [vLLM Hook 实现](backend/reference/implementation/vllm_hook_implementation.md)
+
+#### 设计文档
+- [算法设计](backend/reference/design/algorithm.md)
+- [优化设计](backend/reference/design/optimization.md)
+
+#### Phase1 文档
+- [Phase1 README](backend/reference/phase1/README.md)
+- [技术笔记](backend/reference/phase1/TECHNICAL_NOTES.md)
+
+#### R-KV 对比分析
+- [分析概述](backend/reference/r-kv-analysis/README.md)
+- [需求覆盖对比](backend/reference/r-kv-analysis/Q1_requirement_coverage.md)
+- [优缺点分析](backend/reference/r-kv-analysis/Q2_pros_cons_analysis.md)
+- [可复用代码分析](backend/reference/r-kv-analysis/Q3_reusable_code.md)
 
 ---
 
-## 5. 配置参数
-
-| 参数 | 说明 | 示例值 |
-|-----|------|-------|
-| `budget` | KV cache 上限 | 2048, 4096, 8192 |
-| `divide_length` | 每 N 步检查一次 | 64, 128 |
-| `pruning_mode` | 裁剪粒度 | `per_head`, `per_layer_per_head`, `per_layer` |
-| `stats_path` | 频率统计文件路径 | 见 2.2 |
-| `protect_prefill` | 是否保护 prefill token | `False`（默认） |
-
----
-
-## 6. 快速导航
-
-### 核心文档（优先阅读）
-
-| 想了解... | 阅读文档 |
-|----------|---------|
-| ⭐ **关键决策与验证结论** | [project/key_decisions.md](project/key_decisions.md) |
-| 开发阶段与需求清单 | [project/key_decisions.md](project/key_decisions.md) |
-| 实施路线图和开发准则 | [project/roadmap.md](project/roadmap.md) |
-
-### 设计文档
-
-| 想了解... | 阅读文档 |
-|----------|---------|
-| 打分公式和裁剪逻辑 | [design/algorithm.md](design/algorithm.md) |
-| 计算优化（RoPE、三角表） | [design/optimization.md](design/optimization.md) |
-
-### 实现文档
-
-| 想了解... | 阅读文档 |
-|----------|---------|
-| Fill-in-Place 工作流程 | [implementation/fill_in_place.md](implementation/fill_in_place.md) |
-| position_indices 等数据结构 | [implementation/data_structures.md](implementation/data_structures.md) |
-| vLLM PagedAttention 集成 | [implementation/vllm_integration.md](implementation/vllm_integration.md) |
-
-### 项目管理
-
-| 想了解... | 阅读文档 |
-|----------|---------|
-| 待办事项 | [project/todo.md](project/todo.md) |
-| 设计问题澄清记录 | [project/CLARIFICATIONS_NEEDED.md](project/CLARIFICATIONS_NEEDED.md) |
-
-### R-KV 对比分析（详细）
-
-| 想了解... | 阅读文档 |
-|----------|---------|
-| R-KV 分析概述 | [r-kv-analysis/README.md](r-kv-analysis/README.md) |
-| 需求覆盖对比 | [r-kv-analysis/Q1_requirement_coverage.md](r-kv-analysis/Q1_requirement_coverage.md) |
-| 优缺点分析 | [r-kv-analysis/Q2_pros_cons_analysis.md](r-kv-analysis/Q2_pros_cons_analysis.md) |
-| 可复用代码分析 | [r-kv-analysis/Q3_reusable_code.md](r-kv-analysis/Q3_reusable_code.md) |
-
----
-
-*文档版本：4.0*
+*文档版本：6.0*
 *创建日期：2025-01-30*
-*更新日期：2025-01-31（重组文档结构，添加关键决策汇总）*
+*更新日期：2026-02-02（基于 R-KV/vLLM/docs/weian_development/README.md 重构）*

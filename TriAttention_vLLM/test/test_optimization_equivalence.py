@@ -70,8 +70,6 @@ def test_optimization1_rope_correction():
     assert max_abs_error < tolerance, f"Optimization 1 failed: max error {max_abs_error:.2e} > {tolerance:.2e}"
     print(f"✓ PASS: Errors within tolerance ({tolerance:.2e})")
 
-    return max_abs_error, max_rel_error
-
 
 def test_optimization2_fast_coefficients():
     """
@@ -130,8 +128,6 @@ def test_optimization2_fast_coefficients():
     assert max_error < tolerance, f"Optimization 2 failed: max error {max_error:.2e} > {tolerance:.2e}"
     print(f"\n✓ PASS: Errors within tolerance ({tolerance:.2e})")
 
-    return max_error, max(rel_error_A.max().item(), rel_error_B.max().item())
-
 
 def test_optimization3_trig_identity():
     """
@@ -184,8 +180,6 @@ def test_optimization3_trig_identity():
     tolerance = 1e-5
     assert max_abs_error < tolerance, f"Optimization 3 failed: max error {max_abs_error:.2e} > {tolerance:.2e}"
     print(f"✓ PASS: Errors within tolerance ({tolerance:.2e})")
-
-    return max_abs_error, max_rel_error
 
 
 def test_full_pipeline():
@@ -280,8 +274,6 @@ def test_full_pipeline():
     assert max_abs_error < tolerance, f"Full pipeline failed: max error {max_abs_error:.2e} > {tolerance:.2e}"
     print(f"\n✓ PASS: Errors within tolerance ({tolerance:.2e})")
 
-    return max_abs_error, max_rel_error
-
 
 def test_dtype_precision():
     """
@@ -335,8 +327,6 @@ def test_dtype_precision():
 
         assert max_error < tolerance, f"Dtype {dtype} failed: {max_error:.2e} > {tolerance:.2e}"
         print(f"  ✓ PASS: Within {dtype} tolerance ({tolerance:.2e})")
-
-    return results
 
 
 if __name__ == "__main__":
