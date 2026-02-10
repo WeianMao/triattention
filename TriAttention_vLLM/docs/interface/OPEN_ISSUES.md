@@ -220,6 +220,65 @@ Request.num_computed_tokens
 
 ---
 
+### 1.0.3 🟡 V1 Backend 准确率与 V0/HF 仍有差距 (P1 - 待调查)
+
+**问题描述**：
+GQA 修复后 V1 Backend 准确率恢复到 ~39%，但与 V0 Monkey Patching (41.7%) 和 HF 基线 (42.5%) 仍有 ~2-3% 差距。
+
+**实验数据**：
+| 方案 | Seed=888 | Seed=42 | 平均 |
+|------|---------|---------|------|
+| HF 无压缩基线 | 42.5% | - | 42.5% |
+| V0 Monkey-Patching (vLLM 0.7.x) | 41.7% | - | 41.7% |
+| V1 Backend (vLLM 0.15.0) | 40.0% | 37.9% | 39.0% |
+
+**差距分析**：
+- V1 vs V0: -2.7%（V1 平均 39.0% vs V0 41.7%）
+- V1 vs HF: -3.5%（V1 平均 39.0% vs HF 42.5%）
+- 30 题 × 8 samples 的统计方差约 ±3%，差距可能在方差范围内
+- 但也可能存在系统性偏差，需要调查
+
+**调查结果 (2026-02-08)**：
+
+#### 发现 1：🔴 请求状态污染 Bug（高优先级）
+V1 backend 使用 `request_id="decode_0"` 但**从不调用 `unregister_request()`**。当一个请求完成后（如 seq_len 达到 4000），下一个请求开始时 CompressionState 仍保留旧状态：
+- `absolute_position = 4000`（来自上一个请求）
+- 新请求 `seq_len = 200` → `new_tokens = 200 - 4000 = -3800`（负数）
+- `append_tokens` 不执行，`current_cache_len` 保持旧值
+- 压缩触发判断可能不正确
+
+V0 不受影响：runner 显式调用 `unregister_request()` 清理状态。
+
+**修复方案**：在 `_maybe_compress_kv_cache` 中检测新请求（`seq_len < absolute_position` 时 reset state）。
+
+#### 发现 2：🟡 缺少 is_decode 保护（中优先级）
+V1 在 prefill 时也调用 `_maybe_compress_kv_cache()`，导致 CompressionState 提前 initialize：
+- V0：首次 decode 时 `initialize(201)`（prefill 200 + 1 decode token）
+- V1：prefill 时 `initialize(200)`
+- 1-token 差异，单独影响小，但与 Bug #1 叠加
+
+#### 发现 3：统计学分析（差距不显著）
+- n=30，SE ≈ 8.9%，两组比较 Z-statistic = 0.21，p-value > 0.80
+- V1 自身两个 seed 的差异为 2.1%（40.0% vs 37.9%），与 V0-V1 差距 2.7% 相当
+- **结论：当前差距在统计意义上不显著**
+
+#### 发现 4：vLLM 引擎差异（固有差异）
+- vLLM 0.7.x vs 0.15.0 的 sampling 实现不同
+- 预期有 0.5-1% 的 baseline 差异
+
+#### 发现 5：Wrapper 架构差异（无影响）
+V1 每层独立 wrapper vs V0 共享 wrapper，功能上等价。
+
+**按优先级排序的验证实验**：
+1. [ ] **修复状态污染 Bug**：在 `_maybe_compress_kv_cache` 中检测 `seq_len < absolute_position` 时 reset state
+2. [ ] **添加 is_decode 保护**：检查 `attn_metadata.max_query_len == 1` 时才压缩
+3. [ ] **跑 V1 fullkv 基线**：`--disable-compression` 确认引擎差异有多大
+4. [ ] **增加样本量**：多 seed 或更多题目降低统计噪声
+
+**状态**：🟡 发现请求状态污染 Bug，待修复验证。统计分析表明当前差距可能在方差范围内
+
+---
+
 ### 1.1 阻塞任务 (P0 - 必须完成)
 
 - [x] **修复 Triton bf16 编译错误** ✅ (2026-02-03)
