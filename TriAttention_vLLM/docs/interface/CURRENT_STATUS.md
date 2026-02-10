@@ -1,8 +1,8 @@
 # TriAttention_vLLM 项目当前状态
 
-**文档更新日期**: 2026-02-03
+**文档更新日期**: 2026-02-08
 **项目阶段**: Phase 1 (核心实现与 vLLM 集成)
-**总体状态**: 🟡 核心库完成，bf16 编译错误已修复，待重新验证
+**总体状态**: ✅ V1 Backend GQA 修复完成，准确率恢复正常
 
 ---
 
@@ -21,6 +21,19 @@ TriAttention_vLLM 是将 SpeckV KV cache 压缩算法移植到 vLLM 的项目，
 - 目标：实现内存触发压缩
 - 方式：Hook `Scheduler.schedule()` 根据 block 使用率动态触发
 
+### 最近更新
+
+**2026-02-08: V1 Backend GQA 修复**
+- **根因确认**：`config.num_kv_heads=None` 导致 GQA 统计数据未平均（28 Q头未映射到 4 KV头）
+- **修复**：`v1_backend.py` 的 `_get_wrapper()` 中从 `self._model_info` 获取 `num_kv_heads` 和 `head_dim`
+- **验证结果**：seed=888 → 40.0%, seed=42 → 37.9%（修复前 28.3%，V0 基线 41.7%）
+- **状态**：✅ 准确率恢复正常，在方差范围内
+
+**2026-02-05: 切换到官方继承方案**
+- Runner 组件：移除 `patch_vllm_attention()`，改用 `setup_triattention()` + 环境变量
+- Dispatch 组件：添加 `VLLM_ATTENTION_BACKEND=TRIATTENTION` 环境变量
+- Merge/Eval 组件：确认无需修改
+
 ### 状态一览表
 
 | 维度 | 状态 | 完成度 | 说明 |
@@ -29,14 +42,14 @@ TriAttention_vLLM 是将 SpeckV KV cache 压缩算法移植到 vLLM 的项目，
 | **Triton Kernel 验证** | ✅ 完成 | 100% | 打分 kernel 通过 33/33 测试，数值误差 < 1e-6 |
 | **数学公式验证** | ✅ 完成 | 100% | RoPE 相位计算、MLR 公式已修正并验证 |
 | **配置对齐** | ✅ 完成 | 100% | window_size 默认值已修正为 128（2026-02-03） |
-| **vLLM 集成框架** | ✅ 完成 | 90% | Monkey Patching 已实现，继承方案延后 |
+| **vLLM 集成框架** | ✅ 完成 | 100% | 官方继承方案已实现 (2026-02-05) |
 | **Benchmark 脚本** | ✅ 完成 | 100% | `run_math_vllm.py` 已完成 (404 行) |
 | **Triton BF16 兼容** | ✅ 已修复 | 100% | 添加 fp32 cast 修复 tl.cos/sin bf16 错误 |
 | **端到端验证** | ✅ 已验证 | 100% | bf16 修复后压缩正常执行 |
-| **R-KV 测试框架集成** | 📋 待执行 | 0% | 复用 R-KV 上下游框架进行完整测试 |
-| **HF 等价性验证** | ⚠️ 待验证 | 0% | 需通过 R-KV 框架完成准确率对比 |
+| **R-KV 测试框架集成** | ✅ 完成 | 100% | 复用 R-KV 上下游框架完成评估 |
+| **HF 等价性验证** | ✅ 已验证 | 100% | V1 Backend ~39% vs HF 42.5%（GQA 修复后正常） |
 
-**总体完成度**: **90%** - 核心功能已完成，待集成 R-KV 测试框架进行完整验证
+**总体完成度**: **95%** - V1 Backend 核心功能已完成，GQA 修复后准确率恢复正常
 
 ---
 
@@ -667,5 +680,5 @@ R-KV/outputs/repository/sample8_fullkv_aime25_official_qwen/stats/
 ---
 
 *文档生成日期: 2026-02-03*
-*下次更新: 完成 vLLM Backend 继承方案后*
+*最后更新: 2026-02-05 (切换到官方继承方案)*
 *维护者: TriAttention_vLLM 项目组*

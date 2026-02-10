@@ -5,9 +5,10 @@ integrate with vLLM's V1 Engine attention infrastructure.
 
 Design:
 - Inherits from FlashAttentionBackend/FlashAttentionImpl
-- Compression happens AFTER KV cache is updated (forward_includes_kv_cache_update=False)
-- Uses do_kv_cache_update() to apply compression after attention computation
-- Configuration via environment variables or global setup
+- Compression happens in forward() AFTER attention computation
+- forward_includes_kv_cache_update=False means vLLM calls do_kv_cache_update()
+  before forward(), so the KV cache is fully populated when forward() runs
+- Execution order: do_kv_cache_update() -> forward() -> compress
 
 Environment Variables:
 - TRIATTENTION_STATS_PATH: Path to frequency statistics file (required)
@@ -21,7 +22,7 @@ Usage:
     # Option 1: Environment variables
     export TRIATTENTION_STATS_PATH=/path/to/stats.pt
     export TRIATTENTION_KV_BUDGET=2048
-    python -m vllm.entrypoints.openai.api_server --attention-backend TRIATTENTION
+    python -m vllm.entrypoints.openai.api_server --attention-backend CUSTOM
 
     # Option 2: Programmatic setup
     from triattention.backends import setup_triattention
@@ -31,12 +32,12 @@ Usage:
     setup_triattention(config)
 
     from vllm import LLM
-    llm = LLM(model="...", attention_backend="TRIATTENTION")
+    llm = LLM(model="...", attention_backend="CUSTOM")
 """
 
 import os
 from pathlib import Path
-from typing import ClassVar, Optional
+from typing import Optional
 
 import torch
 
@@ -56,21 +57,24 @@ class TriAttentionBackend(FlashAttentionBackend):
     compression through the TriAttentionImpl class.
 
     Key Design Decisions:
-    - forward_includes_kv_cache_update = False
-      This tells vLLM to call do_kv_cache_update() separately, allowing us
-      to apply compression after the KV cache is populated.
+    - forward_includes_kv_cache_update = False (inherited from FlashAttentionBackend)
+      This tells vLLM to call do_kv_cache_update() BEFORE forward().
+      So the KV cache is already populated when forward() runs.
+    - Compression runs in forward() AFTER super().forward() completes attention
     - Uses FlashAttentionMetadataBuilder for metadata construction
     - All KV cache shape/stride methods inherited from FlashAttentionBackend
     """
 
-    # Override: KV cache update happens separately (in do_kv_cache_update)
-    # This allows compression to be applied after attention computation
-    forward_includes_kv_cache_update: bool = False
+    # Inherited from FlashAttentionBackend: forward_includes_kv_cache_update = False
 
     @staticmethod
     def get_name() -> str:
-        """Backend identifier for vLLM registry."""
-        return "TRIATTENTION"
+        """Backend identifier for vLLM registry.
+
+        Must match the AttentionBackendEnum member name used for registration.
+        Since we register under CUSTOM, this must return "CUSTOM".
+        """
+        return "CUSTOM"
 
     @staticmethod
     def get_impl_cls() -> type["TriAttentionImpl"]:
@@ -89,21 +93,25 @@ class TriAttentionImpl(FlashAttentionImpl):
     """TriAttention implementation with KV cache compression.
 
     This class extends FlashAttentionImpl to add compression logic that runs
-    after the KV cache is updated.
+    after attention computation in forward().
 
-    Compression Flow:
-    1. vLLM calls forward() for attention computation
-    2. vLLM calls do_kv_cache_update() to populate KV cache
-    3. In do_kv_cache_update(), we:
-       a. Call parent's reshape_and_cache_flash to update cache
-       b. Check if compression is needed
-       c. Apply TriAttention compression if threshold exceeded
+    Execution Order (when forward_includes_kv_cache_update=False):
+    1. vLLM calls do_kv_cache_update() - writes new K/V to cache
+    2. vLLM calls forward() - we run attention, then compress
+
+    Compression Flow (inside forward):
+    1. Call super().forward() for attention computation
+    2. Check if compression is needed (using attn_metadata.seq_lens)
+    3. If needed: gather KV from paged cache, compress, scatter back
 
     State Management:
-    - Uses global _TRIATTENTION_WRAPPER for configuration
-    - Per-request state tracked via request_id
-    - Lazy initialization of compressor on first use
+    - Lazy initialization of TriAttentionWrapper on first use
+    - Per-request state tracked via request_id (batch_idx proxy)
     """
+
+    # Throttle compression logging
+    _compress_log_count = 0
+    _reshape_logged = False
 
     def __init__(
         self,
@@ -182,13 +190,21 @@ class TriAttentionImpl(FlashAttentionImpl):
                           "Set TRIATTENTION_STATS_PATH or call setup_triattention().")
                 self._wrapper = None
             else:
+                # Propagate model info to config for proper GQA handling
+                # in stats loading (mirrors V0's patch_vllm_attention logic)
+                if config.num_kv_heads is None:
+                    config.num_kv_heads = self._model_info["num_kv_heads"]
+                if config.head_dim is None:
+                    config.head_dim = self._model_info["head_dim"]
+
                 from triattention.vllm_integration import TriAttentionWrapper
                 self._wrapper = TriAttentionWrapper(config)
                 quiet = os.environ.get("TRIATTENTION_QUIET", "0") == "1"
                 if not quiet and self._layer_idx_counter == 0:
                     print(f"[TriAttention] V1 Impl initialized: "
                           f"kv_budget={config.kv_budget}, "
-                          f"divide_length={config.divide_length}")
+                          f"divide_length={config.divide_length}, "
+                          f"num_kv_heads={config.num_kv_heads}")
 
         except Exception as e:
             print(f"[TriAttention] Failed to initialize wrapper: {e}")
@@ -211,15 +227,15 @@ class TriAttentionImpl(FlashAttentionImpl):
         output_scale: Optional[torch.Tensor] = None,
         output_block_scale: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """Forward pass with FlashAttention.
+        """Forward pass with FlashAttention + post-attention compression.
 
-        This method delegates to parent's forward(). Compression is applied
-        separately in do_kv_cache_update().
-
-        The forward_includes_kv_cache_update=False flag tells vLLM to call
-        do_kv_cache_update() after this method returns.
+        Execution order (guaranteed by vLLM when forward_includes_kv_cache_update=False):
+        1. do_kv_cache_update() already ran - KV cache has all tokens
+        2. super().forward() - attention computation on full cache
+        3. _maybe_compress_kv_cache() - compress cache for next step
         """
-        return super().forward(
+        # Step 1: Run attention computation
+        result = super().forward(
             layer=layer,
             query=query,
             key=key,
@@ -231,6 +247,12 @@ class TriAttentionImpl(FlashAttentionImpl):
             output_block_scale=output_block_scale,
         )
 
+        # Step 2: Apply compression after attention (decoder only)
+        if self.attn_type not in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
+            self._maybe_compress_kv_cache(kv_cache, attn_metadata)
+
+        return result
+
     def do_kv_cache_update(
         self,
         layer: torch.nn.Module,
@@ -239,17 +261,11 @@ class TriAttentionImpl(FlashAttentionImpl):
         kv_cache: torch.Tensor,
         slot_mapping: torch.Tensor,
     ) -> None:
-        """Update KV cache and apply compression if needed.
+        """Update KV cache (no compression here).
 
-        This method is called by vLLM after forward() when
-        forward_includes_kv_cache_update=False.
-
-        Flow:
-        1. Call parent's do_kv_cache_update to populate cache
-        2. Check compression conditions
-        3. Apply compression if threshold exceeded
+        Compression has been moved to forward() where attn_metadata is available.
+        This method simply delegates to the parent implementation.
         """
-        # Step 1: Update KV cache using parent implementation
         super().do_kv_cache_update(
             layer=layer,
             key=key,
@@ -258,68 +274,157 @@ class TriAttentionImpl(FlashAttentionImpl):
             slot_mapping=slot_mapping,
         )
 
-        # Step 2: Check if we should apply compression
-        # Only compress for decoder attention (not encoder)
-        if self.attn_type not in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
-            self._maybe_compress_kv_cache(kv_cache, slot_mapping)
-
     def _maybe_compress_kv_cache(
         self,
         kv_cache: torch.Tensor,
-        slot_mapping: torch.Tensor,
+        attn_metadata: FlashAttentionMetadata,
     ) -> None:
-        """Apply compression if conditions are met.
+        """Apply KV cache compression if conditions are met.
 
-        Compression is applied when:
-        - Wrapper is configured
-        - Current sequence length exceeds budget + divide_length
+        This mirrors _apply_triattention_compression() from vllm_integration.py
+        but adapted for the V1 backend where attn_metadata is available in forward().
 
-        Note: slot_mapping tells us which slots were just written.
-        We use this to determine sequence length and apply compression.
+        Args:
+            kv_cache: [2, num_blocks, block_size, num_kv_heads, head_dim]
+            attn_metadata: FlashAttentionMetadata with seq_lens and block_table
         """
         wrapper = self._get_wrapper()
         if wrapper is None:
             return
 
-        # Get layer index
-        layer_idx = self._layer_idx_counter
-
-        # Calculate sequence length from slot_mapping
-        # slot_mapping contains the slots that were just written
-        if slot_mapping.numel() == 0:
+        # attn_metadata can be None during profile/dummy runs
+        if attn_metadata is None:
             return
 
-        # For V1 API, slot_mapping contains linear indices into the KV cache
-        # We need to derive sequence length from the maximum slot + 1
-        # Note: This is a simplified approach. In practice, vLLM manages
-        # sequence lengths through the scheduler, but we don't have direct access.
+        layer_idx = self._layer_idx_counter
 
-        # Get block_size from KV cache shape
-        # V1 format: [2, num_blocks, block_size, num_kv_heads, head_size]
+        # V1 API: FlashAttentionMetadata has block_table and seq_lens directly
+        block_tables = getattr(attn_metadata, 'block_table', None)
+        seq_lens_tensor = getattr(attn_metadata, 'seq_lens', None)
+
+        if block_tables is None or seq_lens_tensor is None:
+            return
+
+        # Extract model config
+        block_size = self._model_info["block_size"]
+        num_kv_heads = self._model_info["num_kv_heads"]
+        head_dim = self._model_info["head_dim"]
+
+        # Update block_size from actual KV cache shape
         if kv_cache.dim() == 5 and kv_cache.shape[0] == 2:
             block_size = kv_cache.shape[2]
             self._model_info["block_size"] = block_size
 
-        # Apply compression using the integration function
-        try:
-            from triattention.vllm_integration import _apply_triattention_compression
+        # Handle flattened cache format: [2, num_blocks, block_size * num_kv_heads * head_dim]
+        was_reshaped = False
+        if kv_cache.dim() == 3 and kv_cache.shape[0] == 2:
+            num_blocks = kv_cache.shape[1]
+            flattened_size = kv_cache.shape[2]
+            expected_size = block_size * num_kv_heads * head_dim
 
-            # Create a minimal attn_metadata-like object for compatibility
-            # The compression function expects block_table and seq_lens
-            # For now, we'll skip compression if we can't determine these
-            # TODO: Integrate with vLLM's scheduler to get proper seq_lens
+            if flattened_size == expected_size:
+                if not TriAttentionImpl._reshape_logged:
+                    print("[TriAttention] Detected flattened cache format, "
+                          "reshaping to block format")
+                    TriAttentionImpl._reshape_logged = True
+                kv_cache = kv_cache.view(
+                    2, num_blocks, block_size, num_kv_heads, head_dim
+                )
+                was_reshaped = True
+            else:
+                quiet = os.environ.get("TRIATTENTION_QUIET", "0") == "1"
+                if not quiet:
+                    print(f"[TriAttention] Warning: Flattened cache size mismatch. "
+                          f"Expected {expected_size}, got {flattened_size}. "
+                          f"Skipping compression.")
+                return
 
-            # For V1 backend, compression is more complex because we don't have
-            # direct access to sequence metadata in do_kv_cache_update
-            # The compression should ideally be triggered from a higher level
-            # where metadata is available
-
-            pass  # Placeholder for future integration
-
-        except Exception as e:
+        # Split cache into key and value
+        if isinstance(kv_cache, tuple):
+            key_cache = kv_cache[0]
+            value_cache = kv_cache[1]
+        elif kv_cache.dim() == 5 and kv_cache.shape[0] == 2:
+            key_cache = kv_cache[0]
+            value_cache = kv_cache[1]
+        else:
             quiet = os.environ.get("TRIATTENTION_QUIET", "0") == "1"
             if not quiet:
-                print(f"[TriAttention] Compression error: {e}")
+                print(f"[TriAttention] Warning: Unexpected kv_cache format: "
+                      f"shape={kv_cache.shape}")
+            return
+
+        # Process each sequence in the batch
+        batch_size = block_tables.shape[0]
+
+        for batch_idx in range(batch_size):
+            seq_len = seq_lens_tensor[batch_idx].item()
+            block_table = block_tables[batch_idx]
+
+            # Use batch_idx as request identifier
+            request_id = f"decode_{batch_idx}"
+
+            # Check if compression is needed
+            if not wrapper.should_compress(layer_idx, seq_len, request_id):
+                continue
+
+            try:
+                # Get or create compressor for this request-layer pair
+                compressor = wrapper.get_compressor(layer_idx, request_id)
+
+                # Log compression start (throttled, layer 0 only)
+                if layer_idx == 0:
+                    TriAttentionImpl._compress_log_count += 1
+                    if TriAttentionImpl._compress_log_count <= 5:
+                        print(f"[TriAttention] Compressing: seq_len={seq_len} "
+                              f"-> budget={wrapper.config.kv_budget}")
+
+                # Gather KV from paged cache to dense format
+                from triattention.vllm_integration import (
+                    _gather_kv_from_paged_cache,
+                    _scatter_kv_to_paged_cache,
+                )
+
+                keys, values = _gather_kv_from_paged_cache(
+                    key_cache, value_cache, block_table, seq_len, block_size
+                )
+
+                # Create position indices
+                cache_positions = torch.arange(
+                    seq_len, device=key_cache.device, dtype=torch.int32
+                )
+
+                # Compress using the compressor (shared state + stats)
+                compressed_keys, compressed_values, new_positions = (
+                    compressor.compress(
+                        key_states=keys,
+                        value_states=values,
+                        cache_positions=cache_positions,
+                        layer_idx=layer_idx,
+                    )
+                )
+
+                # Scatter compressed data back to paged cache
+                _scatter_kv_to_paged_cache(
+                    compressed_keys, compressed_values,
+                    key_cache, value_cache,
+                    block_table, new_positions, block_size,
+                )
+
+                new_seq_len = compressed_keys.shape[2]
+
+                # Log compression result (throttled, layer 0 only)
+                if layer_idx == 0:
+                    if TriAttentionImpl._compress_log_count <= 5:
+                        print(f"[TriAttention] Compressed: "
+                              f"{seq_len} -> {new_seq_len} tokens")
+
+            except Exception as e:
+                quiet = os.environ.get("TRIATTENTION_QUIET", "0") == "1"
+                if not quiet:
+                    import traceback
+                    print(f"[TriAttention] Compression error for batch "
+                          f"{batch_idx}, layer {layer_idx}: {e}")
+                    traceback.print_exc()
 
 
 # Global layer index counter for tracking
