@@ -482,6 +482,21 @@ def main() -> None:
     base_env = prepare_environment(experiment.get("env", {}))
     base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 
+    # TriAttention environment variables for V1 backend
+    # These are used by triattention.v1_backend._load_config_from_env()
+    if runner_args.get("sparse_stats_path"):
+        base_env["TRIATTENTION_STATS_PATH"] = str(resolve_path(runner_args["sparse_stats_path"]))
+    if runner_args.get("kv_budget"):
+        base_env["TRIATTENTION_KV_BUDGET"] = str(runner_args["kv_budget"])
+    if runner_args.get("divide_length"):
+        base_env["TRIATTENTION_DIVIDE_LENGTH"] = str(runner_args["divide_length"])
+    if runner_args.get("window_size"):
+        base_env["TRIATTENTION_WINDOW_SIZE"] = str(runner_args["window_size"])
+    if runner_args.get("pruning_mode"):
+        base_env["TRIATTENTION_PRUNING_MODE"] = str(runner_args["pruning_mode"])
+    # Suppress verbose logging in dispatch mode
+    base_env.setdefault("TRIATTENTION_QUIET", "1")
+
     runner_args["output_dir"] = resolve_path(args.output_dir or runner_args.get("output_dir", method_output_dir / "shards"))
     runner_args["dataset_path"] = resolve_path(runner_args["dataset_path"])
     runner_args["model_path"] = resolve_path(runner_args["model_path"])

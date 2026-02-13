@@ -363,14 +363,26 @@ class TriAttentionImpl(FlashAttentionImpl):
             # Use batch_idx as request identifier
             request_id = f"decode_{batch_idx}"
 
+            # Detect request transition: if seq_len dropped below the tracked
+            # absolute_position, a new (shorter) request has started on this
+            # slot. Reset compressor state so it doesn't carry over stale
+            # position/cache-length from the previous request.
+            compressor = wrapper.get_compressor(layer_idx, request_id)
+            if (compressor.state.absolute_position > 0
+                    and seq_len < compressor.state.absolute_position):
+                quiet = os.environ.get("TRIATTENTION_QUIET", "0") == "1"
+                if not quiet and layer_idx == 0:
+                    print(f"[TriAttention] New request detected on slot "
+                          f"{batch_idx}: seq_len={seq_len} < "
+                          f"prev_pos={compressor.state.absolute_position}, "
+                          f"resetting state")
+                compressor.reset()
+
             # Check if compression is needed
             if not wrapper.should_compress(layer_idx, seq_len, request_id):
                 continue
 
             try:
-                # Get or create compressor for this request-layer pair
-                compressor = wrapper.get_compressor(layer_idx, request_id)
-
                 # Log compression start (throttled, layer 0 only)
                 if layer_idx == 0:
                     TriAttentionImpl._compress_log_count += 1

@@ -24,9 +24,6 @@ Usage (V1):
     # Run: python -m vllm ... --attention-backend TRIATTENTION
 """
 
-from .triattention_backend import TriAttentionBackend
-from .triattention_impl import TriAttentionImpl
-
 __all__ = [
     "TriAttentionBackend",
     "TriAttentionImpl",
@@ -34,6 +31,17 @@ __all__ = [
     "setup_triattention",
     "get_triattention_config",
 ]
+
+# Lazy imports: V0 backend classes are only loaded when accessed directly.
+# This avoids ImportError on vLLM V1 where vllm.attention.backends does not exist.
+def __getattr__(name):
+    if name == "TriAttentionBackend":
+        from .triattention_backend import TriAttentionBackend
+        return TriAttentionBackend
+    if name == "TriAttentionImpl":
+        from .triattention_impl import TriAttentionImpl
+        return TriAttentionImpl
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Global configuration storage
 _TRIATTENTION_CONFIG = None

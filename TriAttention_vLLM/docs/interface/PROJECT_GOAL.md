@@ -4,6 +4,9 @@
 **目标定义版本**: 1.0
 **状态**: 📋 定义完成
 
+> 说明（2026-02-13）：本文件只定义长期目标与验收口径，不作为当前实施方案文档。  
+> 当前执行方案请以 `interface/V2_OVERVIEW.md` 与 `backend/ARCHITECTURE_REDESIGN.md` 为准。
+
 ---
 
 ## 1. 终极目标概述
@@ -485,22 +488,17 @@ TriAttention_vLLM/test/
 
 ### 7.3 关键文档
 
-**项目管理**:
-- `docs/project/CURRENT_STATUS.md` - 当前状态（本文档）
-- `docs/project/ULTIMATE_GOAL.md` - 终极目标（本文档）
-- `docs/project/key_decisions.md` - 关键决策
-- `docs/project/roadmap.md` - 路线图
-- `docs/project/todo.md` - 待办事项
+**当前主文档（V2）**:
+- `docs/interface/V2_OVERVIEW.md` - V2 方案总览（当前执行方案）
+- `docs/interface/CURRENT_STATUS.md` - 当前进度
+- `docs/interface/OPEN_ISSUES.md` - 当前问题
+- `docs/interface/PENDING_DECISIONS.md` - 待决策项
+- `docs/backend/ARCHITECTURE_REDESIGN.md` - 技术规格
+- `docs/backend/DESIGN_DECISIONS.md` - 决策日志
 
-**技术文档**:
-- `docs/design/algorithm.md` - 算法设计
-- `docs/implementation/vllm_integration.md` - vLLM 集成
-- `test/VERIFICATION_SUMMARY.md` - 验证总结
-
-**修正记录**:
-- `docs/RKV_EQUIVALENCE_FIX.md` - RoPE 相位修正
-- `docs/MLR_FIX.md` - MLR 公式修正
-- `docs/FP32_EQUIVALENCE_FIX.md` - FP32 等价性修正
+**历史与参考**:
+- `docs/backend/reference/` - 详细技术分析与历史修复记录
+- `docs/archive/snapshots/2026-02-13/` - 文档重构前快照
 
 ---
 

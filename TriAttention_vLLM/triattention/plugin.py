@@ -9,7 +9,7 @@ Usage:
        - TRIATTENTION_STATS_PATH: Path to frequency statistics file
        - TRIATTENTION_KV_BUDGET: Maximum KV tokens to retain (default: 2048)
        - TRIATTENTION_DIVIDE_LENGTH: Compression interval (default: 128)
-    3. Run vLLM with: --attention-backend TRIATTENTION
+    3. Run vLLM with: --attention-backend CUSTOM
 """
 
 import os
@@ -30,7 +30,7 @@ def register_triattention_backend():
 
         # Register TriAttention backend with vLLM
         register_backend(
-            AttentionBackendEnum.TRIATTENTION,
+            AttentionBackendEnum.CUSTOM,
             "triattention.v1_backend.TriAttentionBackend"
         )
 

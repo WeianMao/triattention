@@ -1,300 +1,78 @@
-# 关键决策与验证结论
+# TriAttention_vLLM 设计决策日志（V2）
 
-本文档汇总 TriAttention 项目的所有关键决策和经过验证的结论。
+- 更新时间：2026-02-13
+- 状态：Active
+- 适用范围：vLLM 0.15.x
 
----
-
-## 1. 开发阶段定义
-
-| 阶段 | 目标 | 框架 | Batch Size | 效率要求 |
-|-----|------|------|------------|----------|
-| **阶段 0** | 快速验证 | R-KV 框架内 | = 1 | 不追求 |
-| **阶段 1** | 高效独立版本 | TriAttention 独立 | > 1 | Triton 级别 |
-| **阶段 2** | 边界情况与鲁棒性 | TriAttention 独立 | > 1 | Triton 级别 |
+> 说明：本文件只保留仍然有效的关键决策和必要历史摘要。
+> 详细历史请参考 `docs/archive/snapshots/2026-02-13/` 与 `docs/backend/reference/`。
 
 ---
 
-## 2. 验证确认的结论 ✅
+## D-001：V2 主线采用非侵入式扩展
+- 日期：2026-02-13
+- 问题：如何避免高维护成本并支持多人并行开发。
+- 决策：通过 `worker_cls + scheduler_cls` 扩展接入，不修改 vLLM 源码。
+- 影响范围：整体架构与后续开发流程。
+- 替代方案：直接 fork/修改 vLLM（拒绝）。
+- 状态：Accepted
 
-以下结论经过代码审查验证：
+## D-002：压缩主流程不再放在 Attention 层
+- 日期：2026-02-13
+- 问题：Attention 层缺乏完整生命周期与调度信息，易产生状态问题。
+- 决策：Attention 保持纯计算；压缩执行迁移至 runner，触发决策在 scheduler。
+- 影响范围：TriAttentionImpl 不再作为主逻辑承载点。
+- 替代方案：继续后置压缩于 forward（拒绝）。
+- 状态：Accepted
 
-### 2.1 R-KV 效率
+## D-003：request state 唯一键是 req_id
+- 日期：2026-02-13
+- 问题：batch_idx/block_id 在多请求、抢占、重排场景下不稳定。
+- 决策：所有持久状态必须按 req_id 管理。
+- 影响范围：状态字典、日志、测试、诊断工具。
+- 替代方案：使用 batch_idx 或 first_block_id（拒绝）。
+- 状态：Accepted
 
-| 结论 | 验证方法 | 状态 |
-|-----|---------|------|
-| R-KV 无 Triton kernel | 搜索整个代码库 | ✅ 确认 |
-| R-KV 无 custom CUDA kernel | 搜索整个代码库 | ✅ 确认 |
-| R-KV 全部 native PyTorch | 代码审查 | ✅ 确认 |
-| TopK 使用 `torch.topk()` | 代码审查 | ✅ 确认 |
-| Gather 使用 `torch.gather()` | 代码审查 | ✅ 确认 |
-| 整体效率比 Triton 慢 1.8-2.8x | 估算 | ✅ 确认 |
+## D-004：V2 分阶段推进
+- 日期：2026-02-13
+- 问题：需求复杂，无法一轮交付。
+- 决策：
+  1. Phase 1：基础功能与正确性。
+  2. Phase 2：batch>1、prefill 可裁剪、显存触发。
+  3. Phase 3：性能与鲁棒性优化。
+- 影响范围：任务拆分、里程碑管理、验收策略。
+- 状态：Accepted
 
-### 2.2 R-KV 功能限制
+## D-005：prefill 策略双模式支持，Phase 1 默认保护
+- 日期：2026-02-13
+- 问题：需要兼顾稳定性与后续策略实验。
+- 决策：保留 `protect_prefill=true/false` 双模式能力；Phase 1 默认保护。
+- 影响范围：策略配置、回归测试、实验可比性。
+- 状态：Accepted（默认值仍由 `PENDING_DECISIONS.md` 最终确认）
 
-| 结论 | 验证方法 | 状态 |
-|-----|---------|------|
-| batch_size > 1 **静默失败** | 发现 `key_states[0]` 硬编码 | ✅ 确认 |
-| 无 noise injection | 搜索整个代码库 | ✅ 确认（之前分析有误）|
-| 相似度计算 O(n²) 内存 | 代码审查 | ✅ 确认 |
-| 无 TP/PP 支持 | 代码审查 | ✅ 确认 |
-| 代码版本不一致 | 对比 rkv/ 和 HuggingFace/rkv/ | ✅ 确认 |
+## D-006：显存触发压缩由 Scheduler 决策
+- 日期：2026-02-13
+- 问题：KV usage 信息在 scheduler 侧最稳定。
+- 决策：显存触发（阈值策略）在 scheduler；runner 只执行动作。
+- 影响范围：触发链路、策略单测、可观测性。
+- 状态：Accepted
 
-### 2.3 SpeckV 优势
-
-| 结论 | 原因 | 状态 |
-|-----|------|------|
-| 无 O(n²) 内存问题 | 不做相似度计算 | ✅ 确认 |
-| 不依赖实时 Query | 使用预计算频率统计 | ✅ 确认 |
-
----
-
-## 3. 关键设计决策
-
-### 3.1 不使用 Noise Injection ❌
-
-**决策**：不使用加噪声方式解决 tie-breaking
-
-**理由**：
-1. 方法不够优雅
-2. R-KV 实际也没有实现（之前分析有误）
-3. 直接使用 `topk()` 的 PyTorch 默认行为
-
-**替代方案**：
-- 阶段 0：怎么方便怎么来
-- 阶段 1：确定性选择（按位置顺序取前 N 个）
-
-### 3.2 不使用 Query Cache ❌
-
-**决策**：不实现 Window-based Query Cache
-
-**理由**：SpeckV 基于预计算的 Q 频率统计打分，不依赖实时 Query
-
-**影响**：简化实现，只需保护最近的 KV
-
-### 3.3 阶段 1 必须支持 Batch Size > 1 ✅
-
-**决策**：阶段 1 必须显式支持 batch > 1
-
-**理由**：R-KV 的 batch=1 限制是静默失败，会导致数据错误
-
-**实现要求**：要么支持 batch > 1，要么在 batch > 1 时抛出明确错误
-
-### 3.4 阶段 1 打分 Triton，TopK/Gather 先用 PyTorch ✅
-
-**决策**：阶段 1 仅要求打分使用 Triton；TopK/Gather 先用 PyTorch，Phase 2 再评估是否 Triton 化
-
-**理由**：先保证正确性与主路径可用，再根据性能收益决定是否投入 Triton TopK/Gather
-
-**重写范围**：阶段 1 仅打分；TopK/Gather 视 Phase 2 性能收益再决定
-
-### 3.5 vLLM 集成方案分阶段实施 ✅
-
-- **日期**：2026-02-03
-- **问题**：如何将 TriAttention 集成到 vLLM 中？
-- **决策**：分阶段实施，当前阶段聚焦 Attention 接口，下一阶段实现 Scheduler 接口
-
-**当前阶段（Phase 1）- Attention 接口集成**：
-
-**方案 A（主力）- 继承 FlashAttentionImpl**：
-```python
-# 通过命令行参数或 Python API 启用
-# CLI: python run.py --attention-backend triattention
-# API: LLM(model_path, attention_backend="triattention", ...)
-```
-- 继承 `FlashAttentionImpl`，覆盖 `forward()` 方法
-- 注册到 vLLM 的 backend registry（通过 entry_points 或运行时注册）
-- 优点：利用 vLLM 官方扩展机制，代码优雅，版本兼容性好
-
-**方案 B（备用）- Monkey Patching**：
-```python
-# 通过代码手动启用
-wrapper = TriAttentionWrapper(config)
-patch_vllm_attention(model, wrapper)
-```
-- 运行时替换 attention 方法
-- 适用于：快速实验、特殊定制需求
-- **定位**：作为 backup 方案，不再主力维护，只保证不破坏原有接口
-
-**配置方式说明**：
-- ❌ **不存在** `VLLM_ATTENTION_BACKEND` 环境变量（经调查确认 vLLM 无此机制）
-- ✅ **统一使用** 命令行参数 `--attention-backend` 或 Python API `attention_backend=` 参数
-
-**下一阶段（Phase 2）- Scheduler 接口集成**：
-- Hook `Scheduler.schedule()` 实现内存触发压缩
-- 根据 block 使用率动态决定是否压缩
-- 详见决策 3.6（内存触发压缩）
-
-**理由**：
-1. 分阶段降低实现复杂度，先完成核心 Attention 集成
-2. vLLM 配置统一通过参数传递，无环境变量机制
-3. Monkey Patching 作为 fallback 保留，主力推进方案 A
-4. Scheduler 集成涉及内存管理，作为独立阶段处理
-
-**状态**：
-- ✅ 方案 B（Monkey Patching）已实现（`triattention/vllm_integration.py`）
-- ⏸️ 方案 A（继承 FlashAttentionImpl）待实现（预计新增 ~200 行代码）
-- ⏸️ Phase 2 Scheduler 集成待设计
+## D-007：V1 方案定位为历史参考，不再作为主线
+- 日期：2026-02-13
+- 问题：V1 对项目有贡献但边界不适合后续主线扩展。
+- 决策：保留 V1 资产用于参考与回归对比，主线迁移 V2。
+- 影响范围：文档导航、任务分配、实现优先级。
+- 状态：Accepted
 
 ---
 
-## 4. 各阶段需求清单
+## 历史摘要（保留）
 
-### 阶段 0（R-KV 框架内）
+### H-001：GQA 相关准确率异常曾是关键问题
+- 结论：该问题已定位并修复，相关经验保留用于排障。
+- 参考：`archive/snapshots/2026-02-13/interface/OPEN_ISSUES.md`
 
-**必须**：
-- [ ] 基于频率统计的打分（SpeckV 核心）
-- [ ] Per-head / Per-layer 裁剪模式
-- [ ] RoPE 位置追踪（复用 R-KV）
-- [ ] Prefill 保护选项
+### H-002：V1 对“Attention 层后置压缩”可行性进行了充分探索
+- 结论：验证了部分可行性，但不满足 V2 长期可维护边界。
+- 参考：`archive/snapshots/2026-02-13/backend/ARCHITECTURE_REDESIGN.md`
 
-**可选**：
-- [ ] RoPE 一致性检查（复用 R-KV）
-- [ ] FP32 TopK
-
-**不需要**：Batch Size > 1、Triton 优化、状态重置（R-KV 框架已有）
-
-### 阶段 1（独立高效版本）
-
-**必须**：
-- [x] Triton kernel 实现打分 - ✅ 完成（`triattention/kernels/triton_scoring.py`）
-- [x] TopK/Gather 先用 PyTorch 跑通 - ✅ 完成（`triattention/scoring.py`）
-- [ ] **Batch Size > 1 支持** - ⏸️ 进行中
-- [ ] RoPE 一致性检查 - ⏸️ 待实现
-- [ ] 状态重置接口 - ⏸️ 待实现（`state.py` 已创建）
-- [x] Per-head / Per-layer 裁剪模式 - ✅ 完成（`config.py` 中 `pruning_mode`）
-- [ ] Prefill 保护 - ⏸️ 待实现
-
-**可选**：
-- [ ] Union-based 选择 - ⏸️ 待实现
-- [x] 多种聚合策略（mean/max） - ✅ 完成（`score_aggregation` 参数）
-
-**验证状态**：
-- 核心打分 kernel：33/33 测试通过 ✅
-- Triton-PyTorch 等价性：FP32 验证通过 ✅
-- MLR 公式等价性：已修正并验证 ✅
-
-### 阶段 2（边界情况与鲁棒性）
-
-**计划**：
-- [ ] 内存触发压缩（见下方 3.6 决策）
-- [ ] CUDA Graph 兼容
-- [ ] 更灵活的 Budget 策略
-- [ ] TP/PP 支持（可选）
-
-### 3.6 内存触发压缩：基于 Block 使用率动态触发 ⏸️
-
-- **日期**：2026-02-03
-- **问题**：如何在显存快满时自动触发压缩，而非固定间隔？
-- **决策**：通过 Hook `Scheduler.schedule()` 获取 block 使用率，传递给压缩层
-
-**功能需求**：
-- 当 block 使用率 < 98%：不压缩
-- 当 block 使用率 ≥ 98%：触发压缩，压缩到 80%
-
-**技术可行性**：✅ 已验证可行
-
-**vLLM 提供的 API**：
-```python
-# 获取空闲 block 数量
-num_free = scheduler.block_manager.get_num_free_gpu_blocks()
-# 获取总 block 数量
-num_total = scheduler.block_manager.block_allocator.get_num_total_blocks(Device.GPU)
-# 计算使用率
-usage_rate = (num_total - num_free) / num_total
-```
-
-**实现方案**：
-1. Hook `Scheduler.schedule()` 计算使用率
-2. 通过 `ForwardContext` 传递到 Attention 层
-3. 在 `should_compress()` 中根据使用率决策
-
-**与方案 A/B 的关系**：
-- 两种接入方案都可以支持此功能
-- 核心逻辑在编排层实现，接入层复用
-
-**工作量估算**：~450 行新代码，7-11 天
-
-**状态**：待实现（Phase 2）
-
----
-
-## 5. 需求覆盖对比
-
-| 需求 | R-KV | 阶段 0 | 阶段 1 | 阶段 2 |
-|-----|------|-------|-------|-------|
-| 频率统计打分 | ❌ | ✅ | ✅ | ✅ |
-| Per-head 裁剪 | ✅ | ✅ | ✅ | ✅ |
-| Per-layer 裁剪 | ❌ | ✅ | ✅ | ✅ |
-| Recent KV 保护 | ✅ | ✅ | ✅ | ✅ |
-| Prefill 保护 | ✅ | ✅ | ✅ | ✅ |
-| RoPE 位置追踪 | ✅ | ✅ | ✅ | ✅ |
-| Batch Size > 1 | ❌ | ❌ | ✅ | ✅ |
-| Triton 效率 | ❌ | ❌ | ✅ | ✅ |
-| 无 O(n²) 内存 | ❌ | ✅ | ✅ | ✅ |
-| CUDA Graph | ❌ | ❌ | ❌ | ⏸️ |
-| 内存触发压缩 | ❌ | ❌ | ❌ | ⏸️ |
-
----
-
-## 6. 从 R-KV 借鉴的内容
-
-### 需要借鉴
-
-| 项目 | 来源文件 | 阶段 |
-|-----|---------|------|
-| RoPE 一致性检查 | `round_pruning_utils.py` | 阶段 0/1 |
-| 状态重置机制 | `rkv_speckv_generate.py` | 阶段 1 |
-| FP32 TopK 选项 | `r1_kv.py` | 阶段 1（可选）|
-| 配置类设计 | `r1_kv.py` | 阶段 1 |
-| 评估脚本结构 | `rkv_sharded_eval.py` | 阶段 0/1 |
-
-### 不需要借鉴
-
-| 项目 | 原因 |
-|-----|------|
-| Noise injection | R-KV 未实现，我们也不需要 |
-| Query cache | SpeckV 不依赖实时 Query |
-| 相似度计算 | SpeckV 不需要，且有 O(n²) 问题 |
-| TopK/Gather 代码 | 效率不达标 |
-
----
-
-## 7. R-KV 已知问题
-
-| 问题 | 影响 | 我们的规避 |
-|-----|------|----------|
-| batch > 1 静默失败 | 数据错误 | 阶段 1 必须显式支持或报错 |
-| O(n²) 相似度计算 | 长序列 OOM | SpeckV 不做相似度 |
-| 代码版本不一致 | 行为差异 | 阶段 0 用 HuggingFace 版本 |
-| 无 TP/PP | 分布式受限 | 阶段 2 考虑 |
-
----
-
-## 8. 文件位置参考
-
-### 阶段 0 开发位置
-
-```
-R-KV/weian_development/speckv/
-├── speckv_rkv_style.py        # 主实现
-├── round_pruning_utils.py     # 工具函数
-└── rkv_speckv_generate.py     # 生成脚本
-```
-
-### 阶段 1 开发位置
-
-```
-TriAttention_vLLM/triattention/
-├── config.py                  # 配置类
-├── compressor.py              # 主压缩器
-├── scoring.py                 # 打分逻辑
-└── kernels/
-    ├── scoring_kernel.py      # Triton 打分
-    ├── topk_gather_kernel.py  # Triton TopK+Gather（Phase 2 评估）
-    └── fill_in_place_kernel.py
-```
-
----
-
-*创建日期：2025-01-31*
-*本文档汇总自 R-KV 对比分析（QA 文档），所有结论经过代码审查验证*

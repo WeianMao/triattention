@@ -316,18 +316,50 @@ def setup_triattention_config(args: argparse.Namespace):
 
 
 def setup_vllm_engine(args: argparse.Namespace, tri_config=None):
-    """Initialize vLLM engine with optional TriAttention compression via monkey patching.
+    """Initialize vLLM engine with optional TriAttention compression.
 
-    Uses monkey patching approach compatible with vLLM 0.7.x.
-    The V1 Backend requires vLLM 0.14+, which is not available in current environment.
+    Uses the official inheritance approach via setup_triattention() for V0 API,
+    or environment variables for V1 API (when VLLM_ATTENTION_BACKEND is set).
+
+    Configuration is passed via:
+    1. setup_triattention(config) - registers config globally
+    2. Environment variables - for V1 backend to pick up configuration
     """
     from vllm import LLM, SamplingParams
 
     # Determine max_model_len
     max_model_len = args.max_length if args.max_length > 0 else 32768
 
-    # Initialize vLLM engine (no attention_config parameter for v0.7.x)
-    llm = LLM(
+    tri_wrapper = None
+
+    # Setup TriAttention configuration if compression is enabled
+    if tri_config is not None and not args.disable_compression:
+        from triattention.backends import setup_triattention
+        from triattention.vllm_integration import TriAttentionWrapper
+
+        # Register config globally for backend to access
+        setup_triattention(tri_config)
+
+        # Create wrapper for request state management
+        tri_wrapper = TriAttentionWrapper(tri_config)
+
+        # Set environment variables for V1 backend (if used)
+        # These are read by v1_backend.py's _load_config_from_env()
+        if tri_config.stats_path:
+            os.environ["TRIATTENTION_STATS_PATH"] = str(tri_config.stats_path)
+        os.environ["TRIATTENTION_KV_BUDGET"] = str(tri_config.kv_budget)
+        os.environ["TRIATTENTION_DIVIDE_LENGTH"] = str(tri_config.divide_length)
+        os.environ["TRIATTENTION_WINDOW_SIZE"] = str(tri_config.window_size)
+        os.environ["TRIATTENTION_PRUNING_MODE"] = str(tri_config.pruning_mode)
+
+        print(f"[TriAttention] Configuration registered: kv_budget={tri_config.kv_budget}, "
+              f"divide_length={tri_config.divide_length}, pruning_mode={tri_config.pruning_mode}")
+    else:
+        print("[TriAttention] Compression disabled (fullkv mode)")
+
+    # Initialize vLLM engine
+    # Note: enforce_eager=True is required for TriAttention (CUDA graphs not compatible)
+    llm_kwargs = dict(
         model=args.model_path,
         dtype=args.load_dtype,
         tensor_parallel_size=args.tensor_parallel_size,
@@ -335,29 +367,13 @@ def setup_vllm_engine(args: argparse.Namespace, tri_config=None):
         trust_remote_code=True,
         seed=args.seed,
         max_model_len=max_model_len,
-        enforce_eager=True,  # Required for TriAttention (CUDA graphs not compatible)
+        enforce_eager=True,
     )
-
-    tri_wrapper = None
-
-    # Apply monkey patching if compression is enabled
+    # When compression is enabled, tell vLLM to use the CUSTOM backend
+    # (registered by triattention plugin to point to TriAttentionBackend)
     if tri_config is not None and not args.disable_compression:
-        from triattention.vllm_integration import patch_vllm_attention, TriAttentionWrapper
-
-        # Create wrapper
-        tri_wrapper = TriAttentionWrapper(tri_config)
-
-        # Access the model from vLLM engine and patch attention
-        try:
-            model = llm.llm_engine.model_executor.driver_worker.model_runner.model
-            patch_vllm_attention(model, tri_wrapper)
-            print(f"[TriAttention] Monkey patching enabled: kv_budget={tri_config.kv_budget}, "
-                  f"divide_length={tri_config.divide_length}")
-        except Exception as e:
-            print(f"[TriAttention] WARNING: Failed to patch attention: {e}")
-            tri_wrapper = None
-    else:
-        print("[TriAttention] Compression disabled (fullkv mode)")
+        llm_kwargs["attention_backend"] = "CUSTOM"
+    llm = LLM(**llm_kwargs)
 
     return llm, tri_wrapper
 

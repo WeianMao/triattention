@@ -1,105 +1,61 @@
-# Review Checklist
+# TriAttention_vLLM 评审清单（V2）
 
-This document provides a comprehensive checklist for reviewing TriAttention_vLLM implementations.
-
-## Code Quality
-
-- [ ] Code follows existing vLLM conventions and patterns
-- [ ] Minimal modifications to vLLM core (extension over replacement)
-- [ ] No duplicated logic - reuses existing vLLM utilities
-- [ ] Clear variable names and function signatures
-- [ ] Appropriate error handling and edge case coverage
-
-## Correctness
-
-- [ ] Strict alignment with R-KV reference scripts (Phase 1)
-  - [ ] Scoring formula matches reference implementation
-  - [ ] Aggregation strategy (mean/max) correct
-  - [ ] Offsets geometric sequence generation aligned
-  - [ ] Pruning trigger conditions match (divide_length, budget)
-  - [ ] Per-head/per-layer token selection logic correct
-  - [ ] RoPE processing approach aligned
-  - [ ] All config parameters default correctly
-
-- [ ] Position indices handling
-  - [ ] Proper indexing for PagedAttention blocks
-  - [ ] Correct dtype (int32/int64 as needed)
-  - [ ] Valid for both prefill and decode paths
-
-- [ ] KV cache format compatibility
-  - [ ] Matches vLLM's PagedAttention layout
-  - [ ] Correct shape handling for [num_blocks, block_size, num_heads, head_size]
-  - [ ] Proper handling of partial blocks
-
-## Testing
-
-- [ ] Unit tests for core components
-  - [ ] Scoring kernels
-  - [ ] Pruning logic
-  - [ ] RoPE utilities
-  - [ ] Configuration handling
-
-- [ ] Integration tests
-  - [ ] vLLM hook integration
-  - [ ] PagedAttention compatibility
-  - [ ] Per-request state isolation
-
-- [ ] Correctness tests
-  - [ ] Output matches R-KV reference (< 1% perplexity diff)
-  - [ ] FP16/BF16 numerical stability
-  - [ ] Equivalence tests pass
-
-- [ ] Edge case coverage
-  - [ ] Empty sequences
-  - [ ] Single token sequences
-  - [ ] Budget exceeded scenarios
-  - [ ] Request cancellation/slot reuse
-
-## Performance
-
-- [ ] No unnecessary allocations in hot path
-- [ ] Efficient Triton kernel implementations
-- [ ] Proper use of torch.compile where applicable
-- [ ] Memory usage within expected bounds
-- [ ] Throughput meets targets (>= 1.5x at 2048 budget)
-- [ ] Latency overhead acceptable (< 10%)
-
-## vLLM Integration
-
-- [ ] Compatible with PagedAttention
-- [ ] Proper hook registration and invocation
-- [ ] No interference with CUDA Graph mode (or proper fallback)
-- [ ] Supports common inference paths (prefill, decode)
-- [ ] Per-request state properly isolated
-- [ ] Works with target models (Qwen, LLaMA, DeepSeek, Mistral)
-
-## Documentation
-
-- [ ] Implementation details documented in backend/reference/
-- [ ] Design decisions recorded in DESIGN_DECISIONS.md
-- [ ] Known issues tracked in interface/OPEN_ISSUES.md
-- [ ] Pending decisions in interface/PENDING_DECISIONS.md
-- [ ] Status updated in interface/CURRENT_STATUS.md
-
-## Risks & Mitigations
-
-- [ ] PagedAttention integration complexity addressed
-- [ ] CUDA Graph compatibility verified (or eager fallback provided)
-- [ ] Numerical precision validated (FP16/BF16)
-- [ ] Performance profiled and optimized
-- [ ] Stability tested (long-running, multi-request scenarios)
-
-## Success Criteria
-
-| Metric | Target | Status |
-|--------|--------|--------|
-| Correctness | < 1% perplexity difference | |
-| Throughput | >= 1.5x (2048 budget) | |
-| Latency overhead | < 10% | |
-| Stability | 24h zero crashes | |
-| Model coverage | LLaMA/Qwen/DeepSeek/Mistral | |
+- 更新时间：2026-02-13
+- 状态：Active
+- 适用范围：vLLM 0.15.x
 
 ---
 
-*Document Version: 1.0*
-*Created: 2026-02-02*
+## 1. 架构一致性（P0）
+
+- [ ] 是否保持非侵入式（未修改 vLLM 源码）？
+- [ ] 压缩主流程是否从 Attention 层移出？
+- [ ] 是否遵循职责边界（scheduler 决策 / runner 执行）？
+- [ ] request identity 是否仅使用 req_id？
+
+---
+
+## 2. 正确性（P0）
+
+- [ ] 生命周期状态是否覆盖 new/running/finished/preempted/resumed？
+- [ ] 压缩触发条件是否与配置一致？
+- [ ] prefill 模式行为是否符合配置定义？
+- [ ] 异常路径是否降级到“本步不压缩”而非中断？
+
+---
+
+## 3. 可测试性（P0）
+
+- [ ] 是否有针对触发策略的独立测试？
+- [ ] 是否有 request 状态隔离测试？
+- [ ] 是否有基础端到端 smoke test？
+- [ ] 新增逻辑是否可在日志中观测（触发/执行/回退）？
+
+---
+
+## 4. 回归风险（P1）
+
+- [ ] 是否影响 batch>1 兼容路径？
+- [ ] 是否引入新的全局状态污染点？
+- [ ] 是否增加不可控的行为分支（隐式环境变量）？
+
+---
+
+## 5. 文档一致性（P0）
+
+- [ ] `CURRENT_STATUS.md` 已更新为最新状态？
+- [ ] `OPEN_ISSUES.md` 已新增/删除对应问题？
+- [ ] 若有新决策，`DESIGN_DECISIONS.md` 已记录？
+- [ ] 是否违反 `docs/DOCS_STANDARDS.md` 的 SSOT 规则？
+
+---
+
+## 6. 合并门槛
+
+以下任一未满足，不应合并：
+
+1. 架构边界被破坏。
+2. request 状态管理无明确生命周期处理。
+3. 文档未同步。
+4. 无最小回归验证结果。
+

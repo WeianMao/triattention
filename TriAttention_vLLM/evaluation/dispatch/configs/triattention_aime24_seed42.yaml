@@ -1,0 +1,51 @@
+# TriAttention vLLM evaluation config for AIME24
+# Aligned with R-KV/weian_script/configs/aime_sampled8_speckv_aime24_qwen_norm_aligned.yaml
+
+experiment:
+  name: triattention_aime24
+  conda_env: trivllm  # TriAttention dedicated environment (isolated from R-KV)
+  runner_path: TriAttention_vLLM/evaluation/runner/vllm_triattention_runner.py
+  log_dir: TriAttention_vLLM/evaluation/logs/triattention_aime24
+  method_output_dir: TriAttention_vLLM/evaluation/outputs/triattention_aime24
+  merged_dir_name: merged
+  gpus: auto
+  auto_gpu_fallback: [0, 1, 2, 3, 4, 5, 6, 7]
+  num_shards: 8
+  gpu_memory_threshold: 9000
+  env:
+    VLLM_PROCESS_NAME_PREFIX: "PD-L1_binder"
+  runner_args:
+    output_dir: TriAttention_vLLM/evaluation/outputs/triattention_aime24/shards
+    # Dataset: AIME24
+    dataset_path: R-KV/HuggingFace/data/aime24.jsonl
+    # Model path
+    model_path: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Qwen-7B
+    max_length: 32768
+    seed: 42
+    # Sampling parameters (aligned with R-KV)
+    num_samples: 8
+    temperature: 0.6
+    top_p: 0.95
+    load_dtype: bfloat16
+    # TriAttention compression parameters
+    kv_budget: 2048
+    window_size: 128
+    divide_length: 128
+    # Stats: Use AIME25 stats for AIME24 test (cross-dataset to avoid data leakage)
+    sparse_stats_path: R-KV/outputs/repository/sample8_fullkv_aime25_official_qwen/stats/deepseek_r1_qwen7b_plain_stats.pt
+    sparse_round_window: 32
+    sparse_offset_max_length: 65536
+    sparse_score_aggregation: mean
+    # Pruning mode (per_head aligns with SpeckV default)
+    pruning_mode: per_head
+    sparse_normalize_scores: true
+    # R-KV alignment flags
+    include_prefill_in_budget: true
+    protect_prefill: true
+    disable_mlr: false
+    disable_trig: false
+    disable_top_n_high_freq: 0
+    # vLLM-specific
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.9
+    disable_compression: false

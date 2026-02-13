@@ -7,7 +7,11 @@ import numpy as np
 from pathlib import Path
 from typing import Iterable, Union, Any
 
-from examples import get_examples
+try:
+    from examples import get_examples
+except ImportError:
+    def get_examples():
+        return {}
 
 
 def set_seed(seed: int = 42) -> None:
