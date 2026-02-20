@@ -92,6 +92,15 @@ class TriAttentionConfig:
     use_triton_scoring: bool = True
     """Use Triton kernel for scoring (Phase 1: always True)."""
 
+    use_trig_cache: bool = True
+    """Use precomputed trig cache when round_start aligns with divide_length."""
+
+    trig_cache_max_seq_len: Optional[int] = None
+    """Optional max sequence length for trig cache table construction."""
+
+    trig_cache_warn_threshold_mb: float = 100.0
+    """Warn threshold for trig cache memory footprint."""
+
     # ===== Stats and Model Paths =====
     stats_path: Optional[Path] = None
     """Path to precomputed frequency statistics file."""
@@ -185,6 +194,9 @@ class TriAttentionConfig:
             "position_indices_dtype": str(self.position_indices_dtype),
             "triton_block_size": self.triton_block_size,
             "use_triton_scoring": self.use_triton_scoring,
+            "use_trig_cache": self.use_trig_cache,
+            "trig_cache_max_seq_len": self.trig_cache_max_seq_len,
+            "trig_cache_warn_threshold_mb": self.trig_cache_warn_threshold_mb,
             "rope_style": self.rope_style,
             "head_dim": self.head_dim,
             "num_kv_heads": self.num_kv_heads,

@@ -47,14 +47,15 @@ Attention Backend (FlashAttention)
 
 ## 4. 扩展点与接入方式
 
-1. `--worker-cls triattention.worker.TriAttentionWorker`
-2. `--scheduler-cls triattention.scheduler.TriAttentionScheduler`
+1. `--worker-cls triattention_v2.worker.TriAttentionWorker`
+2. `--scheduler-cls triattention_v2.scheduler.TriAttentionScheduler`
 3. `--attention-backend` 保持标准路径（V2 默认不承载压缩主逻辑）
 
 约束：
 
 - 不允许通过 monkey patch vLLM 源码路径实现核心能力。
 - 不允许在 Attention.forward 中挂主压缩流程。
+- V2 新代码统一落位：`TriAttention_vLLM/triattention_v2/`。
 
 ---
 
@@ -239,4 +240,3 @@ Attention Backend (FlashAttention)
 3. 历史细节追溯见：
    - `docs/archive/snapshots/2026-02-13/`
    - `docs/backend/reference/`
-

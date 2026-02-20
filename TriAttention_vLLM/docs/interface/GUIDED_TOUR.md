@@ -24,13 +24,17 @@
 
 ## Step 2（5 分钟）：看 V2 方案
 
-阅读：`interface/V2_OVERVIEW.md`
+阅读：
+
+1. `interface/V2_OVERVIEW.md`
+2. `interface/V2_DEVELOPMENT_PLAN.md`
 
 你需要确认：
 
 1. V2 不再把压缩主逻辑放在 Attention 层。
 2. V2 采用 worker/scheduler/runner 扩展点，保持对 vLLM 非侵入。
 3. V2 分阶段推进，Phase 1 先交付基础功能。
+4. 新开发目录为 `triattention_v2/`，旧版只做参考。
 
 ---
 
@@ -57,6 +61,7 @@
 1. `backend/DEVELOPMENT_PRINCIPLES.md`
 2. `backend/ARCHITECTURE_REDESIGN.md`
 3. `backend/DESIGN_DECISIONS.md`
+4. `backend/V2_IMPLEMENTATION_BLUEPRINT.md`
 
 你需要确认：
 
@@ -73,4 +78,3 @@
 3. 我知道完成后如何更新 `CURRENT_STATUS/OPEN_ISSUES` 吗？
 
 如果以上任一问题回答不了，先不要写代码。
-

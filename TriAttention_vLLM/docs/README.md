@@ -24,12 +24,17 @@ docs/
 ├── interface/                    # 对外层：项目负责人/接手同事先读
 │   ├── PROJECT_GOAL.md           # 终极目标（长期稳定）
 │   ├── V2_OVERVIEW.md            # V2 方案总览（当前主线）
+│   ├── V2_DEVELOPMENT_PLAN.md    # V2 分阶段开发计划（当前执行计划）
 │   ├── CURRENT_STATUS.md         # 当前状态（滚动更新）
 │   ├── OPEN_ISSUES.md            # 当前未解决问题（滚动更新）
 │   ├── PENDING_DECISIONS.md      # 需要负责人拍板的问题
+│   ├── LEGACY_BACKUP.md          # 旧版单文件备份说明
+│   ├── V2_WORKLOG.md             # V2 开发执行日志（交接入口）
 │   └── GUIDED_TOUR.md            # 快速接手导读
 ├── backend/                      # 开发层：技术实现与约束
 │   ├── ARCHITECTURE_REDESIGN.md  # V2 架构规格（技术主文档）
+│   ├── V2_IMPLEMENTATION_BLUEPRINT.md # V2 代码落位蓝图（代码映射）
+│   ├── V2_RECLAIM_STRATEGY.md    # V2 物理回收（半侵入继承层）策略
 │   ├── DESIGN_DECISIONS.md       # 关键决策日志（长期保留）
 │   ├── DEVELOPMENT_PRINCIPLES.md # 开发原则（必读）
 │   ├── REVIEW_CHECKLIST.md       # 评审清单
@@ -68,11 +73,13 @@ docs/
 
 1. `interface/PROJECT_GOAL.md`
 2. `interface/V2_OVERVIEW.md`
-3. `interface/CURRENT_STATUS.md`
-4. `interface/OPEN_ISSUES.md`
-5. `backend/DEVELOPMENT_PRINCIPLES.md`
-6. `backend/ARCHITECTURE_REDESIGN.md`
-7. `backend/DESIGN_DECISIONS.md`
+3. `interface/V2_DEVELOPMENT_PLAN.md`
+4. `interface/CURRENT_STATUS.md`
+5. `interface/OPEN_ISSUES.md`
+6. `backend/DEVELOPMENT_PRINCIPLES.md`
+7. `backend/ARCHITECTURE_REDESIGN.md`
+8. `backend/V2_IMPLEMENTATION_BLUEPRINT.md`
+9. `backend/DESIGN_DECISIONS.md`
 
 ---
 

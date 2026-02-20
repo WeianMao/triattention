@@ -184,9 +184,57 @@ def _convert_rkv_stats(
     #     "q_mean_complex": [num_kv_heads, freq_count, 2],  # optional
     # }
     head_stats = {}
+
+    def _derive_freq_scale_sq_fallback() -> torch.Tensor:
+        """Derive RoPE frequency scaling from model config when possible.
+
+        For R-KV stats format, `q_abs_mean` is a query statistic and should not
+        be repurposed as `freq_scale_sq`. We derive `freq_scale_sq` from the
+        model's rotary embedding scaling (HF-aligned semantic source). If that
+        derivation fails, fall back to ones to keep behavior explicit and safe.
+        """
+        model_path_raw = rkv_metadata.get("model_path")
+        if model_path_raw:
+            try:
+                from transformers import AutoConfig
+                from weian_development.speckv.round_pruning_utils import (
+                    build_rotary,
+                    compute_frequency_scaling,
+                )
+
+                model_path = Path(str(model_path_raw))
+                model_config = AutoConfig.from_pretrained(
+                    str(model_path),
+                    trust_remote_code=True,
+                )
+                rotary = build_rotary(
+                    cache_device=device,
+                    model_path=model_path,
+                    dtype=dtype,
+                    config=model_config,
+                )
+                freq_scale = compute_frequency_scaling(
+                    rotary=rotary,
+                    head_dim=head_dim,
+                    dtype=dtype,
+                    device=device,
+                ).to(device=device, dtype=dtype)
+                freq_scale_sq = freq_scale.pow(2)
+                return freq_scale_sq.unsqueeze(0).expand(num_kv_heads, -1).contiguous()
+            except Exception:
+                pass
+
+        # Explicit fallback when model-derived scaling is unavailable.
+        return torch.ones(
+            num_kv_heads,
+            freq_count,
+            device=device,
+            dtype=dtype,
+        )
+
+    default_freq_scale_sq = _derive_freq_scale_sq_fallback()
     for layer_idx in sorted(layer_nums):
         # Collect all attention heads' data for this layer
-        all_freq_scale_sq = []
         all_q_mean_real = []
         all_q_mean_imag = []
         all_q_abs_mean = []
@@ -195,23 +243,11 @@ def _convert_rkv_stats(
             key = f"layer{layer_idx:02d}_head{head_idx:02d}"
             if key in rkv_stats:
                 head_data = rkv_stats[key]
-                # R-KV stores q_abs_mean which we use as freq_scale_sq
+                # R-KV stores q_abs_mean as query statistic.
                 if "q_abs_mean" in head_data:
                     q_abs = head_data["q_abs_mean"].to(dtype=dtype)
-                    all_freq_scale_sq.append(q_abs ** 2)
                     all_q_abs_mean.append(q_abs)
-                elif "freq_scale_sq" in head_data:
-                    all_freq_scale_sq.append(
-                        head_data["freq_scale_sq"].to(dtype=dtype)
-                    )
-                    # Compute q_abs_mean from freq_scale_sq
-                    all_q_abs_mean.append(
-                        torch.sqrt(head_data["freq_scale_sq"].to(dtype=dtype))
-                    )
                 else:
-                    all_freq_scale_sq.append(
-                        torch.ones(freq_count, dtype=dtype)
-                    )
                     all_q_abs_mean.append(
                         torch.ones(freq_count, dtype=dtype)
                     )
@@ -225,24 +261,18 @@ def _convert_rkv_stats(
                     )
 
         # Stack all attention heads: [num_attention_heads, freq_count]
-        all_freq_scale_sq = torch.stack(all_freq_scale_sq, dim=0)
         all_q_abs_mean = torch.stack(all_q_abs_mean, dim=0)
 
         # Apply GQA mapping: average Q heads that share each KV head
         if gqa_ratio > 1:
-            # Reshape and average: [num_kv_heads, gqa_ratio, freq_count] -> [num_kv_heads, freq_count]
-            freq_scale_sq = all_freq_scale_sq.reshape(
-                num_kv_heads, gqa_ratio, freq_count
-            ).mean(dim=1)
             q_abs_mean = all_q_abs_mean.reshape(
                 num_kv_heads, gqa_ratio, freq_count
             ).mean(dim=1)
         else:
-            freq_scale_sq = all_freq_scale_sq
             q_abs_mean = all_q_abs_mean
 
         head_stats[layer_idx] = {
-            "freq_scale_sq": freq_scale_sq.to(device),
+            "freq_scale_sq": default_freq_scale_sq.clone(),
             "q_abs_mean": q_abs_mean.to(device),
         }
 

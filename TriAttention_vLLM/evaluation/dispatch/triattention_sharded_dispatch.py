@@ -28,9 +28,9 @@ if str(RKV_ROOT) not in sys.path:
 
 from weian_development.process_utils import mask_process_command
 
-DEFAULT_CONFIG = TRIATTENTION_ROOT / "evaluation" / "dispatch" / "configs" / "triattention_aime24.yaml"
+DEFAULT_CONFIG = TRIATTENTION_ROOT / "evaluation" / "dispatch" / "configs" / "triattention_v2_aime24.yaml"
 MERGE_SCRIPT = TRIATTENTION_ROOT / "evaluation" / "merge" / "merge_shards.py"
-MULTI_EVAL_SCRIPT = TRIATTENTION_ROOT / "evaluation" / "eval" / "eval_math_multi.py"
+MULTI_EVAL_SCRIPT = RKV_ROOT / "HuggingFace" / "evaluation" / "eval_math_multi.py"
 PATH_ARG_KEYS = {"output_dir", "dataset_path", "model_path", "tokenizer_path", "sparse_stats_path"}
 RUNNER_EXCLUDE_KEYS = {"num_samples_by_dataset"}
 
@@ -42,6 +42,8 @@ class ActiveShard:
     process: subprocess.Popen
     log_handle: TextIO
     log_path: Path
+    last_log_size: int
+    last_log_update_ts: float
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,6 +55,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=str, help="Override runner output_dir argument")
     parser.add_argument("--method-output-dir", type=str, help="Override merge target directory")
     parser.add_argument("--gpu-memory-threshold", type=int, help="Override GPU memory threshold for auto selection")
+    parser.add_argument(
+        "--stall-timeout-minutes",
+        type=float,
+        default=None,
+        help="Fail fast if a shard log has no growth for this many minutes (<=0 disables).",
+    )
     parser.add_argument("--skip-merge", action="store_true", help="Skip shard merge step")
     parser.add_argument(
         "--skip-existing",
@@ -71,6 +79,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-output-dir", type=str, help="Directory to write eval results")
     parser.add_argument("--dataset", type=str, default="aime24", help="Dataset name for eval script")
     parser.add_argument("--dry-run", action="store_true", help="Print what would run without launching processes")
+    parser.add_argument(
+        "--allow-legacy-v1",
+        action="store_true",
+        help="Allow legacy V1 runner config. Default behavior enforces V2 runner.",
+    )
     # TriAttention-specific args
     parser.add_argument(
         "--kv-budget",
@@ -115,9 +128,9 @@ def parse_gpu_string(value: str) -> List[str]:
     return [token.strip() for token in tokens if token.strip()]
 
 
-def compute_local_records(total_records: int, num_shards: int, shard_id: int) -> tuple[int, int]:
-    base = total_records // num_shards
-    extra = total_records % num_shards
+def compute_local_runs(total_runs: int, num_shards: int, shard_id: int) -> tuple[int, int]:
+    base = total_runs // num_shards
+    extra = total_runs % num_shards
     start = shard_id * base + min(shard_id, extra)
     count = base + (1 if shard_id < extra else 0)
     return start, count
@@ -167,12 +180,6 @@ def count_dataset_examples(dataset_path: Path, max_examples: int | None = None) 
             if max_examples is not None and count >= max_examples:
                 return max_examples
     return count
-
-
-def questions_for_shard(total_questions: int, num_shards: int, shard_id: int) -> int:
-    base = total_questions // num_shards
-    extra = total_questions % num_shards
-    return base + (1 if shard_id < extra else 0)
 
 
 def auto_detect_gpus(threshold: int) -> List[str]:
@@ -294,7 +301,16 @@ def launch_shard(
         env=env,
         start_new_session=True,
     )
-    return ActiveShard(shard_id=shard_id, gpu=gpu, process=process, log_handle=log_handle, log_path=log_path)
+    now = time.time()
+    return ActiveShard(
+        shard_id=shard_id,
+        gpu=gpu,
+        process=process,
+        log_handle=log_handle,
+        log_path=log_path,
+        last_log_size=0,
+        last_log_update_ts=now,
+    )
 
 
 def terminate_active(active: Iterable[ActiveShard]) -> None:
@@ -324,6 +340,7 @@ def run_shards(
     skip_existing: bool,
     num_samples: int,
     total_records: int,
+    stall_timeout_minutes: float,
 ) -> None:
     if not gpus:
         raise ValueError("No GPUs available to schedule shards")
@@ -332,16 +349,16 @@ def run_shards(
     if skip_existing:
         shards_to_run = []
         for shard_id in range(total_shards):
-            start_record, local_records = compute_local_records(total_records, total_shards, shard_id)
-            if local_records == 0:
-                print(f"[skip] shard {shard_id} has 0 assigned records, no output required.")
+            run_start, run_count = compute_local_runs(num_samples, total_shards, shard_id)
+            if run_count == 0:
+                print(f"[skip] shard {shard_id} has 0 assigned runs, no output required.")
                 continue
             missing = []
-            for run_id in range(num_samples):
-                if not run_completed(output_dir, shard_id, run_id, local_records):
+            for run_id in range(run_start, run_start + run_count):
+                if not run_completed(output_dir, shard_id, run_id, total_records):
                     missing.append(run_id)
             if not missing:
-                print(f"[skip] shard {shard_id} has all {num_samples} runs completed.")
+                print(f"[skip] shard {shard_id} has all assigned runs completed.")
                 continue
             pending_runs[shard_id] = missing
             shards_to_run.append(shard_id)
@@ -351,45 +368,66 @@ def run_shards(
     else:
         shards_to_run = []
         for shard_id in range(total_shards):
-            _, local_records = compute_local_records(total_records, total_shards, shard_id)
-            if local_records == 0:
-                print(f"[skip] shard {shard_id} has 0 assigned records, no output required.")
+            _, run_count = compute_local_runs(num_samples, total_shards, shard_id)
+            if run_count == 0:
+                print(f"[skip] shard {shard_id} has 0 assigned runs, no output required.")
                 continue
             shards_to_run.append(shard_id)
     if dry_run:
         for shard_id in shards_to_run:
-            start_record, local_records = compute_local_records(total_records, total_shards, shard_id)
-            record_end = start_record + local_records - 1
+            run_start, run_count = compute_local_runs(num_samples, total_shards, shard_id)
+            run_end = run_start + run_count - 1
             gpu = gpus[shard_id % len(gpus)]
             log_path = (log_dir / f"triattention_shard{shard_id:02d}_{log_stamp}.log").resolve()
             cmd_preview = base_cmd + ["--shard-id", str(shard_id)]
             runs_preview = pending_runs.get(shard_id)
-            run_span = f"runs={num_samples}"
+            run_span = f"runs={run_start}-{run_end}"
             if runs_preview is not None:
                 run_span = f"missing_runs={runs_preview}"
             print(
                 f"[dry-run] shard {shard_id} -> GPU {gpu} ({run_span}, "
-                f"records={local_records} range={start_record}-{record_end})\n"
+                f"records={total_records})\n"
                 f"  log: {log_path}\n  cmd: {' '.join(cmd_preview)}"
             )
         return
     shard_queue: deque[int] = deque(shards_to_run)
     available: deque[str] = deque(gpus)
     active: Dict[str, ActiveShard] = {}
+    stall_timeout_seconds = max(0.0, float(stall_timeout_minutes)) * 60.0
     try:
         while shard_queue or active:
             while shard_queue and available:
                 gpu = available.popleft()
                 shard_id = shard_queue.popleft()
-                _, local_records = compute_local_records(total_records, total_shards, shard_id)
-                if local_records == 0:
-                    print(f"[skip] shard {shard_id} has 0 assigned records, continuing.")
+                _, run_count = compute_local_runs(num_samples, total_shards, shard_id)
+                if run_count == 0:
+                    print(f"[skip] shard {shard_id} has 0 assigned runs, continuing.")
                     available.append(gpu)
                     continue
                 active[gpu] = launch_shard(gpu, shard_id, base_cmd, base_env, log_dir, log_stamp)
             if not active:
                 continue
             time.sleep(5)
+            now = time.time()
+            if stall_timeout_seconds > 0:
+                for gpu, shard in active.items():
+                    if shard.process.poll() is not None:
+                        continue
+                    try:
+                        curr_size = int(shard.log_path.stat().st_size)
+                    except OSError:
+                        curr_size = shard.last_log_size
+                    if curr_size > shard.last_log_size:
+                        shard.last_log_size = curr_size
+                        shard.last_log_update_ts = now
+                        continue
+                    if (now - shard.last_log_update_ts) >= stall_timeout_seconds:
+                        terminate_active(active.values())
+                        raise RuntimeError(
+                            f"Shard {shard.shard_id} on GPU {gpu} stalled: "
+                            f"no log growth for {stall_timeout_minutes:.1f} minutes "
+                            f"(log={shard.log_path})"
+                        )
             finished = [gpu for gpu, shard in active.items() if shard.process.poll() is not None]
             for gpu in finished:
                 shard = active.pop(gpu)
@@ -458,7 +496,14 @@ def main() -> None:
     experiment = config.get("experiment", {})
 
     conda_env = experiment.get("conda_env", "rkv")
+    eval_conda_env = experiment.get("eval_conda_env", conda_env)
     runner_path = resolve_path(experiment["runner_path"])
+    if (runner_path.name != "vllm_triattention_v2_runner.py"
+            and not args.allow_legacy_v1):
+        raise RuntimeError(
+            "Refusing to run legacy V1 runner by default. "
+            "Use a V2 config/runner or pass --allow-legacy-v1 explicitly."
+        )
     total_shards = args.num_shards or experiment.get("num_shards", 1)
     gpus = determine_gpus(args, experiment)
     log_dir = resolve_path(args.log_dir or experiment.get("log_dir", "TriAttention_vLLM/evaluation/logs"))
@@ -482,20 +527,21 @@ def main() -> None:
     base_env = prepare_environment(experiment.get("env", {}))
     base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 
-    # TriAttention environment variables for V1 backend
-    # These are used by triattention.v1_backend._load_config_from_env()
-    if runner_args.get("sparse_stats_path"):
-        base_env["TRIATTENTION_STATS_PATH"] = str(resolve_path(runner_args["sparse_stats_path"]))
-    if runner_args.get("kv_budget"):
-        base_env["TRIATTENTION_KV_BUDGET"] = str(runner_args["kv_budget"])
-    if runner_args.get("divide_length"):
-        base_env["TRIATTENTION_DIVIDE_LENGTH"] = str(runner_args["divide_length"])
-    if runner_args.get("window_size"):
-        base_env["TRIATTENTION_WINDOW_SIZE"] = str(runner_args["window_size"])
-    if runner_args.get("pruning_mode"):
-        base_env["TRIATTENTION_PRUNING_MODE"] = str(runner_args["pruning_mode"])
-    # Suppress verbose logging in dispatch mode
-    base_env.setdefault("TRIATTENTION_QUIET", "1")
+    # TriAttention environment variables for legacy V1 backend only.
+    # V2 runner path must avoid V1 env coupling.
+    if runner_path.name != "vllm_triattention_v2_runner.py":
+        if runner_args.get("sparse_stats_path"):
+            base_env["TRIATTENTION_STATS_PATH"] = str(resolve_path(runner_args["sparse_stats_path"]))
+        if runner_args.get("kv_budget"):
+            base_env["TRIATTENTION_KV_BUDGET"] = str(runner_args["kv_budget"])
+        if runner_args.get("divide_length"):
+            base_env["TRIATTENTION_DIVIDE_LENGTH"] = str(runner_args["divide_length"])
+        if runner_args.get("window_size"):
+            base_env["TRIATTENTION_WINDOW_SIZE"] = str(runner_args["window_size"])
+        if runner_args.get("pruning_mode"):
+            base_env["TRIATTENTION_PRUNING_MODE"] = str(runner_args["pruning_mode"])
+        # Suppress verbose logging in dispatch mode
+        base_env.setdefault("TRIATTENTION_QUIET", "1")
 
     runner_args["output_dir"] = resolve_path(args.output_dir or runner_args.get("output_dir", method_output_dir / "shards"))
     runner_args["dataset_path"] = resolve_path(runner_args["dataset_path"])
@@ -509,6 +555,11 @@ def main() -> None:
         max_examples = None
 
     dataset_example_count = count_dataset_examples(runner_args["dataset_path"], max_examples)
+    stall_timeout_minutes = (
+        args.stall_timeout_minutes
+        if args.stall_timeout_minutes is not None
+        else float(experiment.get("stall_timeout_minutes", 0))
+    )
 
     base_cmd = build_base_command(conda_env, runner_path, format_runner_args(runner_args, total_shards))
     num_samples = int(runner_args.get("num_samples", 64))
@@ -525,6 +576,7 @@ def main() -> None:
         args.skip_existing,
         num_samples,
         total_records=dataset_example_count,
+        stall_timeout_minutes=stall_timeout_minutes,
     )
     merge_outputs(runner_args["output_dir"], merged_dir_name, args.skip_merge, args.dry_run)
     merged_dir = runner_args["output_dir"].parent / merged_dir_name
@@ -532,7 +584,15 @@ def main() -> None:
         eval_output_dir = merged_dir.parent / "eval"
     if not args.no_eval:
         exp_name = experiment.get("name", merged_dir_name)
-        run_evaluation(merged_dir, args.dataset, exp_name, eval_output_dir, conda_env, args.dry_run, num_samples)
+        run_evaluation(
+            merged_dir,
+            args.dataset,
+            exp_name,
+            eval_output_dir,
+            eval_conda_env,
+            args.dry_run,
+            num_samples,
+        )
 
 
 if __name__ == "__main__":

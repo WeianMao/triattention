@@ -506,6 +506,7 @@ def speckv_scoring(
     round_start: int,
     aggregation: str = "max",
     trig_cache: Optional[TrigTableCache] = None,
+    trig_values: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     rope_style: str = "interleaved",
     disable_mlr: bool = False,
 ) -> torch.Tensor:
@@ -528,6 +529,8 @@ def speckv_scoring(
         aggregation: "max" or "mean" for offset aggregation
         trig_cache: Optional precomputed trig table cache. If provided, uses optimized
             kernel with table lookup instead of on-the-fly trig computation.
+        trig_values: Optional explicit (cos_table, sin_table), each [num_offsets, freq_count].
+            When set, takes precedence over trig_cache lookup and directly uses cached kernel.
         rope_style: RoPE format for K_rot. Options:
             - "interleaved": [r0, i0, r1, i1, ...] (HuggingFace default)
             - "half": [r0, r1, ..., i0, i1, ...] (Qwen models)
@@ -547,7 +550,6 @@ def speckv_scoring(
     freq_count = q_mean_real.shape[1]
 
     # Validate inputs
-    assert K_rot.is_contiguous(), "K_rot must be contiguous"
     assert head_dim % 2 == 0, "head_dim must be even for complex pairing"
     assert head_dim // 2 == freq_count, f"freq_count {freq_count} != head_dim//2 {head_dim//2}"
 
@@ -584,10 +586,25 @@ def speckv_scoring(
         stride_pb = position_indices.stride(0)
         stride_pn = position_indices.stride(1)
 
-    if trig_cache is not None:
+    if trig_values is not None or trig_cache is not None:
         # Use optimized kernel with precomputed tables
-        cos_table, sin_table = trig_cache.get_trig_values(round_start)
-        num_offsets = trig_cache.num_offsets
+        if trig_values is not None:
+            cos_table, sin_table = trig_values
+            cos_table = cos_table.contiguous()
+            sin_table = sin_table.contiguous()
+            if cos_table.shape != sin_table.shape:
+                raise ValueError(
+                    f"trig_values shape mismatch: cos={tuple(cos_table.shape)} "
+                    f"sin={tuple(sin_table.shape)}"
+                )
+            if cos_table.ndim != 2:
+                raise ValueError(
+                    f"trig_values must be rank-2 [num_offsets, freq_count], got {cos_table.ndim}"
+                )
+            num_offsets = int(cos_table.shape[0])
+        else:
+            cos_table, sin_table = trig_cache.get_trig_values(round_start)
+            num_offsets = trig_cache.num_offsets
 
         speckv_scoring_kernel_cached[grid](
             K_rot,

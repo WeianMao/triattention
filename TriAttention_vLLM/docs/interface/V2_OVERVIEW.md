@@ -38,6 +38,11 @@
 2. `--scheduler-cls`: 注入 `TriAttentionScheduler`
 3. `--attention-backend`: 继续使用标准 FlashAttention（V2 默认不自定义压缩后置逻辑）
 
+当前 class path：
+
+1. `triattention_v2.worker.TriAttentionWorker`
+2. `triattention_v2.scheduler.TriAttentionScheduler`
+
 ### 3.2 组件职责（强约束）
 
 1. `TriAttentionScheduler`
@@ -56,6 +61,10 @@
 
 4. `TriAttentionCompressor`（已有）
 - 保持算法核心（打分、TopK 选择等）独立可测试。
+
+代码落位：
+
+- `TriAttention_vLLM/triattention_v2/`（V2 新开发目录）
 
 ---
 
@@ -90,6 +99,16 @@ V2 允许两条触发线并存（先实现一条，再叠加）：
 1. 不中断主推理流程。
 2. 打结构化日志（request/layer/step）。
 3. 将请求回退到“本步不压缩”路径。
+
+### 4.5 `per_head` 语义开关（避免实现歧义）
+
+1. `legacy_layer_local`
+- 每层独立执行 per-head TopK；用于复现早期 V2 结果（含约 45% 的历史锚点实验）。
+
+2. `hf_aligned_global_per_head`
+- 先在同一 KV group 内做跨层聚合，再按 KV head 独立 TopK；
+- 选出的同一组 per-head 索引应用到组内各层；
+- 该模式用于 HF RKV-style `per_head` 对齐实验。
 
 ---
 
@@ -132,4 +151,3 @@ V2 允许两条触发线并存（先实现一条，再叠加）：
 1. 架构层面：不改 vLLM 源码，全部通过可配置扩展点接入。
 2. 正确性层面：压缩行为与策略定义一致，生命周期无状态污染。
 3. 维护层面：新同事可根据 `GUIDED_TOUR.md` 与本文件直接接手。
-

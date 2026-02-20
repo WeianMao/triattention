@@ -18,7 +18,7 @@ triattention = "triattention.plugin:register_triattention_backend"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["triattention*"]
+include = ["triattention*", "triattention_v2*"]
 
 [tool.setuptools.package-data]
 triattention = ["*.py"]

@@ -24,6 +24,7 @@ def compute_scores(
     freq_scale_sq: torch.Tensor,
     config: TriAttentionConfig,
     round_start: Optional[int] = None,
+    trig_cache=None,
 ) -> torch.Tensor:
     """Compute importance scores for KV tokens.
 
@@ -60,6 +61,7 @@ def compute_scores(
             freq_scale_sq=freq_scale_sq,
             config=config,
             round_start=round_start,
+            trig_cache=trig_cache,
         )
     else:
         return compute_scores_pytorch(
@@ -83,6 +85,7 @@ def compute_scores_triton(
     freq_scale_sq: torch.Tensor,
     config: TriAttentionConfig,
     round_start: Optional[int] = None,
+    trig_cache=None,
 ) -> torch.Tensor:
     """Compute scores using Triton kernel.
 
@@ -128,8 +131,8 @@ def compute_scores_triton(
             # Fallback: use seq_len - 1 as round_start
             round_start = seq_len - 1
 
-    # Ensure inputs are contiguous and properly typed
-    K_rot = key_states.contiguous()
+    # Keep K as-is to avoid an extra full-tensor copy on scoring hot path.
+    K_rot = key_states
     freq_scale_sq_input = freq_scale_sq.contiguous().to(dtype=key_states.dtype)
     omega_input = omega.contiguous().to(dtype=key_states.dtype)
     offsets_input = offsets.contiguous().to(dtype=key_states.dtype)
@@ -138,6 +141,39 @@ def compute_scores_triton(
     # Phase calculation uses t*omega + phi_rot, no per-token positions needed
     # Pass None to avoid GPU memory waste
     position_indices = None
+
+    active_trig_cache = None
+    active_trig_values = None
+    if trig_cache is not None:
+        divide_length = int(getattr(config, "divide_length", 0))
+        max_positions = int(getattr(trig_cache, "num_positions", 0))
+        max_round_start = divide_length * max_positions if divide_length > 0 else 0
+        if (
+            divide_length > 0
+            and round_start >= divide_length
+            and max_round_start >= divide_length
+        ):
+            base_round_start = (int(round_start) // divide_length) * divide_length
+            if divide_length <= base_round_start <= max_round_start:
+                residual = int(round_start) - base_round_start
+                if residual == 0:
+                    active_trig_cache = trig_cache
+                else:
+                    cos_base, sin_base = trig_cache.get_trig_values(base_round_start)
+                    omega_fp32 = omega_input.to(dtype=torch.float32)
+                    residual_phase = float(residual) * omega_fp32
+                    cos_residual = torch.cos(residual_phase).unsqueeze(0)
+                    sin_residual = torch.sin(residual_phase).unsqueeze(0)
+                    # cos(a+b)=cos(a)cos(b)-sin(a)sin(b), sin(a+b)=sin(a)cos(b)+cos(a)sin(b)
+                    cos_shifted = (
+                        cos_base.to(dtype=torch.float32) * cos_residual
+                        - sin_base.to(dtype=torch.float32) * sin_residual
+                    ).contiguous()
+                    sin_shifted = (
+                        sin_base.to(dtype=torch.float32) * cos_residual
+                        + cos_base.to(dtype=torch.float32) * sin_residual
+                    ).contiguous()
+                    active_trig_values = (cos_shifted, sin_shifted)
 
     # Call Triton kernel
     scores = speckv_scoring(
@@ -152,6 +188,8 @@ def compute_scores_triton(
         round_start=round_start,
         aggregation=config.score_aggregation,
         disable_mlr=config.disable_mlr,
+        trig_cache=active_trig_cache,
+        trig_values=active_trig_values,
     )  # [batch, num_kv_heads, seq_len]
 
     # For per_layer mode, aggregate across heads

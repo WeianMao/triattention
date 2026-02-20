@@ -61,6 +61,9 @@ class TriAttentionCompressor:
         # Precomputed offsets for scoring
         self.offsets: Optional[torch.Tensor] = None
 
+        # Optional precomputed trig cache for faster scoring
+        self.trig_cache = None
+
         # Initialization flags
         self._initialized = False
 
@@ -106,6 +109,9 @@ class TriAttentionCompressor:
         # Initialize scoring offsets
         self._init_offsets()
 
+        # Initialize optional trig cache for aligned rounds
+        self._init_trig_cache()
+
         self._initialized = True
 
     def _init_rope(self):
@@ -149,15 +155,58 @@ class TriAttentionCompressor:
         """Initialize scoring offsets.
 
         Offsets define multiple reference positions for scoring robustness.
-        Default: Use a small set of offsets around the current round position.
+        Match HF SpeckV helper: geometric offsets [1, 2, 4, ..., offset_max_length].
         """
-        # For Phase 1, use a simple set of offsets
-        # Future: Can make this configurable or adaptive
+        max_length = int(self.config.offset_max_length)
+        if max_length < 1:
+            raise ValueError(
+                f"offset_max_length must be >= 1, got {self.config.offset_max_length}"
+            )
+        offsets: list[float] = []
+        value = 1
+        while value <= max_length:
+            offsets.append(float(value))
+            value *= 2
         self.offsets = torch.tensor(
-            [0, -1, -2, -4, -8, -16],  # Offset relative to round_start
+            offsets,
             device=self.config.device,
-            dtype=torch.int32,
+            dtype=torch.float32,
         )
+
+    def _init_trig_cache(self):
+        """Initialize optional precomputed trig cache for scoring."""
+        self.trig_cache = None
+        if not self.config.use_triton_scoring or not self.config.use_trig_cache:
+            return
+        try:
+            from .kernels.triton_scoring import create_trig_cache
+        except Exception:
+            return
+
+        if self.offsets is None or self.omega is None:
+            return
+
+        max_seq_len = self.config.trig_cache_max_seq_len
+        if max_seq_len is None:
+            max_seq_len = max(
+                int(self.config.offset_max_length),
+                int(self.config.kv_budget + self.config.divide_length),
+            )
+        max_seq_len = max(int(max_seq_len), int(self.config.divide_length))
+        if max_seq_len <= 0:
+            return
+
+        try:
+            self.trig_cache = create_trig_cache(
+                max_seq_len=max_seq_len,
+                compress_interval=int(self.config.divide_length),
+                offsets=self.offsets,
+                omega=self.omega,
+                device=self.config.device,
+                warn_threshold_mb=float(self.config.trig_cache_warn_threshold_mb),
+            )
+        except Exception:
+            self.trig_cache = None
 
     def compress(
         self,
@@ -263,6 +312,7 @@ class TriAttentionCompressor:
             freq_scale_sq=self.freq_scale_sq[layer_idx],
             config=self.config,
             round_start=round_start,
+            trig_cache=self.trig_cache,
         )
 
         return scores
