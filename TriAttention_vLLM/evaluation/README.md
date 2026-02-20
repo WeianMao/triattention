@@ -12,7 +12,6 @@ evaluation/
 │       ├── triattention_v2_aime24.yaml
 │       └── triattention_v2_aime24_quick.yaml
 ├── runner/                        # Midstream: vLLM inference
-│   ├── vllm_triattention_runner.py        # Legacy V1 path
 │   └── vllm_triattention_v2_runner.py     # V2 non-invasive path
 ├── merge/                         # Downstream: Result aggregation
 │   └── merge_shards.py
@@ -73,6 +72,8 @@ python TriAttention_vLLM/evaluation/dispatch/triattention_sharded_dispatch.py \
 ```
 
 Legacy V1 config is blocked by default in dispatcher. Use `--allow-legacy-v1` only when explicitly doing historical comparison.
+Legacy V1 runner/config snapshot is archived under:
+`TriAttention_vLLM/repository_archive/legacy_v0_v1_code_2026-02-20/`.
 
 ### Run Single Shard Manually (V2)
 
