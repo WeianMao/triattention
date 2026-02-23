@@ -93,7 +93,7 @@
 当前阻塞主要在“原型能力向稳定能力收敛”：
 
 1. V2 已实现实验性 KV gather/score/select/in-place compaction 闭环（hook 路径）；但当前仍是原型语义，尚未实现“物理页回收/块表重排”级别的生产闭环。
-2. `protect_prefill` 与 `include_prefill_in_budget` 语义已落地，但默认策略和 KV usage 触发阈值仍需统一拍板（见 `PENDING_DECISIONS.md`）。
+2. `protect_prefill` 与 `include_prefill_in_budget` 语义已落地；“按 KV usage/显存压力触发压缩”仍属于后续能力，当前重构阶段只要求保留清晰接入点。
 3. Phase 1 有本地 smoke 回归脚本（`tests_v2/run_smoke.py`），已支持自动跳过需要 pytest fixture 的测试函数并恢复可用，但尚未接入 CI/统一门禁流程。
 4. 物理回收能力仍在开发中：已确定采用“继承层半侵入”实现，不直接修改上游 vLLM 源码文件。
 5. 当前实现路径存在方案级复杂度漂移，需先按重构计划拆分职责并收敛热路径，再继续在原型上叠加功能修复。
@@ -121,7 +121,7 @@
 
 1. M1：提交 V2 骨架代码（可加载、可运行、可观测）。
 2. M2：完成 Phase 1 基础功能（单请求 + prefill 保护）。
-3. M3：完成 Phase 2（batch>1 + prefill 可裁剪 + KV usage 触发）。
+3. M3：完成 Phase 2（batch>1 + prefill 可裁剪 + KV usage/显存压力触发）。
 
 ---
 
