@@ -1,35 +1,19 @@
 # PENDING DECISIONS（V2）
 
-- 更新时间：2026-02-13
+- 更新时间：2026-02-23
 - 状态：Active
 - 适用范围：vLLM 0.15.x
 
 ---
 
-## 决策 1：V2 Phase 1 默认 prefill 策略
-- 背景：V2 同时支持 prefill 保护与 prefill 裁剪，但 Phase 1 建议只开一种默认行为。
-- 选项A：`protect_prefill=true`（推荐）
-- 选项B：`protect_prefill=false`
-- 推荐：选项A。先降低变量数量，优先确保生命周期和触发链路稳定。
-- 不决策风险：同事实现时默认值不一致，导致实验不可比。
-- 截止时间：2026-02-16
-- 状态：Pending
+## 当前状态（2026-02-23）
 
-## 决策 2：显存触发阈值默认值
-- 背景：Phase 2 要支持“显存满了才触发压缩”，需要默认阈值与回落阈值。
-- 选项A：`trigger=0.98`, `release=0.90`（推荐）
-- 选项B：`trigger=0.95`, `release=0.85`
-- 推荐：选项A。更保守，减少无必要压缩。
-- 不决策风险：不同同事用不同阈值，结果不可比。
-- 截止时间：2026-02-20
-- 状态：Pending
+当前无已登记的 `Pending` 决策项。
 
-## 决策 3：Phase 1 runner 路径基线
-- 背景：vLLM 存在 V1/V2 两套 runner 路径，需先锁定主支持路径。
-- 选项A：先锁定默认 runner 路径，另一条后续兼容（推荐）
-- 选项B：两条路径同时支持
-- 推荐：选项A。先交付可用基线，再扩展兼容。
-- 不决策风险：开发面过大，节奏失控。
-- 截止时间：2026-02-16
-- 状态：Pending
+说明：
 
+1. 本文件中的早期 Phase 1 pending 条目（prefill 默认策略、显存阈值默认值、runner 路径基线）已过期，且不再适合作为“当前态”继续保留。
+2. 仍然有效的边界与取舍已同步到：
+   - `docs/backend/DESIGN_DECISIONS.md`
+   - `docs/interface/V2_SCHEME_ADJUSTMENT_2026-02-23.md`
+3. 若后续出现新的需要负责人拍板事项，请按 `docs/DOCS_STANDARDS.md` 模板新增，不要在本文件恢复历史过期条目。

@@ -1,6 +1,6 @@
 # TriAttention_vLLM 设计决策日志（V2）
 
-- 更新时间：2026-02-16
+- 更新时间：2026-02-23
 - 状态：Active
 - 适用范围：vLLM 0.15.x
 
@@ -142,6 +142,97 @@
   - scheduler 在 `update_from_output()` 消费并执行 tail block 回收（受实验开关保护）。
 - 影响范围：`triattention_v2/{executor.py,hook_impl.py,runner.py,scheduler.py}` 与对应单测。
 - 替代方案：仅在 worker 侧更新 `req_state.block_ids`（拒绝，调度侧状态不同步）。
+- 状态：Accepted
+
+## D-017：V2 进入“方案重置”阶段，采用三层分离最终架构
+- 日期：2026-02-22
+- 问题：当前 V2 虽已实现大量原型能力，但出现方案级复杂度漂移：worker 热路径 `gpu_seq_len_patch.py` 承担长期主逻辑、`hook_impl.py` 职责过载、`effective/absolute/physical` 语义事实源分散，导致对齐/性能/规范难以同时满足。
+- 决策：
+  1. 保留现有最终目标不变（HF 对齐优先、物理回收、非侵入式优先）；
+  2. 将 V2 最终架构重构为“三层分离”：
+     - HF 语义层（selector，输出 `KeepPlan`）
+     - 布局/回收层（layout engine，输出 `PlacementPlan/ReclaimEvent`）
+     - 运行时输入适配层（runtime input adapter，显式维护 `absolute_progress/effective_cache_len/effective_slot_base`）
+  3. `gpu_seq_len_patch.py` 降级为过渡兼容路径，不再作为长期热路径主设计；
+  4. `hook_impl.py` 后续按执行计划拆分为编排层 + 语义层 + 布局层。
+- 影响范围：
+  - `triattention_v2/hook_impl.py`
+  - `triattention_v2/gpu_seq_len_patch.py`
+  - `triattention_v2/runner.py`
+  - 新增 `selector/layout/input_adapter` 相关模块
+  - 文档 SSOT：`interface/V2_OVERVIEW.md`, `interface/OPEN_ISSUES.md`
+- 替代方案：
+  - 继续在现有 patch-heavy 路径上叠修复（拒绝，复杂度持续上升）
+  - 回退到 V1 / Attention 层主方案（拒绝）
+- 状态：Accepted
+
+## D-018：V2 主线目标模式限定为 `per_head` / `per_layer_per_head`
+- 日期：2026-02-23
+- 问题：重构执行顺序中曾出现“先收敛 `per_layer` strict reclaim 再扩到 `per_head`”的临时思路，但该模式不属于实际交付目标，继续作为主线阶段门槛会误导实现优先级。
+- 决策：
+  - 当前主线目标模式仅保留 `per_head` 与 `per_layer_per_head`；
+  - `per_layer` 不作为交付目标，也不作为合理中间收敛态；
+  - 任务拆分与里程碑不得再以 `per_layer` full-run 作为主线验收门槛。
+- 影响范围：
+  - `docs/backend/V2_FINAL_ARCHITECTURE.md`
+  - `docs/interface/V2_REFACTOR_EXECUTION_PLAN_2026-02-22.md`
+  - 相关任务分解、验收口径、接手沟通
+- 替代方案：先以 `per_layer` 跑通再迁移（拒绝，目标偏离且可能引入无效工程工作）。
+- 状态：Accepted
+
+## D-019：布局层主路径采用低搬运 fill-hole，物理保序不作为正确性要求
+- 日期：2026-02-23
+- 问题：严格保序的全量前缀重写（例如完整重写 2048 前缀）搬运量过大，压缩步 IO 成本不可接受；但完全只做 page/block 顺序交换又无法覆盖所有目标模式场景。
+- 决策：
+  - 布局层主路径采用 slot 级 fill-hole（低搬运）；
+  - 只搬运必要保留 token 回填前缀空洞；
+  - 不将物理保序作为正确性条件；
+  - page/block 级重排仅作为可选 fast path（表达能力足够时使用）。
+- 影响范围：
+  - `triattention_v2/kv_compaction.py`
+  - `triattention_v2/layout_engine.py`
+  - strict reclaim 验收口径（关注 keep 集合一致性而非物理顺序）
+- 替代方案：
+  - 全量保序重写前缀（拒绝，搬运量过大）
+  - 仅 page 级重排（拒绝，表达能力不足以覆盖目标模式）
+- 状态：Accepted
+
+## D-020：运行时输入适配采用“压缩点更新持久状态 + decode 薄适配层”
+- 日期：2026-02-23
+- 问题：当前 step-local runtime override（全局 `ACTIVE_*` + monkey patch + 激活窗口）时序脆弱且 decode 热路径 CPU/Python 开销偏高；但 vLLM 原生输入准备将 `positions` 与 `seq_lens` 绑定在同一 `num_computed_tokens`，无法只靠压缩时改一个状态变量解决。
+- 决策：
+  - 在压缩触发时更新 request-local 持久状态（至少覆盖绝对进度/有效长度/写入基址或等价语义）；
+  - decode 每步通过 thin runtime adapter 应用这些状态；
+  - 允许使用 monkey patch，但 patch 仅做薄适配，不再承担复杂推导与时序敏感状态管理主逻辑；
+  - 将 step-local `ACTIVE_*` override 路径降级为过渡兼容/调试路径，逐步退出主热路径。
+- 影响范围：
+  - `triattention_v2/input_adapter.py`
+  - `triattention_v2/effective_overrides.py`
+  - `triattention_v2/input_patch_state.py`
+  - `triattention_v2/input_patch_vllm_backend.py`
+  - `triattention_v2/runner_output_bridge.py`
+- 替代方案：
+  - 完全不改 decode 输入准备逻辑，仅压缩时 hack 单一状态（拒绝，无法同时满足 positions/seq_lens/slot_mapping 分叉语义）
+  - 继续沿用 step-local override 主路径（拒绝，性能与稳定性风险持续）
+- 状态：Accepted
+
+## D-021：decode 热路径最小修改原则（代码改动与 metadata 最小化）
+- 日期：2026-02-23
+- 问题：当前 V2 性能瓶颈与复杂度问题的核心来自 decode 热路径持续承载 patch-heavy 逻辑与额外状态/metadata 构造，导致 CPU 拖 GPU。
+- 决策：
+  - decode 热路径代码改动与新增 metadata 引入必须最小化；
+  - 若某 metadata 仅服务压缩触发步或调试，不得默认进入每步 decode 主路径；
+  - 运行时适配优先使用 request-local 持久状态增量表达，不在每步重建稀疏映射/字典；
+  - 若少量 monkey patch 能在保持薄适配的前提下减少热路径开销与实现复杂度，允许使用。
+- 影响范围：
+  - `triattention_v2/input_adapter.py`
+  - `triattention_v2/effective_overrides.py`
+  - `triattention_v2/input_patch_*`
+  - `triattention_v2/runner_output_bridge.py`
+  - 后续所有 decode 热路径相关实现评审标准
+- 替代方案：
+  - 为通用性预先引入额外每步 metadata（拒绝）
+  - 继续以 step-local patch-heavy override 作为主路径（拒绝）
 - 状态：Accepted
 
 ---

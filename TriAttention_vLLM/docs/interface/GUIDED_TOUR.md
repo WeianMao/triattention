@@ -1,6 +1,6 @@
 # TriAttention_vLLM 接手导读（V2）
 
-- 更新时间：2026-02-13
+- 更新时间：2026-02-23
 - 状态：Active
 
 ---
@@ -18,7 +18,10 @@
 你需要确认：
 
 1. 项目终极目标是“与 HF SpeckV 行为对齐 + vLLM 工程化落地”。
-2. 当前阶段优先级是“先正确，再优化”。
+2. 当前阶段优先级已明确为：
+   - HF `per_head` / `per_layer_per_head` 对齐优先；
+   - decode 性能（热路径极简）第二；
+   - 工程侵入性/开发复杂度平衡第三。
 
 ---
 
@@ -27,14 +30,17 @@
 阅读：
 
 1. `interface/V2_OVERVIEW.md`
-2. `interface/V2_DEVELOPMENT_PLAN.md`
+2. `interface/V2_REFACTOR_EXECUTION_PLAN_2026-02-22.md`
+3. `interface/V2_SCHEME_ADJUSTMENT_2026-02-23.md`
 
 你需要确认：
 
 1. V2 不再把压缩主逻辑放在 Attention 层。
 2. V2 采用 worker/scheduler/runner 扩展点，保持对 vLLM 非侵入。
-3. V2 分阶段推进，Phase 1 先交付基础功能。
-4. 新开发目录为 `triattention_v2/`，旧版只做参考。
+3. 当前主线目标模式是 `per_head` / `per_layer_per_head`（`per_layer` 非中间态）。
+4. 当前方案调整强调“fill-hole + thin runtime adapter”，复杂度尽量放在压缩触发时。
+5. decode 热路径代码改动与新增 metadata 必须最小化（性能约束）。
+6. 新开发目录为 `triattention_v2/`，旧版只做参考。
 
 ---
 

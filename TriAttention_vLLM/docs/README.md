@@ -24,7 +24,8 @@ docs/
 ├── interface/                    # 对外层：项目负责人/接手同事先读
 │   ├── PROJECT_GOAL.md           # 终极目标（长期稳定）
 │   ├── V2_OVERVIEW.md            # V2 方案总览（当前主线）
-│   ├── V2_DEVELOPMENT_PLAN.md    # V2 分阶段开发计划（当前执行计划）
+│   ├── V2_REFACTOR_EXECUTION_PLAN_2026-02-22.md # V2 重构执行计划（当前执行计划）
+│   ├── V2_SCHEME_ADJUSTMENT_2026-02-23.md # 方案调整计划（fill-hole + thin adapter）
 │   ├── CURRENT_STATUS.md         # 当前状态（滚动更新）
 │   ├── OPEN_ISSUES.md            # 当前未解决问题（滚动更新）
 │   ├── PENDING_DECISIONS.md      # 需要负责人拍板的问题
@@ -73,13 +74,14 @@ docs/
 
 1. `interface/PROJECT_GOAL.md`
 2. `interface/V2_OVERVIEW.md`
-3. `interface/V2_DEVELOPMENT_PLAN.md`
-4. `interface/CURRENT_STATUS.md`
-5. `interface/OPEN_ISSUES.md`
-6. `backend/DEVELOPMENT_PRINCIPLES.md`
-7. `backend/ARCHITECTURE_REDESIGN.md`
-8. `backend/V2_IMPLEMENTATION_BLUEPRINT.md`
-9. `backend/DESIGN_DECISIONS.md`
+3. `interface/V2_REFACTOR_EXECUTION_PLAN_2026-02-22.md`
+4. `interface/V2_SCHEME_ADJUSTMENT_2026-02-23.md`
+5. `interface/CURRENT_STATUS.md`
+6. `interface/OPEN_ISSUES.md`
+7. `backend/DEVELOPMENT_PRINCIPLES.md`
+8. `backend/ARCHITECTURE_REDESIGN.md`
+9. `backend/V2_IMPLEMENTATION_BLUEPRINT.md`
+10. `backend/DESIGN_DECISIONS.md`
 
 ---
 
@@ -95,4 +97,4 @@ docs/
 ---
 
 *版本：V2 文档体系*
-*更新日期：2026-02-13*
+*更新日期：2026-02-23*

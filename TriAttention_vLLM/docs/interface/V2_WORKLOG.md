@@ -1,6 +1,6 @@
 # TriAttention_vLLM V2 开发执行日志
 
-- 更新时间：2026-02-17
+- 更新时间：2026-02-23
 - 状态：Active
 - 适用范围：vLLM 0.15.x（V1 Engine）
 
@@ -218,11 +218,6 @@
    - `tests_v2/run_smoke.py` 纳入新模块。
 4. 回归结果：
    - `conda run -n rkv python -m pytest -q tests_v2/test_scoring_trig_cache.py tests_v2/test_runner.py tests_v2/test_v2_eval_runner.py`
-   - 结果：`19 passed`
-   - `conda run -n rkv python tests_v2/run_smoke.py`
-   - 结果：`smoke passed: 70 tests`
-   - `conda run -n rkv python -m pytest -q tests_v2`
-   - 结果：`70 passed`
 
 ### 4.6 压缩路径继续优化（2026-02-18）
 
@@ -504,3 +499,276 @@
    - `tests_v2/test_hook_impl.py::test_hook_clamps_effective_tokens_to_block_capacity_in_paged_path`
    - `tests_v2/test_kv_compaction.py::test_gather_request_k_dense_range_with_tensor_block_ids`
    - `tests_v2/test_kv_compaction.py::test_gather_request_k_dense_range_non_consecutive_blocks`
+
+---
+
+## 5. 2026-02-22（方案级复盘与重构定稿启动）
+
+### 5.1 本轮目标
+
+1. 重新对齐项目最终目标（HF 对齐优先、物理回收、性能、规范）。
+2. 复盘当前 V2 实现的方案级问题，而不是继续只修局部 bug。
+3. 产出新的最终架构方案与执行计划，作为后续代码重构基线。
+
+### 5.2 已确认事实（复盘结论）
+
+1. 当前主要矛盾已扩展为“方案边界偏航”，不只是实现细节问题。
+2. `triattention_v2/gpu_seq_len_patch.py` 已承载 decode 热路径主逻辑，是长期 GPU 利用率不理想的重要嫌疑。
+3. `triattention_v2/hook_impl.py` 职责过载（HF 语义 + compaction + reclaim + guard + debug），增加维护与回归风险。
+4. `effective length / absolute progress / physical block state` 事实源分散在 scheduler/runner/worker patch/hook，多处推导导致口径漂移风险上升。
+
+### 5.3 本轮产出（文档）
+
+1. 新增最终架构定稿：
+   - `docs/backend/V2_FINAL_ARCHITECTURE.md`
+2. 新增重构执行计划：
+   - `docs/interface/V2_REFACTOR_EXECUTION_PLAN_2026-02-22.md`
+3. 更新 SSOT：
+   - `docs/interface/V2_OVERVIEW.md`
+   - `docs/interface/CURRENT_STATUS.md`
+   - `docs/interface/OPEN_ISSUES.md`
+   - `docs/backend/DESIGN_DECISIONS.md`（新增 D-017）
+
+### 5.4 后续主线（代码层）
+
+1. 不再继续扩张 `gpu_seq_len_patch.py` 的热路径职责。
+2. 优先拆分 `hook_impl.py`（语义层 / 布局层 / 编排层）。
+3. 引入 Runtime Input Adapter，逐步替代 patch-heavy 的 worker 输入修正路径。
+
+### 5.5 代码重构进展（2026-02-22，已开始）
+
+1. 已落地结构化计划对象（T1）：
+   - `triattention_v2/plan_models.py`
+   - 新增 `KeepPlan` / `PlacementPlan` / `ReclaimEvent` / `ReclaimGroup`
+   - `hook_impl.py` 内部结果开始改用结构化对象，外部返回仍兼容旧 dict 契约。
+2. 已启动 `hook_impl.py` 拆分（T2 第一阶段）：
+   - 新增 `triattention_v2/selector_hf.py`，迁出 HF selector 主实现；
+   - `hook_impl.py` 运行路径已改为调用新模块（保留 monkeypatch 兼容符号）。
+3. 已启动布局层抽取（T2 第二阶段起步）：
+   - 新增 `triattention_v2/layout_engine.py`
+   - 抽出“单层 compaction 执行 + truncate-tail reclaim 计算”帮助函数；
+   - `hook_impl.py` 改为调用布局层 helper（编排职责开始收敛）。
+4. 已启动 Runtime Input Adapter 入口（T3 起步）：
+   - 新增 `triattention_v2/input_adapter.py`
+   - `runner.py` 的 effective override 组装/激活/清理由 adapter 承接（行为保持不变）。
+5. T3 继续推进（构建逻辑迁出 patch）：
+   - 新增 `triattention_v2/effective_overrides.py`
+   - `input_adapter.py` 改为从 `effective_overrides.py` 构建 sparse override 元数据；
+   - `gpu_seq_len_patch.py::build_effective_sparse_overrides` 保留为兼容 wrapper（实际逻辑已迁出）。
+6. 兼容性护栏（避免重构破坏既有测试/调试手段）：
+   - `layout_engine.compact_layer_with_keep_plan(...)` 支持注入 compaction 函数；
+   - `hook_impl.py` 显式传入 `hook_impl` 模块级 compaction 符号，保留 monkeypatch 可控性。
+7. 轻量一致性整理：
+   - 新增 `triattention_v2/constants.py`，统一 `TRITON_SCORING_REQUIRED_MARKER` 常量来源。
+5. 当前目标未变：
+   - 以上改动均为架构重构，不改变 HF 语义和既有 hook 输出契约。
+
+### 5.6 本轮定向验证（2026-02-22）
+
+1. `tests_v2/test_plan_models.py` + `test_hook_impl.py`（`per_head/reclaim` 子集）通过。
+2. `tests_v2/test_runner.py`（`strict/batch_signals/compression` 子集）通过。
+3. 新增：
+   - `tests_v2/test_effective_overrides.py`
+   - `tests_v2/test_input_adapter.py`
+   均通过。
+
+### 5.7 代码重构继续推进（2026-02-22，后续增量）
+
+1. `layout_engine.py` 扩展为 group 级执行入口（T2 深化）：
+   - 新增 `GroupCompactionOutcome`
+   - 新增 `execute_group_compaction(...)`
+   - 将“每组 layer compaction 执行 + 组内 `cache_len_after` 一致性校验 + reclaim block 截断/校验”从 `hook_impl.py` 迁入布局层。
+2. `hook_impl.py` 继续瘦身（编排职责收敛）：
+   - 调用 `layout_engine.execute_group_compaction(...)`，不再直接处理组内 compaction/reclaim 细节；
+   - 行数进一步下降（约降至 541 行）。
+3. 新增 `selection_planner.py`（T2 深化）：
+   - 抽出“group 级选择 + fallback + `PreparedLayerCompaction` 组装”逻辑；
+   - `hook_impl.py` 改为调用 `prepare_group_layer_compactions(...)`；
+   - 保留 `hook_impl` 兼容符号（如 `gather_request_k_dense`）以兼容既有测试/调试代码。
+4. `input_adapter.py` 加上下文入口（T3 小步）：
+   - 新增 `active_effective_input_overrides(...)` context manager；
+   - `runner.py` 改为通过上下文激活/清理 overrides，减少对 patch 细节的直接依赖。
+5. `runner.py` 继续瘦身（运行时边界收敛）：
+   - 新增 `worker_reclaim_sync.py`
+   - 将 worker-side block table reclaim 同步与 debug 校验从 `runner.py` 抽离；
+   - `runner.py` 保留流程编排调用点。
+
+### 5.8 本轮新增验证（2026-02-22）
+
+1. 新增：
+   - `tests_v2/test_layout_engine.py`（覆盖 group 级 compaction/reclaim 入口）
+2. 定向回归通过：
+   - `tests_v2/test_hook_impl.py`（`reclaim/per_head/inconsistent/pre_step/multi_group` 子集）
+   - `tests_v2/test_runner.py`（`compression/strict/batch_signals` 子集）
+   - `tests_v2/test_input_adapter.py`
+   - `tests_v2/test_layout_engine.py`
+
+### 5.9 T3 继续推进：Patch backend 降级（2026-02-22）
+
+1. 新增 `triattention_v2/input_patch_ops.py`：
+   - 承接 `gpu_seq_len_patch.py` 中的低层 patch 运算与 debug 校验逻辑（seq_lens patch、position delta patch、slot mapping 校验）。
+2. `gpu_seq_len_patch.py` 改为更薄的 patch 安装/路由层：
+   - 相关 helper 保留兼容函数名，但实现迁移为调用 `input_patch_ops.py`。
+3. 新增 `tests_v2/test_selection_planner.py`：
+   - 覆盖 `selection_planner.py` 的 fallback / selector / prefill_exceeds_budget 映射行为。
+4. 本轮定向验证通过：
+   - `tests_v2/test_selection_planner.py`
+   - `tests_v2/test_hook_impl.py`（相关子集）
+   - `tests_v2/test_input_adapter.py`
+   - `tests_v2/test_runner.py`（相关子集）
+
+### 5.10 T3 继续推进：状态与后端门面收口（2026-02-22）
+
+1. 新增 `triattention_v2/input_patch_state.py`：
+   - 将 patch 活动 override 状态（全局变量 + setter）从 `gpu_seq_len_patch.py` 抽离。
+2. 新增 `triattention_v2/input_patch_vllm_backend.py`：
+   - 将 `prepare_pos_seq_lens` / `compute_slot_mappings` 的 vLLM patch 闭包逻辑从 `gpu_seq_len_patch.py` 抽离。
+3. 新增 `triattention_v2/input_patch_backend.py`（T3 边界门面）：
+   - 提供 `install_runtime_input_patch()` 与 override 激活/清理接口；
+   - 让 `worker.py` / `input_adapter.py` 不再直接依赖 patch 安装器或状态实现细节。
+4. `gpu_seq_len_patch.py` 进一步降级为：
+   - patch 安装器 + 兼容 wrapper；
+   - 活动状态/低层 patch ops/vLLM patch 闭包均已外移。
+5. 定向验证通过：
+   - `tests_v2/test_input_adapter.py`
+   - `tests_v2/test_runner.py`（相关子集）
+   - `tests_v2/test_hook_impl.py`（相关子集）
+
+### 5.11 T2 继续推进：Hook 运行时口径/门禁抽离（2026-02-22）
+
+1. 新增 `triattention_v2/hook_runtime_context.py`：
+   - 集中承载 hook 运行时长度语义与门禁逻辑：
+   - pre-step effective len 推导
+   - recent_unabsorbed 计算与 active state 写入
+   - effective_len_regression guard
+   - local recompression defer gate
+2. `hook_impl.py` 切换为调用 `build_hook_runtime_context(...)`：
+   - `hook_impl` 不再直接维护上述口径/门禁细节；
+   - 继续向“纯编排器”收敛。
+3. 定向验证通过：
+   - `tests_v2/test_hook_impl.py`（`pre_step/effective_len_guard/defers_recompression/...` 子集）
+   - `tests_v2/test_runner.py`（相关子集）
+
+### 5.12 T2/T3 继续推进：Group 管线与 patch 安装器收口（2026-02-22）
+
+1. `hook_impl.py` 继续瘦身（T2）：
+   - 新增 `triattention_v2/hook_group_pipeline.py`，承接 group 循环编排、错误映射与结果拼装；
+   - 新增 `triattention_v2/kv_group_resolver.py`，承接 KV group tensor 解析；
+   - `hook_impl.py` 继续向“纯编排入口”收敛。
+2. T3 收口（patch backend）：
+   - 新增 `triattention_v2/input_patch_installer.py`，将 vLLM patch 安装状态与闭包挂载从 `gpu_seq_len_patch.py` 迁出；
+   - `triattention_v2/input_patch_backend.py` 改为依赖 installer/backend facade；
+   - `gpu_seq_len_patch.py` 进一步降级为兼容层（installer wrapper + 兼容 helper）。
+3. 定向验证通过：
+   - `tests_v2/test_input_adapter.py`
+   - `tests_v2/test_runner.py`（`strict/compression/batch_signals` 子集）
+   - `tests_v2/test_hook_impl.py`（相关子集）
+
+### 5.13 T2 继续推进：Hook 前置校验抽离（2026-02-22）
+
+1. 新增 `triattention_v2/hook_preflight.py`：
+   - 承接 request/runtime_state 获取；
+   - 承接 KV cache / block_size / block_ids 容器校验与 block_ids 归一化。
+2. `hook_impl.py` 切换为调用 preflight helper：
+   - 进一步减少入口层校验细节；
+   - 当前 `hook_impl.py` 已缩减至约 190 行。
+3. 新增 `tests_v2/test_hook_preflight.py` 并通过；
+4. 定向回归通过：
+   - `tests_v2/test_hook_impl.py`
+   - `tests_v2/test_hook_group_pipeline.py`
+   - `tests_v2/test_hook_runtime_context.py`
+
+### 5.14 T3 深化：`gpu_seq_len_patch.py` 完成“兼容层化”（2026-02-22）
+
+1. 新增 `triattention_v2/input_patch_installer.py` 后，继续将 `gpu_seq_len_patch.py` 内部 wrapper 大幅瘦身：
+   - 大部分 helper 改为直接别名转发到 `effective_overrides.py` / `input_patch_ops.py` / `input_patch_state.py`；
+   - 保留 `install_seq_len_override_patch()` 兼容入口（内部转发到 installer）。
+2. 结果：
+   - `gpu_seq_len_patch.py` 从 ~190 行进一步降至 ~50 行；
+   - patch 安装、状态、vLLM backend 闭包、低层 patch ops 均已外移到独立模块。
+3. 验证：
+   - `tests_v2/test_input_adapter.py`
+   - `tests_v2/test_effective_overrides.py`
+   - `python -m py_compile triattention_v2/gpu_seq_len_patch.py`
+
+### 5.15 T2 继续推进：Runner 压缩执行块抽离（2026-02-22）
+
+1. 新增 `triattention_v2/runner_compression_actions.py`：
+   - 将 `TriAttentionModelRunner._execute_compression_actions()` 的主逻辑迁出；
+   - 集中处理 strict fail-fast、skip/error 事件构造、state_store 更新与 debug 日志。
+2. `runner.py` 改为调用 `execute_runner_compression_actions(...)`：
+   - runner 更聚焦于生命周期/执行编排；
+   - `runner.py` 行数进一步下降至约 180 行。
+3. 定向验证通过：
+   - `tests_v2/test_runner.py`（`compression/strict/batch_signals` 子集）
+   - `python -m py_compile triattention_v2/runner.py triattention_v2/runner_compression_actions.py`
+
+### 5.16 T2 继续推进：Runner 生命周期/信号摄取抽离（2026-02-22）
+
+1. 新增 `triattention_v2/runner_state_updates.py`：
+   - 承接 new/finished/preempt/resume 生命周期状态更新；
+   - 承接 scheduler signal 摄取与 `state_store` 更新（含 trigger 记录与日志）。
+2. `runner.py` 切换为调用 `runner_state_updates` helper：
+   - `TriAttentionModelRunner` 更接近“执行总控 + side-channel 透传”角色；
+   - `runner.py` 行数进一步下降至约 160 行。
+3. 定向验证通过：
+   - `tests_v2/test_runner.py`（`compression/strict/batch_signals/preempt/resume` 子集）
+   - `python -m py_compile triattention_v2/runner.py triattention_v2/runner_state_updates.py`
+
+### 5.17 门禁脚本修复：`run_smoke.py` 支持跳过 fixture 测试（2026-02-22）
+
+1. 修复 `tests_v2/run_smoke.py`：
+   - 对 `test_*` 函数增加签名检查；
+   - 自动跳过需要参数/fixture（例如 `tmp_path`）的 pytest 测试函数，避免直接函数调用时报错。
+2. 修复/对齐 `tests_v2/test_hook_impl.py` 中一处回归门禁测试假设：
+   - 调整 fake compaction 返回值，真正保持物理 block 数不变，从而稳定触发 `effective_len_regression` 场景。
+3. 验证：
+   - `tests_v2/test_hook_impl.py::test_hook_fail_fast_when_effective_len_regresses_to_full_history`
+   - `tests_v2/run_smoke.py`（通过，输出 `smoke passed`）
+
+### 5.18 T2 继续推进：Runner 输出桥接抽离（2026-02-22）
+
+1. 新增 `triattention_v2/runner_output_bridge.py`：
+   - 承接 base runner 的 `execute_model()` 调用（带 effective overrides 上下文）；
+   - 承接 `execute_model` / `sample_tokens` 的 compression events side-channel 挂载逻辑。
+2. `runner.py` 切换为调用 output bridge helper：
+   - `runner.py` 进一步收敛为流程编排器；
+   - 当前 `runner.py` 行数进一步下降至约 140 行。
+3. 新增 `tests_v2/test_runner_output_bridge.py` 并通过；
+4. 定向验证通过：
+   - `tests_v2/test_runner_output_bridge.py`
+   - `tests_v2/test_runner.py`（`attaches_events/compression/strict/batch_signals` 子集）
+
+### 5.19 重构稳定性确认（2026-02-22）
+
+1. 全量 `tests_v2` 回归通过：
+   - `env PYTHONPATH=TriAttention_vLLM conda run -n dc pytest -q TriAttention_vLLM/tests_v2`
+   - 结果：`128 passed`
+2. `tests_v2/run_smoke.py` 再次验证通过：
+   - 结果：`smoke passed: 98 tests`
+3. 运行时依赖面确认（T3 目标检查）：
+   - 当前 `triattention_v2` 运行时主路径已不再直接 import `gpu_seq_len_patch.py`；
+   - `gpu_seq_len_patch.py` 仅保留兼容入口/兼容符号角色（由 `input_patch_backend` / `input_patch_installer` / `input_patch_*` 模块承接真实逻辑）。
+
+### 5.20 新架构验证准备：全量 strict 重跑启动器（2026-02-22）
+
+1. 新增 `weian_development/triattention_v2_launch_full_strict.py`：
+   - 封装 V2 full strict dispatch 长命令；
+   - 自动创建时间戳输出目录（`shards/` + `eval/`）；
+   - 默认注入 `VLLM_PROCESS_NAME_PREFIX=PD-L1_binder`；
+   - 便于在 GPU 空闲后快速启动“新架构代码版本”的全量回归。
+2. 已执行 `--dry-run` 验证，参数与目录结构正确。
+
+### 5.21 方案调整共识固化：Fill-Hole + Thin Runtime Adapter（2026-02-23）
+
+1. 基于对 `docs/interface/PROJECT_GOAL.md`、`docs/interface/OPEN_ISSUES.md`（含已合并的 runtime mapping bug 结论）以及 `triattention_v2` 运行时链路的复盘，确认当前主要矛盾为：
+   - 压缩后有效上下文状态一致性风险（P0 正确性）；
+   - decode 热路径 patch-heavy 逻辑导致 CPU 拖 GPU（P0 性能/复杂度）。
+2. 形成新的执行共识并文档化：
+   - 新增 `docs/interface/V2_SCHEME_ADJUSTMENT_2026-02-23.md`；
+   - 主线目标模式限定为 `per_head` / `per_layer_per_head`（`per_layer` 非目标/非中间态）；
+   - 布局层主路径采用低搬运 fill-hole（slot 级回填空洞，不以物理保序为正确性要求）；
+   - Runtime Adapter 目标形态为“压缩点更新持久状态 + decode 薄适配层（可 monkey patch，但必须 thin）”。
+3. 同步影响：
+   - 更新 `docs/backend/V2_FINAL_ARCHITECTURE.md` 与 `docs/interface/V2_REFACTOR_EXECUTION_PLAN_2026-02-22.md`，移除 `per_layer` 作为主线收敛门槛；
+   - 更新 `docs/backend/DESIGN_DECISIONS.md` 记录模式范围、布局策略、runtime adapter 取舍。

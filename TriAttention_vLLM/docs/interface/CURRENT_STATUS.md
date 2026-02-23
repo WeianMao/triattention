@@ -1,6 +1,6 @@
 # TriAttention_vLLM 当前状态
 
-- 更新时间：2026-02-16
+- 更新时间：2026-02-23
 - 状态：Active
 - 适用范围：vLLM 0.15.x
 
@@ -55,6 +55,36 @@
 24. 已完成“物理回收方案”技术澄清并形成执行文档：`backend/V2_RECLAIM_STRATEGY.md`（半侵入继承层路线）。
 25. 已新增执行日志：`interface/V2_WORKLOG.md`，用于记录本轮实现事实/落点/验收口径，支持多人无聊天上下文接手。
 26. 已落地 experimental block reclaim 原型闭环（hook 产出 reclaim 事件 -> runner 透传 -> scheduler 应用并释放 tail blocks），并补充最小单测覆盖。
+27. 已完成一轮方案级复盘（2026-02-22）：确认当前 V2 主要问题已从“局部实现 bug”扩展为“方案边界偏航”（worker 热路径 patch 过重、hook 职责过载、长度语义事实源分散）。
+28. 已新增方案重置文档与执行计划：
+   - `backend/V2_FINAL_ARCHITECTURE.md`
+   - `interface/V2_REFACTOR_EXECUTION_PLAN_2026-02-22.md`
+29. 已进入重构实施中段（T2/T3 持续推进）：
+   - `hook_impl.py` 已进一步瘦身（group 级选择/布局执行逻辑外移）；
+   - `runner.py` 的 worker reclaim 同步逻辑已抽离到 `triattention_v2/worker_reclaim_sync.py`；
+   - `gpu_seq_len_patch.py` 的低层 patch ops 已迁移至 `triattention_v2/input_patch_ops.py`（patch 正在降级为兼容/路由层）。
+30. T2/T3 继续推进（后续增量）：
+   - `hook_impl.py` 运行时口径/门禁逻辑已迁移到 `triattention_v2/hook_runtime_context.py`；
+   - `hook_impl.py` group 循环编排与结果拼装已迁移到 `triattention_v2/hook_group_pipeline.py`；
+   - `hook_impl.py` 前置校验（request/runtime state、KV cache/block_ids 校验）已迁移到 `triattention_v2/hook_preflight.py`；
+   - `gpu_seq_len_patch.py` 的活动状态、vLLM patch 闭包与 backend facade 已拆分为：
+     - `triattention_v2/input_patch_state.py`
+     - `triattention_v2/input_patch_vllm_backend.py`
+     - `triattention_v2/input_patch_backend.py`
+   - `gpu_seq_len_patch.py` 的 patch 安装器已迁移到 `triattention_v2/input_patch_installer.py`；
+   - `gpu_seq_len_patch.py` 已完成兼容层化（大部分 helper 变为别名转发到 backend/ops 模块）；
+   - `runner.py` 的压缩执行块已迁移到 `triattention_v2/runner_compression_actions.py`；
+   - `runner.py` 的生命周期/信号摄取逻辑已迁移到 `triattention_v2/runner_state_updates.py`；
+   - `runner.py` 的 base execute + output side-channel 挂载逻辑已迁移到 `triattention_v2/runner_output_bridge.py`；
+   - 当前 `hook_impl.py` 已缩减至 ~180 行，`runner.py` 已缩减至 ~140 行，`gpu_seq_len_patch.py` 已缩减至 ~50 行。
+31. 重构稳定性复验（2026-02-22）：
+   - `tests_v2` 全量通过（`128 passed`）；
+   - `tests_v2/run_smoke.py` 通过（`smoke passed: 98 tests`）；
+   - 运行时主路径已不再直接依赖 `gpu_seq_len_patch.py`（其已退化为兼容入口层）。
+32. 方案调整共识（2026-02-23）已文档化：
+   - 新增 `interface/V2_SCHEME_ADJUSTMENT_2026-02-23.md`；
+   - 明确主线目标模式仅 `per_head` / `per_layer_per_head`（`per_layer` 非目标/非中间态）；
+   - 明确压缩主线为低搬运 fill-hole，运行时走“压缩点更新持久状态 + decode 薄适配”。
 
 ---
 
@@ -64,8 +94,10 @@
 
 1. V2 已实现实验性 KV gather/score/select/in-place compaction 闭环（hook 路径）；但当前仍是原型语义，尚未实现“物理页回收/块表重排”级别的生产闭环。
 2. `protect_prefill` 与 `include_prefill_in_budget` 语义已落地，但默认策略和 KV usage 触发阈值仍需统一拍板（见 `PENDING_DECISIONS.md`）。
-3. Phase 1 有本地 smoke 回归脚本（`tests_v2/run_smoke.py`），但尚未接入 CI/统一门禁流程。
+3. Phase 1 有本地 smoke 回归脚本（`tests_v2/run_smoke.py`），已支持自动跳过需要 pytest fixture 的测试函数并恢复可用，但尚未接入 CI/统一门禁流程。
 4. 物理回收能力仍在开发中：已确定采用“继承层半侵入”实现，不直接修改上游 vLLM 源码文件。
+5. 当前实现路径存在方案级复杂度漂移，需先按重构计划拆分职责并收敛热路径，再继续在原型上叠加功能修复。
+6. 当前阶段重点已从纯 T2/T3 模块拆分推进到“Runtime Adapter 简化 + 状态一致性验证”收敛阶段（见 `interface/V2_SCHEME_ADJUSTMENT_2026-02-23.md`）。
 
 ---
 
