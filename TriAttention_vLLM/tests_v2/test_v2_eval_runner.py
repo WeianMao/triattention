@@ -43,6 +43,28 @@ def _fake_vllm_module():
             sys.modules["vllm"] = old
 
 
+@contextmanager
+def _fake_integration_monkeypatch():
+    captured: dict[str, object] = {}
+
+    fake = ModuleType("triattention_v2.integration_monkeypatch")
+
+    def _install_vllm_integration_monkeypatches(*, patch_scheduler: bool, patch_worker: bool):
+        captured["patch_scheduler"] = patch_scheduler
+        captured["patch_worker"] = patch_worker
+
+    fake.install_vllm_integration_monkeypatches = _install_vllm_integration_monkeypatches
+    old = sys.modules.get("triattention_v2.integration_monkeypatch")
+    sys.modules["triattention_v2.integration_monkeypatch"] = fake
+    try:
+        yield captured
+    finally:
+        if old is None:
+            sys.modules.pop("triattention_v2.integration_monkeypatch", None)
+        else:
+            sys.modules["triattention_v2.integration_monkeypatch"] = old
+
+
 def _args(disable_compression: bool) -> SimpleNamespace:
     return SimpleNamespace(
         model_path="/tmp/model",
@@ -78,6 +100,9 @@ def _args(disable_compression: bool) -> SimpleNamespace:
         score_chunk_max_tokens=4096,
         log_decisions=True,
         enforce_eager=False,
+        force_v2_integration=False,
+        force_v2_worker=False,
+        force_v2_scheduler=False,
     )
 
 
@@ -99,12 +124,14 @@ def test_apply_v2_env():
         assert os.environ["TRIATTN_V2_PER_HEAD_SELECTION_SEMANTICS"] == "legacy_layer_local"
 
 
-def test_setup_vllm_engine_sets_worker_scheduler_for_v2():
+def test_setup_vllm_engine_installs_monkeypatch_for_v2():
     args = _args(disable_compression=False)
-    with _patched_environ(), _fake_vllm_module() as captured:
+    with _patched_environ(), _fake_vllm_module() as captured, _fake_integration_monkeypatch() as mp:
         setup_vllm_engine(args)
-        assert captured["worker_cls"] == "triattention_v2.worker.TriAttentionWorker"
-        assert captured["scheduler_cls"] == "triattention_v2.scheduler.TriAttentionScheduler"
+        assert "worker_cls" not in captured
+        assert "scheduler_cls" not in captured
+        assert mp["patch_worker"] is True
+        assert mp["patch_scheduler"] is True
         assert captured["enforce_eager"] is False
         assert os.environ["TRIATTN_V2_KV_BUDGET"] == "2048"
 
@@ -125,6 +152,16 @@ def test_setup_vllm_engine_respects_enforce_eager_flag():
     with _patched_environ(), _fake_vllm_module() as captured:
         setup_vllm_engine(args)
         assert captured["enforce_eager"] is False
+
+
+def test_setup_vllm_engine_force_v2_scheduler_only_installs_scheduler_patch():
+    args = _args(disable_compression=True)
+    args.force_v2_scheduler = True
+    with _patched_environ(), _fake_vllm_module() as captured, _fake_integration_monkeypatch() as mp:
+        setup_vllm_engine(args)
+        assert captured["enforce_eager"] is False
+        assert mp["patch_scheduler"] is True
+        assert mp["patch_worker"] is False
 
 
 def test_setup_vllm_engine_strict_requires_compaction_enabled():

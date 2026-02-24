@@ -487,7 +487,10 @@ def setup_vllm_engine(args: argparse.Namespace):
         enforce_eager=bool(args.enforce_eager),
     )
 
-    force_any_v2 = bool(args.force_v2_integration or args.force_v2_worker or args.force_v2_scheduler)
+    force_v2_integration = bool(getattr(args, "force_v2_integration", False))
+    force_v2_worker = bool(getattr(args, "force_v2_worker", False))
+    force_v2_scheduler = bool(getattr(args, "force_v2_scheduler", False))
+    force_any_v2 = bool(force_v2_integration or force_v2_worker or force_v2_scheduler)
     use_v2_integration = (not args.disable_compression) or force_any_v2
     if use_v2_integration:
         if not args.enable_experimental_kv_compaction and not args.disable_compression:
@@ -510,8 +513,8 @@ def setup_vllm_engine(args: argparse.Namespace):
                 "require_physical_reclaim=true"
             )
         _apply_v2_env(args)
-        want_v2_worker = (not args.disable_compression) or bool(args.force_v2_integration) or bool(args.force_v2_worker)
-        want_v2_scheduler = (not args.disable_compression) or bool(args.force_v2_integration) or bool(args.force_v2_scheduler)
+        want_v2_worker = (not args.disable_compression) or force_v2_integration or force_v2_worker
+        want_v2_scheduler = (not args.disable_compression) or force_v2_integration or force_v2_scheduler
         # Performance-first integration path: keep native vLLM class identities
         # and patch only the minimal methods in-place.
         from triattention_v2.integration_monkeypatch import install_vllm_integration_monkeypatches
@@ -531,9 +534,9 @@ def setup_vllm_engine(args: argparse.Namespace):
             f"fail_on_effective_len_regression={args.fail_on_effective_len_regression}, "
             f"enforce_eager={args.enforce_eager}, "
             f"disable_compression={args.disable_compression}, "
-            f"force_v2_integration={args.force_v2_integration}, "
-            f"force_v2_worker={args.force_v2_worker}, "
-            f"force_v2_scheduler={args.force_v2_scheduler}, "
+            f"force_v2_integration={force_v2_integration}, "
+            f"force_v2_worker={force_v2_worker}, "
+            f"force_v2_scheduler={force_v2_scheduler}, "
             f"inject_worker={want_v2_worker}, "
             f"inject_scheduler={want_v2_scheduler}, "
             "integration_mode=monkeypatch"
