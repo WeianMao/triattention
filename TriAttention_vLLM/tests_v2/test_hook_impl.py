@@ -4,6 +4,7 @@ import tempfile
 import torch
 
 from triattention_v2.config import TriAttentionV2Config
+from triattention_v2.kv_compaction import register_kv_layout_axis_hint
 from triattention_v2.hook_impl import (
     install_runner_compression_hook,
     make_runner_compression_hook,
@@ -1953,6 +1954,8 @@ def test_selector_hf_global_per_head_paged_matches_dense_with_normalize():
             o = token % block_size
             value = float(token) + offset
             kv[0, b, o, :, 0] = value  # key dim0 carries token id
+        if num_blocks == 2:
+            register_kv_layout_axis_hint(kv, 0)
         return kv
 
     old_compressor = compressor_module.TriAttentionCompressor
@@ -2092,6 +2095,8 @@ def test_selector_hf_per_layer_paged_matches_dense_with_normalize():
             b = token // block_size
             o = token % block_size
             kv[0, b, o, :, 0] = float(token)
+        if num_blocks == 2:
+            register_kv_layout_axis_hint(kv, 0)
         return kv
 
     old_compressor = compressor_module.TriAttentionCompressor

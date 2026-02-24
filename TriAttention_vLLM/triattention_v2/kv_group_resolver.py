@@ -33,10 +33,31 @@ def _infer_kv_axis_from_group_backend(base_runner: Any, gid: int) -> int | None:
         return None
 
     backend_cls = backend if isinstance(backend, type) else backend.__class__
+    get_kv_cache_shape = getattr(backend_cls, "get_kv_cache_shape", None)
+    if callable(get_kv_cache_shape):
+        try:
+            # Probe with num_blocks=3 to avoid (2, 2, ...) ambiguity.
+            shape = tuple(
+                int(x)
+                for x in get_kv_cache_shape(
+                    3,   # num_blocks
+                    16,  # block_size (vLLM backends require multiple of 16)
+                    1,   # num_kv_heads
+                    1,   # head_size
+                )
+            )
+            if len(shape) >= 2:
+                dim0_is_kv = shape[0] == 2
+                dim1_is_kv = shape[1] == 2
+                if dim0_is_kv ^ dim1_is_kv:
+                    return 0 if dim0_is_kv else 1
+        except Exception:
+            pass
+
+    # Conservative fallback for fake backends in tests or unknown vLLM variants.
     module_name = str(getattr(backend_cls, "__module__", ""))
     cls_name = str(getattr(backend_cls, "__name__", ""))
     ident = f"{module_name}.{cls_name}".lower()
-
     if "flash_attn" in ident:
         return 0
     if "triton_attn" in ident:
