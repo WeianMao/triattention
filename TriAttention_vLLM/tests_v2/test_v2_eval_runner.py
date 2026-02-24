@@ -83,10 +83,13 @@ def _args(disable_compression: bool) -> SimpleNamespace:
         window_size=128,
         sparse_stats_path=None,
         sparse_score_aggregation="mean",
-        pruning_mode="per_layer",
+        pruning_mode="per_head",
         sparse_normalize_scores=True,
         include_prefill_in_budget=True,
         per_head_selection_semantics="legacy_layer_local",
+        layer_perhead_aggregation="max",
+        per_layer_aggregation="max",
+        allow_per_layer_mode=False,
         disable_mlr=False,
         disable_trig=False,
         disable_top_n_high_freq=0,
@@ -120,8 +123,11 @@ def test_apply_v2_env():
         assert os.environ["TRIATTN_V2_FAIL_ON_EFFECTIVE_LEN_REGRESSION"] == "true"
         assert os.environ["TRIATTN_V2_EFFECTIVE_LEN_REGRESSION_RATIO"] == "0.9"
         assert os.environ["TRIATTN_V2_EFFECTIVE_LEN_GUARD_DIVIDE_MULTIPLES"] == "2"
-        assert os.environ["TRIATTN_V2_PRUNING_MODE"] == "per_layer"
+        assert os.environ["TRIATTN_V2_PRUNING_MODE"] == "per_head"
         assert os.environ["TRIATTN_V2_PER_HEAD_SELECTION_SEMANTICS"] == "legacy_layer_local"
+        assert os.environ["TRIATTN_V2_LAYER_PERHEAD_AGGREGATION"] == "max"
+        assert os.environ["TRIATTN_V2_PER_LAYER_AGGREGATION"] == "max"
+        assert os.environ["TRIATTN_V2_ALLOW_PER_LAYER_MODE"] == "false"
 
 
 def test_setup_vllm_engine_installs_monkeypatch_for_v2():

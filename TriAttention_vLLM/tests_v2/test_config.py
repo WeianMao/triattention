@@ -41,7 +41,10 @@ def test_config_from_env():
         "TRIATTN_V2_EFFECTIVE_LEN_GUARD_DIVIDE_MULTIPLES": "3",
         "TRIATTN_V2_LOG_DECISIONS": "false",
         "TRIATTN_V2_PRUNING_MODE": "per_layer",
+        "TRIATTN_V2_ALLOW_PER_LAYER_MODE": "true",
         "TRIATTN_V2_PER_HEAD_SELECTION_SEMANTICS": "hf_aligned_global_per_head",
+        "TRIATTN_V2_LAYER_PERHEAD_AGGREGATION": "mean",
+        "TRIATTN_V2_PER_LAYER_AGGREGATION": "pure_mean",
         "TRIATTN_V2_WINDOW_SIZE": "96",
         "TRIATTN_V2_SPARSE_STATS_PATH": "/tmp/fake_stats.pt",
     }
@@ -61,9 +64,31 @@ def test_config_from_env():
     assert cfg.effective_len_guard_divide_multiples == 3
     assert cfg.log_decisions is False
     assert cfg.pruning_mode == "per_layer"
+    assert cfg.allow_per_layer_mode is True
     assert cfg.per_head_selection_semantics == "hf_aligned_global_per_head"
+    assert cfg.layer_perhead_aggregation == "mean"
+    assert cfg.per_layer_aggregation == "pure_mean"
     assert cfg.window_size == 96
     assert cfg.sparse_stats_path == Path("/tmp/fake_stats.pt")
+
+
+def test_per_layer_mode_requires_explicit_opt_in():
+    cfg = TriAttentionV2Config(pruning_mode="per_layer")
+    try:
+        cfg.validate()
+    except ValueError as exc:
+        assert "disabled by default" in str(exc)
+        assert "ALLOW_PER_LAYER_MODE" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for per_layer without opt-in")
+
+
+def test_per_layer_mode_is_allowed_with_explicit_opt_in():
+    cfg = TriAttentionV2Config(
+        pruning_mode="per_layer",
+        allow_per_layer_mode=True,
+    )
+    cfg.validate()
 
 
 def test_invalid_hysteresis_raises():

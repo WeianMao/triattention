@@ -45,12 +45,15 @@ class TriAttentionV2Config:
 
     # Optional SpeckV-style scoring path (used by V2 hook when enabled).
     sparse_stats_path: Path | None = None
-    pruning_mode: str = "per_layer"
+    pruning_mode: str = "per_head"
     sparse_score_aggregation: str = "mean"
     sparse_normalize_scores: bool = True
     window_size: int = 128
     include_prefill_in_budget: bool = True
     per_head_selection_semantics: str = "hf_aligned_global_per_head"
+    layer_perhead_aggregation: str = "max"
+    per_layer_aggregation: str = "max"
+    allow_per_layer_mode: bool = False
     disable_mlr: bool = False
     disable_trig: bool = False
     disable_top_n_high_freq: int = 0
@@ -145,6 +148,23 @@ class TriAttentionV2Config:
                 )
                 or cls.per_head_selection_semantics
             ),
+            layer_perhead_aggregation=(
+                maybe_str(
+                    "LAYER_PERHEAD_AGGREGATION",
+                    cls.layer_perhead_aggregation,
+                )
+                or cls.layer_perhead_aggregation
+            ),
+            per_layer_aggregation=(
+                maybe_str(
+                    "PER_LAYER_AGGREGATION",
+                    cls.per_layer_aggregation,
+                )
+                or cls.per_layer_aggregation
+            ),
+            allow_per_layer_mode=maybe_bool(
+                "ALLOW_PER_LAYER_MODE", cls.allow_per_layer_mode
+            ),
             disable_mlr=maybe_bool("DISABLE_MLR", cls.disable_mlr),
             disable_trig=maybe_bool("DISABLE_TRIG", cls.disable_trig),
             disable_top_n_high_freq=maybe_int(
@@ -181,6 +201,12 @@ class TriAttentionV2Config:
                 "pruning_mode must be one of {'per_layer','per_head','per_layer_per_head'}, "
                 f"got {self.pruning_mode!r}"
             )
+        if self.pruning_mode == "per_layer" and not self.allow_per_layer_mode:
+            raise ValueError(
+                "pruning_mode='per_layer' is disabled by default in V2 to prevent "
+                "accidental use. Set allow_per_layer_mode=True "
+                "(env TRIATTN_V2_ALLOW_PER_LAYER_MODE=1) for explicit opt-in."
+            )
         if self.sparse_score_aggregation not in {"mean", "max"}:
             raise ValueError(
                 "sparse_score_aggregation must be 'mean' or 'max', "
@@ -194,6 +220,16 @@ class TriAttentionV2Config:
                 "per_head_selection_semantics must be one of "
                 "{'legacy_layer_local','hf_aligned_global_per_head'}, "
                 f"got {self.per_head_selection_semantics!r}"
+            )
+        if self.layer_perhead_aggregation not in {"max", "mean"}:
+            raise ValueError(
+                "layer_perhead_aggregation must be 'max' or 'mean', "
+                f"got {self.layer_perhead_aggregation!r}"
+            )
+        if self.per_layer_aggregation not in {"max", "mean", "pure_mean"}:
+            raise ValueError(
+                "per_layer_aggregation must be one of {'max','mean','pure_mean'}, "
+                f"got {self.per_layer_aggregation!r}"
             )
         if self.window_size < 0:
             raise ValueError(f"window_size must be >= 0, got {self.window_size}")

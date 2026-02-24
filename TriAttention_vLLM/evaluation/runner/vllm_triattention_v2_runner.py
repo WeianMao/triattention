@@ -296,7 +296,7 @@ def parse_arguments() -> argparse.Namespace:
         "--pruning-mode",
         dest="pruning_mode",
         type=str,
-        default="per_layer",
+        default="per_head",
         choices=["per_head", "per_layer", "per_layer_per_head"],
     )
     parser.add_argument(
@@ -317,6 +317,27 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
         default="hf_aligned_global_per_head",
         choices=["legacy_layer_local", "hf_aligned_global_per_head"],
+    )
+    parser.add_argument(
+        "--layer-perhead-aggregation",
+        dest="layer_perhead_aggregation",
+        type=str,
+        default="max",
+        choices=["max", "mean"],
+    )
+    parser.add_argument(
+        "--per-layer-aggregation",
+        dest="per_layer_aggregation",
+        type=str,
+        default="max",
+        choices=["max", "mean", "pure_mean"],
+    )
+    parser.add_argument(
+        "--allow-per-layer-mode",
+        dest="allow_per_layer_mode",
+        type=str2bool,
+        default=False,
+        help="Explicitly allow pruning_mode=per_layer (disabled by default to avoid accidental use).",
     )
     parser.add_argument("--disable-mlr", dest="disable_mlr", type=str2bool, default=False)
     parser.add_argument("--disable-trig", dest="disable_trig", type=str2bool, default=False)
@@ -453,6 +474,11 @@ def _apply_v2_env(args: argparse.Namespace) -> None:
     os.environ["TRIATTN_V2_PER_HEAD_SELECTION_SEMANTICS"] = str(
         args.per_head_selection_semantics
     )
+    os.environ["TRIATTN_V2_LAYER_PERHEAD_AGGREGATION"] = str(
+        args.layer_perhead_aggregation
+    )
+    os.environ["TRIATTN_V2_PER_LAYER_AGGREGATION"] = str(args.per_layer_aggregation)
+    os.environ["TRIATTN_V2_ALLOW_PER_LAYER_MODE"] = str(args.allow_per_layer_mode).lower()
     os.environ["TRIATTN_V2_DISABLE_MLR"] = str(args.disable_mlr).lower()
     os.environ["TRIATTN_V2_DISABLE_TRIG"] = str(args.disable_trig).lower()
     os.environ["TRIATTN_V2_DISABLE_TOP_N_HIGH_FREQ"] = str(args.disable_top_n_high_freq)

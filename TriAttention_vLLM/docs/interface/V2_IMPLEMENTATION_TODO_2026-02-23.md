@@ -21,6 +21,10 @@
 - [ ] 必要时对 runtime patch / adapter 路径做定向重构（以正确性与 decode 性能为准，不被历史结构绑定）
 - [ ] 项目阶段性完成后做 HF 对齐复核（不要预设“地址错位”就是根因；按现象→证据重新验证）
 - [ ] 在真实 `vllm.v1` 运行路径做端到端复核（当前仅完成单测/冒烟门禁，尚未完成真实 runtime/HF 对齐验收）
+- [x] 将 V2 默认 `pruning_mode` 收敛到 `per_head`，并为 `per_layer` 增加显式 opt-in 门禁（未批准使用时直接报错）
+- [x] 修复 `per_layer_per_head` 在 GQA 下“先缩并统计再打分”的潜在不等价路径（改为先打分再按 KV-head 聚合）
+- [x] 预留 `layer_perhead_aggregation/per_layer_aggregation` 配置接口，并同步 runner CLI/env 入口
+- [ ] 以 `run_speckv_aime24_qwen_norm_aligned_perhead.sh` 为唯一参照完成 `per_head` 端到端对齐验收（P0）
 
 ## 工作记录
 
@@ -162,6 +166,29 @@
   - 定点 pytest 通过：`test_input_adapter.py`, `test_runner_output_bridge.py`, `test_runner.py`, `test_effective_overrides.py`
   - `run_lite_gate.py` 再次通过（含关键 pytest + `run_smoke.py`）
 
+### 2026-02-24 / 模式范围收敛与 `per_layer_per_head` 语义修复（进行中）
+
+- 按用户最新约束收敛目标：
+  - `per_head` 是当前唯一主目标模式；
+  - `per_layer_per_head` 需要支持并修复高风险不等价，但暂不立即跑实验；
+  - `per_layer` 保留实现能力，但默认禁止误用（未经批准应报错）。
+- 已完成代码修改：
+  - `TriAttentionV2Config` 默认 `pruning_mode` 改为 `per_head`
+  - 新增 `allow_per_layer_mode`（默认 `False`）及运行时 selector 门禁（未显式放行时 `per_layer` 直接报错）
+  - 新增 `layer_perhead_aggregation` / `per_layer_aggregation` 配置接口（默认 `max`）
+  - 修复 `selector_hf` 在 `per_layer_per_head` + GQA (`stats_heads != runtime_heads`) 时的聚合路径：
+    - 不再先缩并统计再打分；
+    - 改为先按 attention-head 打分，再按 KV-head 分组聚合（默认 `max`，并支持接口 `mean`）
+  - runner CLI/env 已同步支持上述新接口，方便后续实验直接配置
+- 测试与验证说明（环境限制）：
+  - 本机当前对 `trivllm` 环境/pytest 的文件读取出现 `rpc_wait_bit_killable`（NFS I/O 阻塞），导致本轮新增测试无法及时跑完；
+  - 已完成 `compileall` 语法检查（本轮修改文件）；
+  - 待 I/O 恢复后优先回补：
+    - `test_config.py`
+    - `test_v2_eval_runner.py`
+    - `test_hook_impl.py`（新增 `per_layer` 门禁与 `per_layer_per_head` GQA 聚合用例）
+
 ## 备注
 
 - 若后续发现本轮范围过大，应优先完成“状态语义收敛 + 测试补齐”，其余优化留到下一轮。
+- 2026-02-24 起，HF 对齐的系统性核查改由独立清单维护：`TriAttention_vLLM/docs/interface/V2_HF_ALIGNMENT_AUDIT_CHECKLIST_2026-02-24.md`（按项记录已确认/待确认状态，避免遗漏）。

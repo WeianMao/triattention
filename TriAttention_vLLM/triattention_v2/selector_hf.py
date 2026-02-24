@@ -61,6 +61,13 @@ def build_speckv_selector(
                 f"{TRITON_SCORING_REQUIRED_MARKER}:unsupported_pruning_mode:{requested_pruning_mode}"
             )
         return None, None, f"unsupported_pruning_mode:{requested_pruning_mode}"
+    if requested_pruning_mode == "per_layer" and not bool(
+        getattr(config, "allow_per_layer_mode", False)
+    ):
+        raise RuntimeError(
+            f"{TRITON_SCORING_REQUIRED_MARKER}:per_layer_mode_disabled:"
+            "set allow_per_layer_mode=True for explicit opt-in"
+        )
     # Keep per-head score tensor and decide aggregation in selector;
     # this matches HF path better than forcing mean aggregation inside scoring.
     pruning_mode = "per_head"
@@ -227,9 +234,14 @@ def build_speckv_selector(
         layer_freq_scale_sq = compressor.freq_scale_sq[resolved_layer_idx]
         stats_heads = int(layer_freq_scale_sq.shape[0])
         use_hf_group_max = (
-            requested_pruning_mode == "per_head"
-            and per_head_semantics == "hf_aligned_global_per_head"
-            and stats_heads != runtime_heads
+            stats_heads != runtime_heads
+            and (
+                (
+                    requested_pruning_mode == "per_head"
+                    and per_head_semantics == "hf_aligned_global_per_head"
+                )
+                or requested_pruning_mode == "per_layer_per_head"
+            )
         )
         score_head_stats = layer_head_stats
         score_freq_scale_sq = layer_freq_scale_sq
@@ -246,6 +258,28 @@ def build_speckv_selector(
                 target_heads=runtime_heads,
             )
         return score_head_stats, score_freq_scale_sq, use_hf_group_max, group_size
+
+    def _reduce_grouped_head_scores(
+        *,
+        scores: torch.Tensor,
+        runtime_heads: int,
+        group_size: int,
+        aggregate_mode: str,
+    ) -> torch.Tensor:
+        grouped = scores.view(
+            scores.shape[0],
+            runtime_heads,
+            group_size,
+            scores.shape[-1],
+        )
+        if aggregate_mode == "mean":
+            return grouped.mean(dim=2)
+        return grouped.max(dim=2).values
+
+    def _layer_group_aggregation_mode() -> str:
+        if requested_pruning_mode == "per_layer_per_head":
+            return config.layer_perhead_aggregation
+        return "max"
 
     def _compute_layer_scores_raw(
         *,
@@ -308,12 +342,12 @@ def build_speckv_selector(
         if protect_prefill and prefill_len > 0:
             scores[..., :prefill_len] = float("inf")
         if use_hf_group_max:
-            scores = scores.view(
-                scores.shape[0],
-                runtime_heads,
-                group_size,
-                scores.shape[-1],
-            ).max(dim=2).values
+            scores = _reduce_grouped_head_scores(
+                scores=scores,
+                runtime_heads=runtime_heads,
+                group_size=group_size,
+                aggregate_mode=_layer_group_aggregation_mode(),
+            )
         return scores
 
     def _compute_layer_scores_paged(
@@ -546,12 +580,12 @@ def build_speckv_selector(
                     chunk_scores - mean.view(1, -1, 1)
                 ) / std_safe.view(1, -1, 1)
             if use_hf_group_max:
-                chunk_scores = chunk_scores.view(
-                    chunk_scores.shape[0],
-                    runtime_heads,
-                    group_size,
-                    chunk_scores.shape[-1],
-                ).max(dim=2).values
+                chunk_scores = _reduce_grouped_head_scores(
+                    scores=chunk_scores,
+                    runtime_heads=runtime_heads,
+                    group_size=group_size,
+                    aggregate_mode=_layer_group_aggregation_mode(),
+                )
             chunk_scores = _apply_token_guards(
                 scores=chunk_scores,
                 start_token=start,
@@ -1054,12 +1088,12 @@ def build_speckv_selector(
                             float("inf"),
                         )
                     if entry["use_hf_group_max"]:
-                        chunk_scores = chunk_scores.view(
-                            chunk_scores.shape[0],
-                            entry["runtime_heads"],
-                            entry["group_size"],
-                            chunk_scores.shape[-1],
-                        ).max(dim=2).values
+                        chunk_scores = _reduce_grouped_head_scores(
+                            scores=chunk_scores,
+                            runtime_heads=entry["runtime_heads"],
+                            group_size=entry["group_size"],
+                            aggregate_mode="max",
+                        )
                     if chunk_scores.ndim != 3:
                         raise RuntimeError(
                             f"unexpected_score_rank_for_per_head:{chunk_scores.ndim}"
