@@ -48,6 +48,7 @@ class TriAttentionScheduler(Scheduler):
         self._planner = CompressionPlanner(self.triattention_config)
         self._effective_len_tracker = EffectiveCacheLenTracker()
         self._prefill_lens: dict[str, int] = {}
+        self._length_threshold_cache: dict[str, int] = {}
         self._triattention_step = 0
 
         logger.info(
@@ -68,6 +69,12 @@ class TriAttentionScheduler(Scheduler):
             return 0
         return request.num_prompt_tokens
 
+    def _compute_length_threshold(self, prefill_len: int) -> int:
+        threshold = self.triattention_config.kv_budget + self.triattention_config.divide_length
+        if self.triattention_config.protect_prefill and not self.triattention_config.include_prefill_in_budget:
+            threshold += max(0, int(prefill_len))
+        return threshold
+
     def _sync_prefill_lens(self, scheduler_output: SchedulerOutput) -> None:
         for new_req in scheduler_output.scheduled_new_reqs:
             # Treat newly scheduled request as lifecycle reset for tracker state.
@@ -82,46 +89,99 @@ class TriAttentionScheduler(Scheduler):
             else:
                 prefill_len = 0
             self._prefill_lens[new_req.req_id] = prefill_len
+            self._length_threshold_cache[new_req.req_id] = self._compute_length_threshold(prefill_len)
 
         for req_id in scheduler_output.finished_req_ids:
             self._prefill_lens.pop(req_id, None)
+            self._length_threshold_cache.pop(req_id, None)
             self._effective_len_tracker.remove_request(req_id)
 
         resumed_req_ids = scheduler_output.scheduled_cached_reqs.resumed_req_ids
         for req_id in resumed_req_ids:
-            self._prefill_lens.setdefault(req_id, self._resolve_prefill_len(req_id))
+            if req_id not in self._prefill_lens:
+                prefill_len = self._resolve_prefill_len(req_id)
+                self._prefill_lens[req_id] = prefill_len
+                self._length_threshold_cache[req_id] = self._compute_length_threshold(prefill_len)
+
+    def _has_active_effective_len_overrides(self) -> bool:
+        checker = getattr(self._effective_len_tracker, "has_any_effective_len_overrides", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                return False
+        return False
 
     def _build_signals(self, scheduler_output: SchedulerOutput) -> dict[str, CompressionSignal]:
-        kv_usage = (
-            self.kv_cache_manager.usage
-            if self.triattention_config.enable_kv_usage_trigger
-            else None
-        )
+        kv_usage_enabled = bool(self.triattention_config.enable_kv_usage_trigger)
+        kv_usage = self.kv_cache_manager.usage if kv_usage_enabled else None
+        compression_disabled = bool(self.triattention_config.disable_compression)
         signals: dict[str, CompressionSignal] = {}
         for _raw_key, req_id, scheduled_tokens in iter_scheduled_token_items(scheduler_output):
             request = self.requests.get(req_id)
             if request is None:
                 continue
-            effective_base_len = self._effective_len_tracker.observe_num_computed(
-                req_id=req_id,
-                num_computed_tokens=request.num_computed_tokens,
-            )
+            has_override = self._effective_len_tracker.has_effective_len_override(req_id)
+            if has_override:
+                effective_base_len = self._effective_len_tracker.observe_num_computed(
+                    req_id=req_id,
+                    num_computed_tokens=request.num_computed_tokens,
+                )
+            else:
+                # Common pre-compression path: effective cache length is exactly
+                # num_computed_tokens, so avoid tracker writes in the decode hot path.
+                effective_base_len = request.num_computed_tokens
             estimated_cache_len = effective_base_len + scheduled_tokens
+
+            if not has_override:
+                if compression_disabled and not kv_usage_enabled:
+                    continue
+                if not kv_usage_enabled and not compression_disabled:
+                    threshold = self._length_threshold_cache.get(req_id)
+                    if threshold is None:
+                        prefill_len = self._resolve_prefill_len(req_id)
+                        self._prefill_lens[req_id] = prefill_len
+                        threshold = self._compute_length_threshold(prefill_len)
+                        self._length_threshold_cache[req_id] = threshold
+                    if estimated_cache_len < threshold:
+                        continue
+
+            prefill_len = self._prefill_lens.get(req_id)
+            if prefill_len is None:
+                prefill_len = self._resolve_prefill_len(req_id)
+                self._prefill_lens[req_id] = prefill_len
+                self._length_threshold_cache[req_id] = self._compute_length_threshold(prefill_len)
             signal = self._planner.build_signal(
                 req_id=req_id,
                 estimated_cache_len=estimated_cache_len,
-                prefill_len=self._resolve_prefill_len(req_id),
+                prefill_len=prefill_len,
                 step=self._triattention_step,
                 kv_usage=kv_usage,
             )
-            signals[req_id] = signal
+            # Keep scheduler->runner side-channel sparse to reduce per-step IPC
+            # metadata overhead in the common no-compression decode path.
+            #
+            # Runner only needs full signal payload for:
+            # 1) compression trigger execution in this step; or
+            # 2) requests that have already been compressed and still need
+            #    effective-length updates for runtime input overrides.
+            if signal.should_compress or has_override:
+                signals[req_id] = signal
         return signals
 
     def schedule(self) -> SchedulerOutput:
         scheduler_output = super().schedule()
         self._triattention_step += 1
         self._sync_prefill_lens(scheduler_output)
-        triattention_signals = self._build_signals(scheduler_output)
+        if (
+            self.triattention_config.disable_compression
+            and not self.triattention_config.enable_kv_usage_trigger
+            and not self._has_active_effective_len_overrides()
+        ):
+            # FullKV / no-compression path: avoid per-step planner work entirely.
+            triattention_signals = {}
+        else:
+            triattention_signals = self._build_signals(scheduler_output)
 
         # Attach v2 side-channel metadata to scheduler output.
         setattr(scheduler_output, "triattention_step", self._triattention_step)

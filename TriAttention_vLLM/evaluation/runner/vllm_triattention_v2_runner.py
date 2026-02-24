@@ -315,7 +315,7 @@ def parse_arguments() -> argparse.Namespace:
         "--per-head-selection-semantics",
         dest="per_head_selection_semantics",
         type=str,
-        default="legacy_layer_local",
+        default="hf_aligned_global_per_head",
         choices=["legacy_layer_local", "hf_aligned_global_per_head"],
     )
     parser.add_argument("--disable-mlr", dest="disable_mlr", type=str2bool, default=False)
@@ -372,14 +372,14 @@ def parse_arguments() -> argparse.Namespace:
         "--score-chunk-max-tokens",
         dest="score_chunk_max_tokens",
         type=int,
-        default=1024,
+        default=4096,
     )
     parser.add_argument("--log-decisions", dest="log_decisions", type=str2bool, default=True)
     parser.add_argument(
         "--enforce-eager",
         dest="enforce_eager",
         type=str2bool,
-        default=True,
+        default=False,
     )
 
     # vLLM-specific parameters
@@ -387,6 +387,27 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--gpu-memory-utilization", dest="gpu_memory_utilization", type=float, default=0.9)
     parser.add_argument("--disable-compression", dest="disable_compression", type=str2bool, default=False,
                         help="Run without V2 scheduler/worker injection (fullkv baseline).")
+    parser.add_argument(
+        "--force-v2-integration",
+        dest="force_v2_integration",
+        type=str2bool,
+        default=False,
+        help="Use V2 worker/scheduler even when compression is disabled (diagnostic).",
+    )
+    parser.add_argument(
+        "--force-v2-worker",
+        dest="force_v2_worker",
+        type=str2bool,
+        default=False,
+        help="Use only V2 worker injection as a diagnostic (works with disable_compression=true).",
+    )
+    parser.add_argument(
+        "--force-v2-scheduler",
+        dest="force_v2_scheduler",
+        type=str2bool,
+        default=False,
+        help="Use only V2 scheduler injection as a diagnostic (works with disable_compression=true).",
+    )
 
     return parser.parse_args()
 
@@ -395,6 +416,7 @@ def _apply_v2_env(args: argparse.Namespace) -> None:
     os.environ["TRIATTN_V2_KV_BUDGET"] = str(args.kv_budget)
     os.environ["TRIATTN_V2_DIVIDE_LENGTH"] = str(args.divide_length)
     os.environ["TRIATTN_V2_PROTECT_PREFILL"] = str(args.protect_prefill).lower()
+    os.environ["TRIATTN_V2_DISABLE_COMPRESSION"] = str(args.disable_compression).lower()
     os.environ["TRIATTN_V2_ENABLE_KV_USAGE_TRIGGER"] = str(args.enable_kv_usage_trigger).lower()
     os.environ["TRIATTN_V2_KV_USAGE_TRIGGER"] = str(args.kv_usage_trigger)
     os.environ["TRIATTN_V2_KV_USAGE_RELEASE"] = str(args.kv_usage_release)
@@ -465,25 +487,39 @@ def setup_vllm_engine(args: argparse.Namespace):
         enforce_eager=bool(args.enforce_eager),
     )
 
-    if not args.disable_compression:
-        if not args.enable_experimental_kv_compaction:
+    force_any_v2 = bool(args.force_v2_integration or args.force_v2_worker or args.force_v2_scheduler)
+    use_v2_integration = (not args.disable_compression) or force_any_v2
+    if use_v2_integration:
+        if not args.enable_experimental_kv_compaction and not args.disable_compression:
             raise RuntimeError(
                 "TriAttention V2 strict mode requires "
                 "enable_experimental_kv_compaction=true"
             )
-        if not args.require_triton_scoring:
+        if not args.require_triton_scoring and not args.disable_compression:
             raise RuntimeError(
                 "TriAttention V2 strict mode requires require_triton_scoring=true"
             )
-        if args.require_physical_reclaim and not args.enable_experimental_block_reclaim:
+        if (
+            args.require_physical_reclaim
+            and not args.enable_experimental_block_reclaim
+            and not args.disable_compression
+        ):
             raise RuntimeError(
                 "TriAttention V2 strict mode requires "
                 "enable_experimental_block_reclaim=true when "
                 "require_physical_reclaim=true"
             )
         _apply_v2_env(args)
-        llm_kwargs["worker_cls"] = "triattention_v2.worker.TriAttentionWorker"
-        llm_kwargs["scheduler_cls"] = "triattention_v2.scheduler.TriAttentionScheduler"
+        want_v2_worker = (not args.disable_compression) or bool(args.force_v2_integration) or bool(args.force_v2_worker)
+        want_v2_scheduler = (not args.disable_compression) or bool(args.force_v2_integration) or bool(args.force_v2_scheduler)
+        # Performance-first integration path: keep native vLLM class identities
+        # and patch only the minimal methods in-place.
+        from triattention_v2.integration_monkeypatch import install_vllm_integration_monkeypatches
+
+        install_vllm_integration_monkeypatches(
+            patch_worker=bool(want_v2_worker),
+            patch_scheduler=bool(want_v2_scheduler),
+        )
         print(
             "[TriAttention V2] enabled: "
             f"budget={args.kv_budget}, divide={args.divide_length}, "
@@ -493,7 +529,14 @@ def setup_vllm_engine(args: argparse.Namespace):
             f"require_triton_scoring={args.require_triton_scoring}, "
             f"require_physical_reclaim={args.require_physical_reclaim}, "
             f"fail_on_effective_len_regression={args.fail_on_effective_len_regression}, "
-            f"enforce_eager={args.enforce_eager}"
+            f"enforce_eager={args.enforce_eager}, "
+            f"disable_compression={args.disable_compression}, "
+            f"force_v2_integration={args.force_v2_integration}, "
+            f"force_v2_worker={args.force_v2_worker}, "
+            f"force_v2_scheduler={args.force_v2_scheduler}, "
+            f"inject_worker={want_v2_worker}, "
+            f"inject_scheduler={want_v2_scheduler}, "
+            "integration_mode=monkeypatch"
         )
     else:
         print("[TriAttention V2] disabled (fullkv mode)")

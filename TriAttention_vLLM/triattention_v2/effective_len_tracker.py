@@ -61,3 +61,8 @@ class EffectiveCacheLenTracker:
             for req_id in keys
         }
 
+    def has_effective_len_override(self, req_id: str) -> bool:
+        return req_id in self._effective_len
+
+    def has_any_effective_len_overrides(self) -> bool:
+        return bool(self._effective_len)

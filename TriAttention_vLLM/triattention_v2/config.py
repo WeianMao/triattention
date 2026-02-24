@@ -27,6 +27,7 @@ class TriAttentionV2Config:
     kv_budget: int = 2048
     divide_length: int = 128
     protect_prefill: bool = True
+    disable_compression: bool = False
 
     enable_kv_usage_trigger: bool = False
     kv_usage_trigger: float = 0.98
@@ -83,6 +84,9 @@ class TriAttentionV2Config:
             kv_budget=maybe_int("KV_BUDGET", cls.kv_budget),
             divide_length=maybe_int("DIVIDE_LENGTH", cls.divide_length),
             protect_prefill=maybe_bool("PROTECT_PREFILL", cls.protect_prefill),
+            disable_compression=maybe_bool(
+                "DISABLE_COMPRESSION", cls.disable_compression
+            ),
             enable_kv_usage_trigger=maybe_bool(
                 "ENABLE_KV_USAGE_TRIGGER", cls.enable_kv_usage_trigger
             ),
