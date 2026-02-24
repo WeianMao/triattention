@@ -26,6 +26,15 @@ def build_speckv_selector(
     - {"mode": "shared", "indices": Tensor|list[int]}
     - {"mode": "per_head", "indices": Tensor|list[list[int]]}
     """
+    requested_pruning_mode = config.pruning_mode
+    if requested_pruning_mode == "per_layer" and not bool(
+        getattr(config, "allow_per_layer_mode", False)
+    ):
+        raise RuntimeError(
+            f"{TRITON_SCORING_REQUIRED_MARKER}:per_layer_mode_disabled:"
+            "set allow_per_layer_mode=True for explicit opt-in"
+        )
+
     strict_triton_required = bool(
         config.enable_experimental_kv_compaction and config.require_triton_scoring
     )
@@ -54,20 +63,12 @@ def build_speckv_selector(
             f"{TRITON_SCORING_REQUIRED_MARKER}:import_failed:{type(exc).__name__}"
         ) from exc
 
-    requested_pruning_mode = config.pruning_mode
     if requested_pruning_mode not in {"per_layer", "per_head", "per_layer_per_head"}:
         if strict_triton_required:
             raise RuntimeError(
                 f"{TRITON_SCORING_REQUIRED_MARKER}:unsupported_pruning_mode:{requested_pruning_mode}"
             )
         return None, None, f"unsupported_pruning_mode:{requested_pruning_mode}"
-    if requested_pruning_mode == "per_layer" and not bool(
-        getattr(config, "allow_per_layer_mode", False)
-    ):
-        raise RuntimeError(
-            f"{TRITON_SCORING_REQUIRED_MARKER}:per_layer_mode_disabled:"
-            "set allow_per_layer_mode=True for explicit opt-in"
-        )
     # Keep per-head score tensor and decide aggregation in selector;
     # this matches HF path better than forcing mean aggregation inside scoring.
     pruning_mode = "per_head"
