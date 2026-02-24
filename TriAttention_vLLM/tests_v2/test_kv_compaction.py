@@ -2,11 +2,13 @@ import torch
 
 from triattention_v2.kv_compaction import (
     build_keep_token_indices,
+    clear_kv_layout_axis_hints_for_tests,
     compact_request_kv_in_place,
     compact_request_kv_in_place_per_head,
     gather_request_k_dense,
     gather_request_k_dense_range,
     gather_request_kv_dense,
+    register_kv_layout_axis_hint,
 )
 
 
@@ -87,6 +89,25 @@ def test_compact_request_kv_in_place_layout0():
     assert torch.equal(kv[0, 1, 2], torch.tensor([[8.0, 9.0]]))
 
 
+def test_compact_request_kv_in_place_layout1_triton_style():
+    kv = torch.arange(4 * 2 * 4 * 1 * 2, dtype=torch.float32).view(4, 2, 4, 1, 2)
+    before = kv.clone()
+    kept = compact_request_kv_in_place(
+        kv_cache=kv,
+        block_ids=[0, 1, 2],
+        block_size=4,
+        keep_token_indices=[0, 1, 7, 8],
+        total_tokens=10,
+    )
+    assert kept == 4
+    assert torch.equal(kv[0, 0, 0], before[0, 0, 0])
+    assert torch.equal(kv[0, 0, 1], before[0, 0, 1])
+    assert torch.equal(kv[0, 0, 2], before[1, 0, 3])  # token7
+    assert torch.equal(kv[0, 0, 3], before[2, 0, 0])  # token8
+    assert torch.equal(kv[0, 1, 2], before[1, 1, 3])
+    assert torch.equal(kv[0, 1, 3], before[2, 1, 0])
+
+
 def test_gather_request_kv_dense_layout0():
     kv = torch.arange(2 * 3 * 4 * 1 * 2, dtype=torch.float32).view(2, 3, 4, 1, 2)
     keys, values = gather_request_kv_dense(
@@ -103,6 +124,22 @@ def test_gather_request_kv_dense_layout0():
     assert torch.equal(keys[0, 0, 5], torch.tensor([10.0, 11.0]))
 
 
+def test_gather_request_kv_dense_layout1_triton_style():
+    kv = torch.arange(3 * 2 * 4 * 1 * 2, dtype=torch.float32).view(3, 2, 4, 1, 2)
+    keys, values = gather_request_kv_dense(
+        kv_cache=kv,
+        block_ids=[0, 1],
+        block_size=4,
+        total_tokens=6,
+    )
+    assert keys.shape == (1, 1, 6, 2)
+    assert values.shape == (1, 1, 6, 2)
+    assert torch.equal(keys[0, 0, 0], kv[0, 0, 0, 0])
+    assert torch.equal(values[0, 0, 0], kv[0, 1, 0, 0])
+    assert torch.equal(keys[0, 0, 5], kv[1, 0, 1, 0])
+    assert torch.equal(values[0, 0, 5], kv[1, 1, 1, 0])
+
+
 def test_gather_request_k_dense_layout0():
     kv = torch.arange(2 * 3 * 4 * 1 * 2, dtype=torch.float32).view(2, 3, 4, 1, 2)
     keys = gather_request_k_dense(
@@ -114,6 +151,19 @@ def test_gather_request_k_dense_layout0():
     assert keys.shape == (1, 1, 6, 2)
     assert torch.equal(keys[0, 0, 0], torch.tensor([0.0, 1.0]))
     assert torch.equal(keys[0, 0, 5], torch.tensor([10.0, 11.0]))
+
+
+def test_gather_request_k_dense_layout1_triton_style():
+    kv = torch.arange(4 * 2 * 4 * 1 * 2, dtype=torch.float32).view(4, 2, 4, 1, 2)
+    keys = gather_request_k_dense(
+        kv_cache=kv,
+        block_ids=[1, 3],
+        block_size=4,
+        total_tokens=7,
+    )
+    assert keys.shape == (1, 1, 7, 2)
+    assert torch.equal(keys[0, 0, 0], kv[1, 0, 0, 0])
+    assert torch.equal(keys[0, 0, 6], kv[3, 0, 2, 0])
 
 
 def test_gather_request_k_dense_non_consecutive_blocks():
@@ -156,6 +206,20 @@ def test_gather_request_k_dense_range_layout0():
     assert keys.shape == (1, 1, 5, 2)
     assert torch.equal(keys[0, 0, 0], torch.tensor([6.0, 7.0]))
     assert torch.equal(keys[0, 0, 4], torch.tensor([14.0, 15.0]))
+
+
+def test_gather_request_k_dense_range_layout1_triton_style():
+    kv = torch.arange(4 * 2 * 4 * 1 * 2, dtype=torch.float32).view(4, 2, 4, 1, 2)
+    keys = gather_request_k_dense_range(
+        kv_cache=kv,
+        block_ids=[0, 1, 2],
+        block_size=4,
+        start_token=3,
+        num_tokens=5,
+    )
+    assert keys.shape == (1, 1, 5, 2)
+    assert torch.equal(keys[0, 0, 0], kv[0, 0, 3, 0])
+    assert torch.equal(keys[0, 0, 4], kv[1, 0, 3, 0])
 
 
 def test_gather_request_k_dense_range_non_consecutive_blocks():
@@ -426,3 +490,51 @@ def test_compact_request_kv_in_place_per_head_keep_only_fast_path_random_prefix_
             }
             assert actual_full == expected
             assert actual_fill == expected
+
+
+def test_ambiguous_shape_requires_layout_hint():
+    clear_kv_layout_axis_hints_for_tests()
+    kv = torch.arange(2 * 2 * 4 * 1 * 2, dtype=torch.float32).view(2, 2, 4, 1, 2)
+    try:
+        gather_request_kv_dense(
+            kv_cache=kv,
+            block_ids=[0, 1],
+            block_size=4,
+            total_tokens=6,
+        )
+    except ValueError as exc:
+        assert "Ambiguous KV layout" in str(exc)
+    else:
+        raise AssertionError("Expected ambiguous KV layout to raise without hint")
+
+
+def test_ambiguous_shape_with_layout_hint_axis0_flash_style():
+    clear_kv_layout_axis_hints_for_tests()
+    kv = torch.arange(2 * 2 * 4 * 1 * 2, dtype=torch.float32).view(2, 2, 4, 1, 2)
+    register_kv_layout_axis_hint(kv, 0)
+    keys, values = gather_request_kv_dense(
+        kv_cache=kv,
+        block_ids=[0, 1],
+        block_size=4,
+        total_tokens=6,
+    )
+    assert torch.equal(keys[0, 0, 0], kv[0, 0, 0, 0])
+    assert torch.equal(values[0, 0, 0], kv[1, 0, 0, 0])
+    assert torch.equal(keys[0, 0, 5], kv[0, 1, 1, 0])
+    assert torch.equal(values[0, 0, 5], kv[1, 1, 1, 0])
+
+
+def test_ambiguous_shape_with_layout_hint_axis1_triton_style():
+    clear_kv_layout_axis_hints_for_tests()
+    kv = torch.arange(2 * 2 * 4 * 1 * 2, dtype=torch.float32).view(2, 2, 4, 1, 2)
+    register_kv_layout_axis_hint(kv, 1)
+    keys, values = gather_request_kv_dense(
+        kv_cache=kv,
+        block_ids=[0, 1],
+        block_size=4,
+        total_tokens=6,
+    )
+    assert torch.equal(keys[0, 0, 0], kv[0, 0, 0, 0])
+    assert torch.equal(values[0, 0, 0], kv[0, 1, 0, 0])
+    assert torch.equal(keys[0, 0, 5], kv[1, 0, 1, 0])
+    assert torch.equal(values[0, 0, 5], kv[1, 1, 1, 0])

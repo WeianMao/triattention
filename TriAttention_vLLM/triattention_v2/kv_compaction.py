@@ -8,6 +8,48 @@ import torch
 
 _CONSECUTIVE_SPAN_CACHE_MAX = 8192
 _CONSECUTIVE_SPAN_CACHE: dict[tuple[int, int, int], tuple[int, int] | None] = {}
+_KV_LAYOUT_AXIS_HINTS: dict[
+    tuple[
+        int,  # data_ptr
+        int,  # storage_offset
+        tuple[int, ...],  # shape
+        tuple[int, ...],  # stride
+        str,  # device
+    ],
+    int,  # kv axis (0 or 1)
+] = {}
+
+
+def _kv_layout_hint_key(kv_cache: torch.Tensor) -> tuple[int, int, tuple[int, ...], tuple[int, ...], str]:
+    return (
+        int(kv_cache.data_ptr()),
+        int(kv_cache.storage_offset()),
+        tuple(int(x) for x in kv_cache.shape),
+        tuple(int(x) for x in kv_cache.stride()),
+        str(kv_cache.device),
+    )
+
+
+def register_kv_layout_axis_hint(kv_cache: torch.Tensor, kv_axis: int) -> None:
+    """Register explicit KV axis hint for ambiguous layouts.
+
+    kv_axis:
+        0 for [2, num_blocks, block_size, H, D] (FlashAttention-style)
+        1 for [num_blocks, 2, block_size, H, D] (TritonAttention-style)
+    """
+    if kv_cache.ndim != 5:
+        raise ValueError(f"Expected 5D kv_cache for layout hint, got ndim={kv_cache.ndim}")
+    if kv_axis not in (0, 1):
+        raise ValueError(f"kv_axis must be 0 or 1, got {kv_axis}")
+    if int(kv_cache.shape[kv_axis]) != 2:
+        raise ValueError(
+            f"kv_axis={kv_axis} does not point to K/V dimension (shape={tuple(kv_cache.shape)})"
+        )
+    _KV_LAYOUT_AXIS_HINTS[_kv_layout_hint_key(kv_cache)] = kv_axis
+
+
+def clear_kv_layout_axis_hints_for_tests() -> None:
+    _KV_LAYOUT_AXIS_HINTS.clear()
 
 
 def build_keep_token_indices(
@@ -48,10 +90,23 @@ def _split_kv_axes(kv_cache: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Return key/value views in shape [num_blocks, block_size, H, D]."""
     if kv_cache.ndim != 5:
         raise ValueError(f"Unsupported kv_cache ndim={kv_cache.ndim}, expect 5")
-    if kv_cache.shape[0] == 2:
+    dim0_is_kv = int(kv_cache.shape[0]) == 2
+    dim1_is_kv = int(kv_cache.shape[1]) == 2
+
+    if dim0_is_kv and not dim1_is_kv:
         return kv_cache[0], kv_cache[1]
-    if kv_cache.shape[1] == 2:
+    if dim1_is_kv and not dim0_is_kv:
         return kv_cache[:, 0], kv_cache[:, 1]
+    if dim0_is_kv and dim1_is_kv:
+        kv_axis = _KV_LAYOUT_AXIS_HINTS.get(_kv_layout_hint_key(kv_cache))
+        if kv_axis == 0:
+            return kv_cache[0], kv_cache[1]
+        if kv_axis == 1:
+            return kv_cache[:, 0], kv_cache[:, 1]
+        raise ValueError(
+            "Ambiguous KV layout for compaction: both dim0 and dim1 have size 2. "
+            "Register an explicit layout hint via register_kv_layout_axis_hint(...)."
+        )
     raise ValueError(
         "Unsupported KV layout for compaction: expected a dimension with size 2"
     )

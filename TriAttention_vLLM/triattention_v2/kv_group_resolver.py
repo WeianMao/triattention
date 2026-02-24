@@ -7,6 +7,8 @@ from typing import Any
 
 import torch
 
+from .kv_compaction import register_kv_layout_axis_hint
+
 
 def infer_layer_idx(layer_name: str, layer_obj: Any, fallback_idx: int) -> int:
     for attr in ("layer_idx", "layer_id", "idx"):
@@ -17,6 +19,29 @@ def infer_layer_idx(layer_name: str, layer_obj: Any, fallback_idx: int) -> int:
     if matches:
         return int(matches[-1])
     return fallback_idx
+
+
+def _infer_kv_axis_from_group_backend(base_runner: Any, gid: int) -> int | None:
+    attn_groups = getattr(base_runner, "attn_groups", None)
+    if not isinstance(attn_groups, (list, tuple)):
+        return None
+    if gid < 0 or gid >= len(attn_groups):
+        return None
+    group = attn_groups[gid]
+    backend = getattr(group, "backend", None)
+    if backend is None:
+        return None
+
+    backend_cls = backend if isinstance(backend, type) else backend.__class__
+    module_name = str(getattr(backend_cls, "__module__", ""))
+    cls_name = str(getattr(backend_cls, "__name__", ""))
+    ident = f"{module_name}.{cls_name}".lower()
+
+    if "flash_attn" in ident:
+        return 0
+    if "triton_attn" in ident:
+        return 1
+    return None
 
 
 def resolve_group_tensors(base_runner: Any) -> dict[int, list[tuple[int, torch.Tensor]]]:
@@ -82,5 +107,14 @@ def resolve_group_tensors(base_runner: Any) -> dict[int, list[tuple[int, torch.T
                 )
             )
         if tensors:
+            kv_axis_hint = _infer_kv_axis_from_group_backend(base_runner=base_runner, gid=gid)
+            if kv_axis_hint is not None:
+                for _layer_idx, tensor in tensors:
+                    try:
+                        register_kv_layout_axis_hint(tensor, kv_axis_hint)
+                    except ValueError:
+                        # Best effort registration only; compaction path will fail-fast if
+                        # an ambiguous layout cannot be safely disambiguated.
+                        pass
             group_tensors[gid] = tensors
     return group_tensors
