@@ -75,8 +75,9 @@ def _args(disable_compression: bool) -> SimpleNamespace:
         fail_on_effective_len_regression=True,
         effective_len_regression_ratio=0.9,
         effective_len_guard_divide_multiples=2,
+        score_chunk_max_tokens=4096,
         log_decisions=True,
-        enforce_eager=True,
+        enforce_eager=False,
     )
 
 
@@ -104,7 +105,7 @@ def test_setup_vllm_engine_sets_worker_scheduler_for_v2():
         setup_vllm_engine(args)
         assert captured["worker_cls"] == "triattention_v2.worker.TriAttentionWorker"
         assert captured["scheduler_cls"] == "triattention_v2.scheduler.TriAttentionScheduler"
-        assert captured["enforce_eager"] is True
+        assert captured["enforce_eager"] is False
         assert os.environ["TRIATTN_V2_KV_BUDGET"] == "2048"
 
 
@@ -114,7 +115,7 @@ def test_setup_vllm_engine_without_compression():
         setup_vllm_engine(args)
         assert "worker_cls" not in captured
         assert "scheduler_cls" not in captured
-        assert captured["enforce_eager"] is True
+        assert captured["enforce_eager"] is False
         assert "TRIATTN_V2_KV_BUDGET" not in os.environ
 
 

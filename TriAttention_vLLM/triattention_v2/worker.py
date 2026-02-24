@@ -28,7 +28,9 @@ class TriAttentionWorker(VLLMGPUWorker):
             config=config,
         )
         logger.info(
-            "TriAttentionWorker injected runner proxy: budget=%d divide_length=%d",
+            "TriAttentionWorker injected runner proxy: budget=%d divide_length=%d "
+            "seq_len_override_patch=%s",
             config.kv_budget,
             config.divide_length,
+            "deferred",
         )

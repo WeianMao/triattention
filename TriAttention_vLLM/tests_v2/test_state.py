@@ -10,6 +10,7 @@ def test_state_lifecycle():
 
     store.update_cache_len("r1", 128)
     assert store.get("r1").current_cache_len == 128
+    assert store.get("r1").current_cache_len_semantics == "estimated_with_scheduled"
 
     store.mark_trigger("r1", reason="length_threshold", step=10)
     state = store.get("r1")
@@ -22,6 +23,8 @@ def test_state_lifecycle():
     assert state.compression_count == 1
     assert state.pending_triggers == 0
     assert state.current_cache_len == 64
+    assert state.current_cache_len_semantics == "effective_pre_step"
+    assert state.current_cache_len_step == 11
     assert state.last_compression_step == 11
     assert state.last_trigger_reason == "applied"
 

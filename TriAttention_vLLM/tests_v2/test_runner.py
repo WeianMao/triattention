@@ -324,3 +324,27 @@ def test_runner_strict_mode_raises_on_executor_exception():
         assert "type=ValueError" in str(exc)
     else:
         raise AssertionError("expected strict mode to fail on executor exception")
+
+
+def test_runner_effective_overrides_only_when_scheduled_batch_contains_compressed_req():
+    class BaseRunner:
+        def execute_model(self, scheduler_output, intermediate_tensors=None):
+            del scheduler_output, intermediate_tensors
+            return {"status": "ok"}
+
+        def sample_tokens(self, grammar_output):
+            del grammar_output
+            return SimpleNamespace(tag="sampler_output")
+
+    runner = TriAttentionModelRunner(
+        base_runner=BaseRunner(),
+        config=TriAttentionV2Config(log_decisions=False),
+    )
+    runner.state_store.ensure(req_id="rX", prefill_len=0, protect_prefill=True)
+    runner.state_store.mark_compressed(req_id="rX", step=1, cache_len=16)
+
+    out_other = SimpleNamespace(num_scheduled_tokens={"r1": 1})
+    out_same = SimpleNamespace(num_scheduled_tokens={"rX": 1})
+
+    assert runner._needs_effective_input_overrides(out_other) is False
+    assert runner._needs_effective_input_overrides(out_same) is True

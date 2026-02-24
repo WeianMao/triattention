@@ -40,7 +40,7 @@ class TriAttentionV2Config:
     fail_on_effective_len_regression: bool = True
     effective_len_regression_ratio: float = 0.9
     effective_len_guard_divide_multiples: int = 2
-    score_chunk_max_tokens: int = 1024
+    score_chunk_max_tokens: int = 4096
 
     # Optional SpeckV-style scoring path (used by V2 hook when enabled).
     sparse_stats_path: Path | None = None
@@ -49,7 +49,7 @@ class TriAttentionV2Config:
     sparse_normalize_scores: bool = True
     window_size: int = 128
     include_prefill_in_budget: bool = True
-    per_head_selection_semantics: str = "legacy_layer_local"
+    per_head_selection_semantics: str = "hf_aligned_global_per_head"
     disable_mlr: bool = False
     disable_trig: bool = False
     disable_top_n_high_freq: int = 0

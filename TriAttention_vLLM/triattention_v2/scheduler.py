@@ -16,6 +16,7 @@ from vllm.v1.structured_output import StructuredOutputManager
 from .config import TriAttentionV2Config
 from .effective_len_tracker import EffectiveCacheLenTracker
 from .planner import CompressionPlanner
+from .request_key_compat import iter_scheduled_token_items
 from .signals import CompressionSignal
 
 logger = init_logger(__name__)
@@ -97,7 +98,7 @@ class TriAttentionScheduler(Scheduler):
             else None
         )
         signals: dict[str, CompressionSignal] = {}
-        for req_id, scheduled_tokens in scheduler_output.num_scheduled_tokens.items():
+        for _raw_key, req_id, scheduled_tokens in iter_scheduled_token_items(scheduler_output):
             request = self.requests.get(req_id)
             if request is None:
                 continue

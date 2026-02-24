@@ -7,11 +7,24 @@ from typing import Any
 
 from .config import TriAttentionV2Config
 from .executor import CompressionExecutor, RunnerHookCompressionExecutor
+from .input_patch_backend import install_runtime_input_patch
+from .request_key_compat import get_scheduled_token_items
+from .runner_compression_actions import execute_runner_compression_actions
+from .runner_output_bridge import (
+    attach_execute_model_compression_events,
+    attach_sample_tokens_compression_events,
+    execute_base_model_with_effective_overrides,
+)
+from .runner_state_updates import (
+    cleanup_finished_requests,
+    consume_runner_signals,
+    mark_preemptions,
+    mark_resumed,
+    register_new_requests,
+)
 from .signals import CompressionSignal
 from .state import RequestStateStore
-
-TRITON_SCORING_REQUIRED_MARKER = "TRIATTN_FATAL_TRITON_SCORING_REQUIRED"
-
+from .worker_reclaim_sync import apply_worker_block_reclaim_events
 
 class TriAttentionModelRunner:
     """Proxy wrapper around vLLM model runner.
@@ -26,11 +39,15 @@ class TriAttentionModelRunner:
         self._base_runner = base_runner
         self.config = config or TriAttentionV2Config.from_env()
         self.state_store = RequestStateStore()
+        # Expose request-level compression state to the installed hook so it can
+        # apply recent-window semantics without relying on logical token order.
+        setattr(base_runner, "_triattention_state_store", self.state_store)
         self.executor: CompressionExecutor = RunnerHookCompressionExecutor(base_runner)
         self._last_step = 0
         self._logger = logging.getLogger(__name__)
         self._pending_compression_events: list[dict[str, Any]] = []
         self._strict_no_downgrade = bool(self.config.enable_experimental_kv_compaction)
+        self._runtime_input_patch_installed = False
         self._allowed_strict_skip_reasons = {
             "under_budget",
             "prefill_exceeds_budget",
@@ -41,60 +58,30 @@ class TriAttentionModelRunner:
         return getattr(self._base_runner, name)
 
     def _register_new_requests(self, scheduler_output: Any) -> None:
-        for new_req in scheduler_output.scheduled_new_reqs:
-            if new_req.prefill_token_ids is not None:
-                prefill_len = len(new_req.prefill_token_ids)
-            elif new_req.prompt_token_ids is not None:
-                prefill_len = len(new_req.prompt_token_ids)
-            else:
-                prefill_len = 0
-            self.state_store.ensure(
-                req_id=new_req.req_id,
-                prefill_len=prefill_len,
-                protect_prefill=self.config.protect_prefill,
-            )
-
-    def _cleanup_finished_requests(self, scheduler_output: Any) -> None:
-        for req_id in scheduler_output.finished_req_ids:
-            self.state_store.remove(req_id)
-
-    def _mark_preemptions(self, scheduler_output: Any) -> None:
-        preempted_req_ids = getattr(scheduler_output, "preempted_req_ids", None)
-        if not preempted_req_ids:
-            return
-        for req_id in preempted_req_ids:
-            self.state_store.mark_preempted(req_id)
-
-    def _mark_resumed(self, scheduler_output: Any) -> None:
-        resumed_req_ids = scheduler_output.scheduled_cached_reqs.resumed_req_ids
-        for req_id in resumed_req_ids:
-            self.state_store.mark_resumed(req_id)
-
-    def _consume_signals(self, scheduler_output: Any) -> dict[str, CompressionSignal]:
-        step = getattr(scheduler_output, "triattention_step", self._last_step + 1)
-        self._last_step = step
-        signals: dict[str, CompressionSignal] = getattr(
-            scheduler_output, "triattention_signals", {}
+        register_new_requests(
+            state_store=self.state_store,
+            scheduler_output=scheduler_output,
+            protect_prefill=bool(self.config.protect_prefill),
         )
 
-        for req_id, signal in signals.items():
-            state = self.state_store.ensure(
-                req_id=req_id,
-                prefill_len=signal.prefill_len,
-                protect_prefill=signal.protect_prefill,
-            )
-            self.state_store.update_cache_len(req_id, signal.estimated_cache_len)
-            if signal.should_compress:
-                self.state_store.mark_trigger(req_id, signal.reason, signal.step)
-                if self.config.log_decisions:
-                    self._logger.debug(
-                        "TriAttention trigger req=%s step=%d reason=%s len=%d mode=%s",
-                        req_id,
-                        signal.step,
-                        signal.reason,
-                        signal.estimated_cache_len,
-                        state.mode,
-                    )
+    def _cleanup_finished_requests(self, scheduler_output: Any) -> None:
+        cleanup_finished_requests(state_store=self.state_store, scheduler_output=scheduler_output)
+
+    def _mark_preemptions(self, scheduler_output: Any) -> None:
+        mark_preemptions(state_store=self.state_store, scheduler_output=scheduler_output)
+
+    def _mark_resumed(self, scheduler_output: Any) -> None:
+        mark_resumed(state_store=self.state_store, scheduler_output=scheduler_output)
+
+    def _consume_signals(self, scheduler_output: Any) -> dict[str, CompressionSignal]:
+        step, signals = consume_runner_signals(
+            state_store=self.state_store,
+            scheduler_output=scheduler_output,
+            last_step=self._last_step,
+            logger=self._logger,
+            log_decisions=bool(self.config.log_decisions),
+        )
+        self._last_step = step
         return signals
 
     def _execute_compression_actions(
@@ -102,146 +89,64 @@ class TriAttentionModelRunner:
         scheduler_output: Any,
         signals: dict[str, CompressionSignal],
     ) -> None:
-        events: list[dict[str, Any]] = []
-        for req_id, signal in signals.items():
-            if not signal.should_compress:
-                continue
+        self._pending_compression_events = execute_runner_compression_actions(
+            executor=self.executor,
+            state_store=self.state_store,
+            scheduler_output=scheduler_output,
+            signals=signals,
+            strict_no_downgrade=self._strict_no_downgrade,
+            allowed_strict_skip_reasons=self._allowed_strict_skip_reasons,
+            logger=self._logger,
+            log_decisions=bool(self.config.log_decisions),
+        )
+
+    def _apply_worker_block_reclaim_events(self) -> None:
+        """Apply reclaim shrink to worker-side block tables before prepare_inputs()."""
+        apply_worker_block_reclaim_events(
+            base_runner=self._base_runner,
+            events=self._pending_compression_events,
+        )
+
+    def _needs_effective_input_overrides(self, scheduler_output: Any) -> bool:
+        # Tighten scope to "current scheduled batch includes a compressed
+        # request". Compression application updates request-local state before
+        # this check, so we do not need to keep a separate step-local event path
+        # here.
+        scheduled_items = get_scheduled_token_items(scheduler_output)
+        scheduled_req_ids: list[str] = [req_id for _raw_key, req_id, _scheduled_tokens in scheduled_items]
+        if not scheduled_req_ids:
+            return False
+        checker = getattr(self.state_store, "has_compressed_request_in", None)
+        if callable(checker):
             try:
-                result = self.executor.execute(
-                    req_id=req_id,
-                    signal=signal,
-                    scheduler_output=scheduler_output,
-                )
-            except Exception as exc:  # pragma: no cover - safety fallback
-                if self._strict_no_downgrade:
-                    self._logger.exception(
-                        "TriAttention strict mode fatal: compression executor exception "
-                        "req=%s step=%d",
-                        req_id,
-                        signal.step,
-                    )
-                    raise RuntimeError(
-                        f"{TRITON_SCORING_REQUIRED_MARKER}:executor_exception:"
-                        f"req={req_id}:step={signal.step}:type={type(exc).__name__}"
-                    ) from exc
-                if TRITON_SCORING_REQUIRED_MARKER in str(exc):
-                    self._logger.exception(
-                        "TriAttention fatal: Triton scoring is required. "
-                        "req=%s step=%d",
-                        req_id,
-                        signal.step,
-                    )
-                    raise
-                self.state_store.mark_compression_skipped(
-                    req_id=req_id,
-                    reason=f"executor_exception:{type(exc).__name__}",
-                    step=signal.step,
-                )
-                self._logger.exception(
-                    "TriAttention compression executor failed req=%s step=%d",
-                    req_id,
-                    signal.step,
-                )
-                events.append(
-                    {
-                        "req_id": req_id,
-                        "step": signal.step,
-                        "status": "error",
-                        "reason": f"executor_exception:{type(exc).__name__}",
-                        "cache_len_after": None,
-                    }
-                )
-                continue
+                return bool(checker(scheduled_req_ids))
+            except Exception:
+                return False
+        # Backward-compatible fallback if state_store is substituted in tests.
+        checker_any = getattr(self.state_store, "has_active_compressed_requests", None)
+        if callable(checker_any):
+            try:
+                return bool(checker_any())
+            except Exception:
+                return False
+        return False
 
-            if (
-                self._strict_no_downgrade
-                and not result.applied
-                and result.reason not in self._allowed_strict_skip_reasons
-            ):
-                raise RuntimeError(
-                    f"{TRITON_SCORING_REQUIRED_MARKER}:unexpected_skip:"
-                    f"req={req_id}:step={signal.step}:reason={result.reason}"
-                )
-
-            if result.applied:
-                cache_len_after = (
-                    signal.estimated_cache_len
-                    if result.cache_len_after is None
-                    else result.cache_len_after
-                )
-                details = result.details if isinstance(result.details, dict) else {}
-                before_len = details.get("effective_tokens_before")
-                budget_total = details.get("budget_total")
-                reclaimed_block_count = details.get("reclaimed_block_count")
-                self.state_store.mark_compressed(
-                    req_id=req_id,
-                    step=signal.step,
-                    cache_len=cache_len_after,
-                )
-                if self.config.log_decisions:
-                    self._logger.debug(
-                        "TriAttention compression applied req=%s step=%d reason=%s",
-                        req_id,
-                        signal.step,
-                        result.reason,
-                    )
-                if isinstance(before_len, int):
-                    self._logger.info(
-                        "TriAttention compression summary req=%s step=%d before=%d after=%d "
-                        "budget=%s reclaimed_blocks=%s reason=%s",
-                        req_id,
-                        signal.step,
-                        before_len,
-                        cache_len_after,
-                        budget_total,
-                        reclaimed_block_count,
-                        result.reason,
-                    )
-                events.append(
-                    {
-                        "req_id": req_id,
-                        "step": signal.step,
-                        "status": "applied",
-                        "reason": result.reason,
-                        "cache_len_after": cache_len_after,
-                        "details": result.details,
-                        "block_reclaim": (
-                            result.details.get("block_reclaim")
-                            if isinstance(result.details, dict)
-                            else None
-                        ),
-                    }
-                )
-                continue
-
-            self.state_store.mark_compression_skipped(
-                req_id=req_id,
-                reason=result.reason,
-                step=signal.step,
+    def _ensure_runtime_input_patch_if_needed(self, need_effective_overrides: bool) -> None:
+        if not need_effective_overrides:
+            return
+        # Unit tests may instantiate TriAttentionModelRunner with a lightweight fake
+        # base runner that does not expose vLLM GPU input-prep internals.
+        if getattr(self._base_runner, "req_states", None) is None:
+            return
+        if self._runtime_input_patch_installed:
+            return
+        patch_ok = install_runtime_input_patch()
+        if not patch_ok:
+            raise RuntimeError(
+                "TriAttention V2 requires gpu seq_len/slot_mapping patch when "
+                "effective-length overrides are active, but patch installation failed"
             )
-            if self.config.log_decisions:
-                self._logger.debug(
-                    "TriAttention compression skipped req=%s step=%d reason=%s",
-                    req_id,
-                    signal.step,
-                    result.reason,
-                )
-            events.append(
-                {
-                    "req_id": req_id,
-                    "step": signal.step,
-                    "status": "skipped",
-                    "reason": result.reason,
-                    "cache_len_after": result.cache_len_after,
-                    "details": result.details,
-                    "block_reclaim": (
-                        result.details.get("block_reclaim")
-                        if isinstance(result.details, dict)
-                        else None
-                    ),
-                }
-            )
-        self._pending_compression_events = events
+        self._runtime_input_patch_installed = True
 
     def execute_model(
         self,
@@ -254,35 +159,29 @@ class TriAttentionModelRunner:
         self._mark_resumed(scheduler_output)
         signals = self._consume_signals(scheduler_output)
         self._execute_compression_actions(scheduler_output, signals)
-        output = self._base_runner.execute_model(
+        self._apply_worker_block_reclaim_events()
+        need_effective_overrides = self._needs_effective_input_overrides(scheduler_output)
+        self._ensure_runtime_input_patch_if_needed(need_effective_overrides)
+        output = execute_base_model_with_effective_overrides(
+            base_runner=self._base_runner,
+            state_store=self.state_store,
             scheduler_output=scheduler_output,
             intermediate_tensors=intermediate_tensors,
+            use_effective_overrides=need_effective_overrides,
         )
-        # vLLM scheduler consumes ModelRunnerOutput from execute_model();
-        # attach side-channel events here so scheduler can update effective
-        # cache length and avoid repeated over-triggering.
-        if output is not None:
-            try:
-                setattr(
-                    output,
-                    "triattention_compression_events",
-                    self._pending_compression_events,
-                )
-            except Exception:
-                # Keep pending events for sample_tokens fallback path.
-                pass
-            else:
-                self._pending_compression_events = []
+        output, self._pending_compression_events = attach_execute_model_compression_events(
+            output=output,
+            pending_events=self._pending_compression_events,
+        )
         return output
 
     def sample_tokens(self, grammar_output: Any) -> Any:
         # Kept for compatibility in case a runner path still calls this method.
         output = self._base_runner.sample_tokens(grammar_output)
-        if output is None:
-            self._pending_compression_events = []
-            return None
-        setattr(output, "triattention_compression_events", self._pending_compression_events)
-        self._pending_compression_events = []
+        output, self._pending_compression_events = attach_sample_tokens_compression_events(
+            output=output,
+            pending_events=self._pending_compression_events,
+        )
         return output
 
     def snapshot_states(self) -> dict[str, Any]:

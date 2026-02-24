@@ -150,6 +150,78 @@ def test_hook_multi_group_compaction():
     assert out["cache_len_after"] == 16
 
 
+def test_hook_raises_on_inconsistent_cache_len_after_across_groups():
+    import triattention_v2.hook_impl as hook_impl_module
+
+    kv_a = torch.arange(2 * 4 * 16 * 1 * 2, dtype=torch.float32).view(2, 4, 16, 1, 2)
+    kv_b = torch.arange(2 * 4 * 16 * 1 * 2, dtype=torch.float32).view(2, 4, 16, 1, 2)
+
+    layer_a = SimpleNamespace(kv_cache=[kv_a])
+    layer_b = SimpleNamespace(kv_cache=[kv_b])
+    kv_cache_config = SimpleNamespace(
+        kv_cache_groups=[
+            SimpleNamespace(layer_names=["layer_a"]),
+            SimpleNamespace(layer_names=["layer_b"]),
+        ]
+    )
+    compilation_config = SimpleNamespace(
+        static_forward_context={"layer_a": layer_a, "layer_b": layer_b}
+    )
+    req_state = SimpleNamespace(
+        num_computed_tokens=32,
+        block_ids=([0, 1], [0, 1]),
+    )
+    base_runner = SimpleNamespace(
+        requests={"r1": req_state},
+        kv_caches=[kv_a, kv_b],
+        kv_cache_config=kv_cache_config,
+        compilation_config=compilation_config,
+        cache_config=SimpleNamespace(block_size=16),
+    )
+    cfg = TriAttentionV2Config(
+        kv_budget=16,
+        enable_experimental_kv_compaction=True,
+        require_triton_scoring=False,
+    )
+
+    old_compact = hook_impl_module.compact_request_kv_in_place
+    old_resolve_groups = hook_impl_module._resolve_group_tensors
+    calls = {"n": 0}
+
+    def _fake_compact_request_kv_in_place(
+        kv_cache,
+        block_ids,
+        block_size,
+        keep_token_indices,
+        total_tokens,
+        preserve_dropped_tokens=True,
+    ):
+        del kv_cache, block_ids, block_size, keep_token_indices, total_tokens, preserve_dropped_tokens
+        calls["n"] += 1
+        return 16 if calls["n"] == 1 else 15
+
+    hook_impl_module.compact_request_kv_in_place = _fake_compact_request_kv_in_place
+    hook_impl_module._resolve_group_tensors = lambda _base_runner: {
+        0: [(0, kv_a)],
+        1: [(1, kv_b)],
+    }
+    try:
+        hook = make_runner_compression_hook(base_runner=base_runner, config=cfg)
+        try:
+            hook(
+                req_id="r1",
+                signal=_signal(),
+                scheduler_output=SimpleNamespace(num_scheduled_tokens={"r1": 1}),
+            )
+        except RuntimeError as exc:
+            assert "inconsistent_cache_len_after" in str(exc)
+        else:
+            raise AssertionError("expected RuntimeError for inconsistent group cache_len_after")
+    finally:
+        hook_impl_module.compact_request_kv_in_place = old_compact
+        hook_impl_module._resolve_group_tensors = old_resolve_groups
+
+
 def test_hook_compaction_trim_prefill_mode():
     kv_cache = torch.arange(2 * 4 * 16 * 1 * 2, dtype=torch.float32).view(
         2, 4, 16, 1, 2
@@ -498,8 +570,10 @@ def test_hook_uses_effective_tokens_for_compaction_work():
         hook_impl_module._build_speckv_selector = old_builder
 
     assert out["applied"] is True
-    assert called["gather_total_tokens"] == 20
-    assert called["compact_total_tokens"] == 20
+    # Hook executes pre-step compaction; when scheduler_output lacks explicit
+    # num_scheduled_tokens, best-effort default is 1 decode token.
+    assert called["gather_total_tokens"] == 19
+    assert called["compact_total_tokens"] == 19
 
 
 def test_hook_clamps_effective_tokens_to_block_capacity_in_paged_path():
@@ -616,7 +690,7 @@ def test_hook_fail_fast_when_effective_len_regresses_to_full_history():
         kv_budget=16,
         divide_length=4,
         enable_experimental_kv_compaction=True,
-        enable_experimental_block_reclaim=False,
+        enable_experimental_block_reclaim=True,
         require_triton_scoring=False,
         fail_on_effective_len_regression=True,
         effective_len_regression_ratio=0.9,
@@ -658,8 +732,10 @@ def test_hook_fail_fast_when_effective_len_regresses_to_full_history():
         total_tokens,
         preserve_dropped_tokens=True,
     ):
-        del kv_cache, block_ids, block_size, total_tokens, preserve_dropped_tokens
-        return len(keep_token_indices)
+        del kv_cache, keep_token_indices, preserve_dropped_tokens
+        # Keep physical block ids unchanged so second call can still exercise
+        # effective_len regression guard against near-full-history length.
+        return int(max(total_tokens, len(block_ids) * block_size - 1))
 
     hook_impl_module.gather_request_k_dense = _fake_gather_request_k_dense
     hook_impl_module.compact_request_kv_in_place = _fake_compact_request_kv_in_place
@@ -1070,6 +1146,182 @@ def test_effective_len_guard_allows_block_plus_two_with_estimate_skew():
             scheduler_output=SimpleNamespace(num_scheduled_tokens={"r1": 1}),
         )
         assert second["applied"] is True
+    finally:
+        hook_impl_module._build_speckv_selector = old_builder
+        hook_impl_module.compact_request_kv_in_place = old_compact
+
+
+def test_effective_len_guard_disabled_in_no_reclaim_mode():
+    import triattention_v2.hook_impl as hook_impl_module
+
+    kv_cache = torch.arange(2 * 8 * 16 * 1 * 2, dtype=torch.float32).view(
+        2, 8, 16, 1, 2
+    )
+    req_state = SimpleNamespace(
+        num_computed_tokens=20,
+        block_ids=([0, 1],),
+    )
+    base_runner = SimpleNamespace(
+        requests={"r1": req_state},
+        kv_caches=[kv_cache],
+        cache_config=SimpleNamespace(block_size=16),
+    )
+    cfg = TriAttentionV2Config(
+        kv_budget=16,
+        divide_length=4,
+        enable_experimental_kv_compaction=True,
+        enable_experimental_block_reclaim=False,
+        require_triton_scoring=False,
+        fail_on_effective_len_regression=True,
+        effective_len_regression_ratio=0.9,
+        effective_len_guard_divide_multiples=2,
+    )
+
+    old_builder = hook_impl_module._build_speckv_selector
+    old_compact = hook_impl_module.compact_request_kv_in_place
+
+    def _fake_selector(**kwargs):
+        total_tokens = int(kwargs["total_tokens"])
+        budget_total = int(kwargs["budget_total"])
+        return {
+            "mode": "shared",
+            "indices": list(range(min(total_tokens, budget_total))),
+        }
+
+    def _fake_compact_request_kv_in_place(
+        kv_cache,
+        block_ids,
+        block_size,
+        keep_token_indices,
+        total_tokens,
+        preserve_dropped_tokens=True,
+    ):
+        del kv_cache, block_ids, block_size, total_tokens, preserve_dropped_tokens
+        return len(keep_token_indices)
+
+    hook_impl_module._build_speckv_selector = (
+        lambda _cfg: (_fake_selector, None, "enabled")
+    )
+    hook_impl_module.compact_request_kv_in_place = _fake_compact_request_kv_in_place
+    try:
+        hook = make_runner_compression_hook(base_runner=base_runner, config=cfg)
+        out = hook(
+            req_id="r1",
+            signal=CompressionSignal(
+                req_id="r1",
+                should_compress=True,
+                reason="length_threshold",
+                estimated_cache_len=20,
+                step=1,
+                kv_usage=None,
+                protect_prefill=True,
+                prefill_len=0,
+            ),
+            scheduler_output=SimpleNamespace(),
+        )
+        assert out["applied"] is True
+
+        # Same shape as regression test, but reclaim is disabled so guard should
+        # not abort the no-reclaim A/B path.
+        req_state.num_computed_tokens = 118
+        second = hook(
+            req_id="r1",
+            signal=CompressionSignal(
+                req_id="r1",
+                should_compress=True,
+                reason="length_threshold",
+                estimated_cache_len=118,
+                step=2,
+                kv_usage=None,
+                protect_prefill=True,
+                prefill_len=0,
+            ),
+            scheduler_output=SimpleNamespace(),
+        )
+        assert second["applied"] is True
+    finally:
+        hook_impl_module._build_speckv_selector = old_builder
+        hook_impl_module.compact_request_kv_in_place = old_compact
+
+
+def test_hook_uses_pre_step_effective_len_and_absolute_round_start():
+    import triattention_v2.hook_impl as hook_impl_module
+
+    kv_cache = torch.arange(2 * 8 * 16 * 1 * 2, dtype=torch.float32).view(
+        2, 8, 16, 1, 2
+    )
+    req_state = SimpleNamespace(
+        num_computed_tokens=20,  # absolute progress before current step
+        block_ids=([0, 1],),
+    )
+    base_runner = SimpleNamespace(
+        requests={"r1": req_state},
+        kv_caches=[kv_cache],
+        cache_config=SimpleNamespace(block_size=16),
+    )
+    cfg = TriAttentionV2Config(
+        kv_budget=8,
+        divide_length=4,
+        enable_experimental_kv_compaction=True,
+        require_triton_scoring=False,
+    )
+
+    old_builder = hook_impl_module._build_speckv_selector
+    old_compact = hook_impl_module.compact_request_kv_in_place
+
+    seen: dict[str, int] = {}
+
+    def _fake_selector(**kwargs):
+        seen["total_tokens"] = int(kwargs["total_tokens"])
+        seen["round_start"] = int(kwargs["round_start"])
+        total_tokens = int(kwargs["total_tokens"])
+        budget_total = int(kwargs["budget_total"])
+        return {
+            "mode": "shared",
+            "indices": list(range(min(total_tokens, budget_total))),
+        }
+
+    setattr(_fake_selector, "_supports_paged", True)
+
+    def _fake_compact_request_kv_in_place(
+        kv_cache,
+        block_ids,
+        block_size,
+        keep_token_indices,
+        total_tokens,
+        preserve_dropped_tokens=True,
+    ):
+        del kv_cache, block_ids, block_size, preserve_dropped_tokens
+        seen["compact_total_tokens"] = int(total_tokens)
+        return len(keep_token_indices)
+
+    hook_impl_module._build_speckv_selector = (
+        lambda _cfg, base_runner=None: (_fake_selector, None, "enabled")
+    )
+    hook_impl_module.compact_request_kv_in_place = _fake_compact_request_kv_in_place
+    try:
+        hook = make_runner_compression_hook(base_runner=base_runner, config=cfg)
+        out = hook(
+            req_id="r1",
+            signal=CompressionSignal(
+                req_id="r1",
+                should_compress=True,
+                reason="length_threshold",
+                # Scheduler estimate includes the currently scheduled decode token (+1).
+                estimated_cache_len=21,
+                step=1,
+                kv_usage=None,
+                protect_prefill=True,
+                prefill_len=0,
+            ),
+            scheduler_output=SimpleNamespace(num_scheduled_tokens={"r1": 1}),
+        )
+        assert out["applied"] is True
+        # Compaction must use pre-step cache length (20), not estimated post-step length (21).
+        assert seen["total_tokens"] == 20
+        assert seen["compact_total_tokens"] == 20
+        # round_start should track absolute decode progress before this step.
+        assert seen["round_start"] == 20
     finally:
         hook_impl_module._build_speckv_selector = old_builder
         hook_impl_module.compact_request_kv_in_place = old_compact
@@ -1548,6 +1800,136 @@ def test_selector_hf_global_per_head_paged_matches_dense_with_normalize():
     assert dense_out is not None and paged_out is not None
     assert dense_out["mode"] == "per_head"
     assert paged_out["mode"] == "per_head"
+    assert torch.equal(
+        dense_out["indices"],
+        paged_out["indices"],
+    )
+
+
+def test_selector_hf_per_layer_paged_matches_dense_with_normalize():
+    import triattention.compressor as compressor_module
+    import triattention.scoring as scoring_module
+    import triattention_v2.hook_impl as hook_impl_module
+
+    class _FakeCompressor:
+        def __init__(self, _cfg):
+            self.head_stats = {
+                0: {
+                    "q_abs_mean": torch.ones((2, 2), dtype=torch.float32),
+                    "q_mean_complex": torch.zeros((2, 2, 2), dtype=torch.float32),
+                }
+            }
+            self.freq_scale_sq = torch.ones((1, 2, 2), dtype=torch.float32)
+            self.omega = torch.ones((2,), dtype=torch.float32)
+            self.offsets = torch.ones((1,), dtype=torch.float32)
+
+        def _lazy_init(self):
+            return None
+
+    def _fake_compute_scores_triton(
+        key_states,
+        cache_positions,
+        head_stats,
+        omega,
+        offsets,
+        freq_scale_sq,
+        config,
+        round_start=None,
+        trig_cache=None,
+    ):
+        del (
+            cache_positions,
+            head_stats,
+            omega,
+            offsets,
+            freq_scale_sq,
+            config,
+            round_start,
+            trig_cache,
+        )
+        token_ids = key_states[0, 0, :, 0].to(dtype=torch.float32)
+        num_heads = int(key_states.shape[1])
+        out = []
+        for head in range(num_heads):
+            head_bias = float(head + 1)
+            scores = torch.where(
+                token_ids < 6.0,
+                token_ids * 2.0 + head_bias,
+                token_ids * 0.1 + 10.0 + head_bias,
+            )
+            out.append(scores)
+        return torch.stack(out, dim=0).unsqueeze(0).contiguous()
+
+    def _make_kv(total_tokens: int, block_size: int) -> torch.Tensor:
+        num_blocks = (total_tokens + block_size - 1) // block_size
+        kv = torch.zeros((2, num_blocks, block_size, 2, 2), dtype=torch.float32)
+        for token in range(total_tokens):
+            b = token // block_size
+            o = token % block_size
+            kv[0, b, o, :, 0] = float(token)
+        return kv
+
+    old_compressor = compressor_module.TriAttentionCompressor
+    old_compute = scoring_module.compute_scores_triton
+    compressor_module.TriAttentionCompressor = _FakeCompressor
+    scoring_module.compute_scores_triton = _fake_compute_scores_triton
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pt") as stats_file:
+            cfg = TriAttentionV2Config(
+                kv_budget=4,
+                pruning_mode="per_layer",
+                sparse_stats_path=stats_file.name,
+                sparse_normalize_scores=True,
+                window_size=0,
+                divide_length=128,
+                enable_experimental_kv_compaction=True,
+                require_triton_scoring=False,
+            )
+            layer_selector, _, status = hook_impl_module._build_speckv_selector(cfg)
+            assert status == "enabled"
+            assert callable(layer_selector)
+            assert getattr(layer_selector, "_supports_paged", False) is True
+
+            total_tokens = 8
+            block_size = 4
+            kv = _make_kv(total_tokens, block_size)
+            dense = hook_impl_module.gather_request_k_dense(
+                kv_cache=kv,
+                block_ids=[0, 1],
+                block_size=block_size,
+                total_tokens=total_tokens,
+            )
+            dense_out = layer_selector(
+                keys_dense=dense,
+                kv_cache=None,
+                block_ids=None,
+                block_size=None,
+                total_tokens=total_tokens,
+                prefill_len=0,
+                protect_prefill=False,
+                layer_idx=0,
+                round_start=5,
+                budget_total=4,
+            )
+            paged_out = layer_selector(
+                keys_dense=None,
+                kv_cache=kv,
+                block_ids=[0, 1],
+                block_size=block_size,
+                total_tokens=total_tokens,
+                prefill_len=0,
+                protect_prefill=False,
+                layer_idx=0,
+                round_start=5,
+                budget_total=4,
+            )
+    finally:
+        compressor_module.TriAttentionCompressor = old_compressor
+        scoring_module.compute_scores_triton = old_compute
+
+    assert dense_out is not None and paged_out is not None
+    assert dense_out["mode"] == "shared"
+    assert paged_out["mode"] == "shared"
     assert torch.equal(
         dense_out["indices"],
         paged_out["indices"],

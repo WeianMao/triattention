@@ -10,6 +10,18 @@ from triattention_v2.kv_compaction import (
 )
 
 
+def _gather_token_scalar_per_head(kv: torch.Tensor, token_idx: int) -> torch.Tensor:
+    block = token_idx // kv.shape[2]
+    off = token_idx % kv.shape[2]
+    return kv[0, block, off, :, 0].clone()
+
+
+def _gather_token_scalar_shared(kv: torch.Tensor, token_idx: int) -> torch.Tensor:
+    block = token_idx // kv.shape[2]
+    off = token_idx % kv.shape[2]
+    return kv[0, block, off, 0, 0].clone()
+
+
 def test_build_keep_indices_protect_prefill():
     keep = build_keep_token_indices(
         total_tokens=12,
@@ -317,3 +329,100 @@ def test_compact_request_kv_in_place_per_head_keep_only_fill_holes():
     assert torch.equal(kv[0, 0, 0, 1], torch.tensor([11.0]))
     assert torch.equal(kv[0, 0, 1, 1], torch.tensor([3.0]))
     assert torch.equal(kv[0, 0, 2, 1], torch.tensor([5.0]))
+
+
+def test_compact_request_kv_in_place_keep_only_fast_path_random_prefix_set_equivalence():
+    gen = torch.Generator().manual_seed(1234)
+    total_tokens = 11
+    keep_count = 7
+    block_size = 4
+    num_blocks = 4
+    for _ in range(50):
+        kv_base = torch.arange(
+            2 * num_blocks * block_size * 1 * 1, dtype=torch.float32
+        ).view(2, num_blocks, block_size, 1, 1)
+        perm = torch.randperm(total_tokens, generator=gen)
+        keep = torch.sort(perm[:keep_count]).values.tolist()
+
+        kv_full = kv_base.clone()
+        kv_fill = kv_base.clone()
+        compact_request_kv_in_place(
+            kv_cache=kv_full,
+            block_ids=[0, 1, 2],
+            block_size=block_size,
+            keep_token_indices=keep,
+            total_tokens=total_tokens,
+            preserve_dropped_tokens=True,
+        )
+        compact_request_kv_in_place(
+            kv_cache=kv_fill,
+            block_ids=[0, 1, 2],
+            block_size=block_size,
+            keep_token_indices=keep,
+            total_tokens=total_tokens,
+            preserve_dropped_tokens=False,
+        )
+
+        expected_prefix = {
+            float(_gather_token_scalar_shared(kv_base, tok).item()) for tok in keep
+        }
+        actual_full = {
+            float(_gather_token_scalar_shared(kv_full, i).item()) for i in range(keep_count)
+        }
+        actual_fill = {
+            float(_gather_token_scalar_shared(kv_fill, i).item()) for i in range(keep_count)
+        }
+        assert actual_full == expected_prefix
+        assert actual_fill == expected_prefix
+
+
+def test_compact_request_kv_in_place_per_head_keep_only_fast_path_random_prefix_set_equivalence():
+    gen = torch.Generator().manual_seed(5678)
+    total_tokens = 12
+    keep_count = 6
+    block_size = 4
+    num_blocks = 4
+    num_heads = 3
+    for _ in range(30):
+        kv_base = torch.arange(
+            2 * num_blocks * block_size * num_heads * 1, dtype=torch.float32
+        ).view(2, num_blocks, block_size, num_heads, 1)
+        keep_per_head = []
+        for _head in range(num_heads):
+            perm = torch.randperm(total_tokens, generator=gen)
+            keep_per_head.append(torch.sort(perm[:keep_count]).values.tolist())
+
+        kv_full = kv_base.clone()
+        kv_fill = kv_base.clone()
+        compact_request_kv_in_place_per_head(
+            kv_cache=kv_full,
+            block_ids=[0, 1, 2],
+            block_size=block_size,
+            keep_token_indices_per_head=keep_per_head,
+            total_tokens=total_tokens,
+            preserve_dropped_tokens=True,
+        )
+        compact_request_kv_in_place_per_head(
+            kv_cache=kv_fill,
+            block_ids=[0, 1, 2],
+            block_size=block_size,
+            keep_token_indices_per_head=keep_per_head,
+            total_tokens=total_tokens,
+            preserve_dropped_tokens=False,
+        )
+
+        for head in range(num_heads):
+            expected = {
+                float(_gather_token_scalar_per_head(kv_base, tok)[head].item())
+                for tok in keep_per_head[head]
+            }
+            actual_full = {
+                float(_gather_token_scalar_per_head(kv_full, i)[head].item())
+                for i in range(keep_count)
+            }
+            actual_fill = {
+                float(_gather_token_scalar_per_head(kv_fill, i)[head].item())
+                for i in range(keep_count)
+            }
+            assert actual_full == expected
+            assert actual_fill == expected

@@ -352,21 +352,11 @@ def compact_request_kv_in_place(
         perm_tensor = torch.cat([keep_tensor, all_tokens[tail_mask]], dim=0)
         dst_tokens = torch.arange(total_tokens, device=device, dtype=torch.long)
     else:
-        # Fill-in-place fast path:
-        # keep tokens already in prefix [0, keep_count) stay in place;
-        # only tail survivors fill free prefix slots.
-        in_prefix = keep_tensor < keep_count
-        occupied_prefix = keep_tensor[in_prefix]
-        free_mask = torch.ones(keep_count, device=device, dtype=torch.bool)
-        if occupied_prefix.numel() > 0:
-            free_mask[occupied_prefix] = False
-        dst_tokens = torch.arange(keep_count, device=device, dtype=torch.long)[free_mask]
-        perm_tensor = keep_tensor[~in_prefix]
-        if int(dst_tokens.numel()) != int(perm_tensor.numel()):
-            raise RuntimeError(
-                "fill_in_place_mismatch: "
-                f"dst={int(dst_tokens.numel())} src={int(perm_tensor.numel())}"
-            )
+        perm_tensor, dst_tokens = _build_fill_hole_placement_shared(
+            keep_tensor=keep_tensor,
+            keep_count=keep_count,
+            device=device,
+        )
         if perm_tensor.numel() == 0:
             return keep_count
 
@@ -478,43 +468,14 @@ def compact_request_kv_in_place_per_head(
         key_cache[dst_blocks, dst_off] = gathered_keys.permute(1, 0, 2).contiguous()
         value_cache[dst_blocks, dst_off] = gathered_values.permute(1, 0, 2).contiguous()
     else:
-        # Fill-in-place fast path per head:
-        # keep rows that already occupy prefix slots stay in-place, only
-        # tail survivors are moved into per-head free prefix slots.
-        src_tokens_rows: list[torch.Tensor] = []
-        dst_tokens_rows: list[torch.Tensor] = []
-        head_rows: list[torch.Tensor] = []
-        for head in range(num_kv_heads):
-            row = keep_tensor[head]
-            in_prefix = row < keep_count
-            occupied = row[in_prefix]
-            free_mask = torch.ones(keep_count, device=device, dtype=torch.bool)
-            if occupied.numel() > 0:
-                free_mask[occupied] = False
-            dst_row = torch.arange(keep_count, device=device, dtype=torch.long)[free_mask]
-            src_row = row[~in_prefix]
-            if int(dst_row.numel()) != int(src_row.numel()):
-                raise RuntimeError(
-                    "fill_in_place_per_head_mismatch: "
-                    f"head={head} dst={int(dst_row.numel())} src={int(src_row.numel())}"
-                )
-            if src_row.numel() == 0:
-                continue
-            src_tokens_rows.append(src_row)
-            dst_tokens_rows.append(dst_row)
-            head_rows.append(
-                torch.full(
-                    (int(src_row.numel()),),
-                    head,
-                    device=device,
-                    dtype=torch.long,
-                )
-            )
-        if not src_tokens_rows:
+        src_tokens, dst_tokens_flat, head_idx = _build_fill_hole_placement_per_head(
+            keep_tensor=keep_tensor,
+            keep_count=keep_count,
+            num_kv_heads=num_kv_heads,
+            device=device,
+        )
+        if src_tokens.numel() == 0:
             return keep_count
-        src_tokens = torch.cat(src_tokens_rows, dim=0)
-        dst_tokens_flat = torch.cat(dst_tokens_rows, dim=0)
-        head_idx = torch.cat(head_rows, dim=0)
 
         src_blocks, src_off = _resolve_token_slots(
             block_ids=block_ids,
@@ -534,3 +495,82 @@ def compact_request_kv_in_place_per_head(
         value_cache[dst_blocks, dst_off, head_idx] = gathered_values
 
     return keep_count
+
+
+def _build_fill_hole_placement_shared(
+    *,
+    keep_tensor: torch.Tensor,
+    keep_count: int,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build src/dst token placement for shared fill-hole compaction.
+
+    The returned mapping moves only tail survivors into free prefix slots,
+    intentionally allowing permutation (unordered prefix) to minimize copies.
+    """
+    in_prefix = keep_tensor < keep_count
+    occupied_prefix = keep_tensor[in_prefix]
+    free_mask = torch.ones(keep_count, device=device, dtype=torch.bool)
+    if occupied_prefix.numel() > 0:
+        free_mask[occupied_prefix] = False
+    dst_tokens = torch.arange(keep_count, device=device, dtype=torch.long)[free_mask]
+    src_tokens = keep_tensor[~in_prefix]
+    if int(dst_tokens.numel()) != int(src_tokens.numel()):
+        raise RuntimeError(
+            "fill_in_place_mismatch: "
+            f"dst={int(dst_tokens.numel())} src={int(src_tokens.numel())}"
+        )
+    return src_tokens, dst_tokens
+
+
+def _build_fill_hole_placement_per_head(
+    *,
+    keep_tensor: torch.Tensor,
+    keep_count: int,
+    num_kv_heads: int,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build flattened per-head fill-hole placement.
+
+    Returns `(src_tokens, dst_tokens, head_idx)` with one move per row entry.
+    """
+    if keep_count <= 0 or num_kv_heads <= 0:
+        empty = torch.empty(0, device=device, dtype=torch.long)
+        return empty, empty, empty
+
+    in_prefix = keep_tensor < keep_count
+    src_mask = ~in_prefix
+
+    prefix_positions = torch.arange(keep_count, device=device, dtype=torch.long)
+    prefix_positions_2d = prefix_positions.unsqueeze(0).expand(num_kv_heads, -1)
+    free_mask = torch.ones((num_kv_heads, keep_count), device=device, dtype=torch.bool)
+    if bool(in_prefix.any().item()):
+        head_ids_all = torch.arange(num_kv_heads, device=device, dtype=torch.long)
+        head_ids_2d = head_ids_all.unsqueeze(1).expand(num_kv_heads, keep_count)
+        occupied_heads = head_ids_2d[in_prefix]
+        occupied_cols = keep_tensor[in_prefix]
+        free_mask[occupied_heads, occupied_cols] = False
+
+    src_counts = src_mask.sum(dim=1)
+    dst_counts = free_mask.sum(dim=1)
+    if not torch.equal(src_counts, dst_counts):
+        mismatch = (src_counts != dst_counts).nonzero(as_tuple=False)
+        head = int(mismatch[0].item()) if mismatch.numel() > 0 else -1
+        src_n = int(src_counts[head].item()) if head >= 0 else -1
+        dst_n = int(dst_counts[head].item()) if head >= 0 else -1
+        raise RuntimeError(
+            "fill_in_place_per_head_mismatch: "
+            f"head={head} dst={dst_n} src={src_n}"
+        )
+
+    if not bool(src_mask.any().item()):
+        empty = torch.empty(0, device=device, dtype=torch.long)
+        return empty, empty, empty
+
+    head_idx_2d = torch.arange(num_kv_heads, device=device, dtype=torch.long).unsqueeze(1)
+    head_idx_2d = head_idx_2d.expand(num_kv_heads, keep_count)
+    return (
+        keep_tensor[src_mask],
+        prefix_positions_2d[free_mask],
+        head_idx_2d[src_mask],
+    )

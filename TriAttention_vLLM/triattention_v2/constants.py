@@ -1,0 +1,3 @@
+"""Shared constants for TriAttention V2 modules."""
+
+TRITON_SCORING_REQUIRED_MARKER = "TRIATTN_FATAL_TRITON_SCORING_REQUIRED"
