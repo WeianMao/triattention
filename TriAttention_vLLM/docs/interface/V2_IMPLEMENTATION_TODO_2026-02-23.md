@@ -25,6 +25,7 @@
 - [x] 修复 `per_layer_per_head` 在 GQA 下“先缩并统计再打分”的潜在不等价路径（改为先打分再按 KV-head 聚合）
 - [x] 预留 `layer_perhead_aggregation/per_layer_aggregation` 配置接口，并同步 runner CLI/env 入口
 - [ ] 以 `run_speckv_aime24_qwen_norm_aligned_perhead.sh` 为唯一参照完成 `per_head` 端到端对齐验收（P0）
+- [x] 修复 `runner/runner_output_bridge` 在默认关闭 profiling 时仍执行每步计时的 decode 热路径额外开销（不改语义）
 
 ## 工作记录
 

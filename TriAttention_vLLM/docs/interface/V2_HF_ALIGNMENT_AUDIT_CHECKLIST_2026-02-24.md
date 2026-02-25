@@ -38,6 +38,16 @@
 4. 与该脚本唯一预期差异是后续评测支持额外数据集（AIME25），该项属于评测/调度层，不属于本轮推理算法对齐核心。
 5. `disable_mlr` / `disable_trig` / `disable_top_n_high_freq` 不属于当前 `norm_aligned_perhead` 参照脚本的对齐范围（先忽略）。
 
+### 审计范围收缩（2026-02-25 更新）
+
+1. 当前主审计对象明确为：
+   - `R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned_perhead.sh`
+2. 因此本清单中的以下项仅作为“能力差异记录”，不作为当前 `per_head` 对齐阻塞：
+   - `disable_mlr`
+   - `disable_trig`
+   - `disable_top_n_high_freq`
+3. `per_layer_per_head` 仍需修复/保留接口，但端到端实验可后置。
+
 ## 本轮开发修复（2026-02-24，已落地）
 
 1. `per_layer` 模式门禁：
@@ -70,8 +80,9 @@
 
 - [x] `DONE` 核对本轮 full strict v2 配置（`triattention_v2_aime24_hf_strict.yaml`）关键生成参数
 - [x] `DONE` 核对 HF 参考 sample8 qwen 配置（`sample8_speckv_aime24_official_qwen.yaml`）关键生成参数
-- [ ] `PENDING` 做逐项参数差异表（区分“应对齐项” vs “允许差异项”；当前已确认本轮 `per_layer strict` 的生成/评测口径与 HF sample8 参考线为同量级对照，但仍缺完整参数表）
-- [ ] `PENDING` 为目标模式（`per_head` / `per_layer_per_head`）建立对应的 HF 参考配置映射表
+- [x] `DONE` 已按 `run_speckv_aime24_qwen_norm_aligned_perhead.sh` 收缩对齐范围（脚本外 ablation 参数不作为当前阻塞）
+- [x] `DONE` 建立 `per_head` anchor 配置映射（`triattention_v2_aime24_hf_perhead_anchor.yaml`）
+- [ ] `PENDING` 为 `per_layer_per_head` 补单独映射表（接口已留，实验暂后置）
 
 ### C. 选择逻辑（HF 语义层）
 
@@ -114,7 +125,7 @@
 
 ### G. 目标模式端到端验收（最高优先级）
 
-- [ ] `PENDING` `per_head`：端到端对齐核验（至少 1 个 anchor 配置）
+- [x] `DONE` `per_head`：AIME24 sampled8 全量 anchor 已跑通（8 shards）并完成 merge+eval，结果 `acc=42.9`
 - [ ] `PENDING` `per_layer_per_head`：端到端对齐核验（至少 1 个 anchor 配置）
 - [ ] `PENDING` 若发现差异：分类为 bug / 等价差异 / 后端采样差异，并形成结论
 
@@ -281,6 +292,25 @@
   - 至少在定点输入上，V2 语义选择与布局关键路径行为与预期一致；
   - 仍需补目标模式端到端实验作为最终证据。
 
+### 4. `per_head` 目标模式全量实验（A6000 / 3卡并发 / 8 shards 全量）
+
+- 运行配置（V2 anchor）：
+  - `TriAttention_vLLM/evaluation/dispatch/configs/triattention_v2_aime24_hf_perhead_anchor.yaml`
+- 实际运行目录：
+  - `TriAttention_vLLM/evaluation/outputs/v2_aime24_hf_perhead_a6000_full/perhead_full_20260224_171332`
+- 完成状态：
+  - `8/8 shards` 全部完成
+  - merged `240` records
+  - `eval_math_multi.py` 评测完成
+- 结果：
+  - `acc=42.9`
+  - `num_scores=240`
+  - `timeout_samples=2`
+
+结论：
+- 这支持“`per_head` 当前实现已进入 HF 参考线附近（同量级）”的判断。
+- 仍需保留对“非 bug 差异来源（采样后端/数值路径）”的解释空间，不应仅凭 token 文本对比下结论。
+
 ## 已知“可能导致结果更好/不同，但不一定是 bug”的候选原因（待进一步归因）
 
 1. HF 与 vLLM 采样后端实现差异（即使参数名一致）
@@ -295,7 +325,7 @@
 
 ## 下一步（按优先级）
 
-1. 做 `per_head` 端到端 anchor 对齐核验（P0）
-2. 做 `per_layer_per_head` 端到端 anchor 对齐核验（P0）
-3. 补“HF 参考配置 vs V2 配置”逐项差异表，标注哪些是非 bug 差异（P1）
-4. 只有在出现明确不对齐证据时，才进入代码修复（避免无效改动）
+1. 做 `per_layer_per_head` 端到端 anchor 对齐核验（P0，代码已修但尚未实验）
+2. 补“HF 参考配置 vs V2 配置”逐项差异表，标注哪些是非 bug 差异（P1）
+3. 若后续需要 V100/非 FA backend，沿用已落地的 backend→KV layout 自动适配路径做 smoke（P1）
+4. 只有在出现明确不对齐证据时，才进入进一步代码修复（避免无效改动）

@@ -24,52 +24,59 @@ def execute_base_model_with_effective_overrides(
     perf_out: dict[str, float] | None = None,
 ) -> Any:
     """Execute base runner with current effective-length overrides applied."""
+    perf_enabled = isinstance(perf_out, dict)
     if not use_effective_overrides:
-        t0 = time.perf_counter()
+        if perf_enabled:
+            t0 = time.perf_counter()
         output = base_runner.execute_model(
             scheduler_output=scheduler_output,
             intermediate_tensors=intermediate_tensors,
         )
-        t1 = time.perf_counter()
-        if isinstance(perf_out, dict):
+        if perf_enabled:
+            t1 = time.perf_counter()
             perf_out["override_prep_ms"] = 0.0
             perf_out["base_exec_ms"] = (t1 - t0) * 1000.0
         return output
 
-    t0 = time.perf_counter()
+    if perf_enabled:
+        t0 = time.perf_counter()
     overrides = prepare_effective_input_overrides(
         base_runner=base_runner,
         state_store=state_store,
         scheduler_output=scheduler_output,
     )
-    t1 = time.perf_counter()
+    if perf_enabled:
+        t1 = time.perf_counter()
     if (
         overrides.seq_base_map is None
         and overrides.pos_delta_map is None
         and overrides.single_seq_base is None
         and overrides.single_pos_delta == 0
     ):
-        t2 = time.perf_counter()
+        if perf_enabled:
+            t2 = time.perf_counter()
         output = base_runner.execute_model(
             scheduler_output=scheduler_output,
             intermediate_tensors=intermediate_tensors,
         )
-        t3 = time.perf_counter()
-        if isinstance(perf_out, dict):
+        if perf_enabled:
+            t3 = time.perf_counter()
             perf_out["override_prep_ms"] = (t1 - t0) * 1000.0
             perf_out["base_exec_ms"] = (t3 - t2) * 1000.0
         return output
     # Use sparse overrides in hot path to avoid per-step dense tensor copies.
     with active_effective_input_overrides(overrides):
-        t2 = time.perf_counter()
+        if perf_enabled:
+            t2 = time.perf_counter()
         output = base_runner.execute_model(
             scheduler_output=scheduler_output,
             intermediate_tensors=intermediate_tensors,
         )
-        t3 = time.perf_counter()
+        if perf_enabled:
+            t3 = time.perf_counter()
         if getattr(base_runner, "req_states", None) is not None:
             assert_effective_overrides_consumed()
-        if isinstance(perf_out, dict):
+        if perf_enabled:
             perf_out["override_prep_ms"] = (t1 - t0) * 1000.0
             perf_out["base_exec_ms"] = (t3 - t2) * 1000.0
         return output

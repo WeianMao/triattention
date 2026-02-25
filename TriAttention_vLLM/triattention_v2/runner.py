@@ -156,24 +156,25 @@ class TriAttentionModelRunner:
         scheduler_output: Any,
         intermediate_tensors: Any = None,
     ) -> Any:
-        t_total = time.perf_counter()
-        t0 = time.perf_counter()
+        perf_enabled = bool(getattr(self._perf, "enabled", False))
+        t_total = time.perf_counter() if perf_enabled else 0.0
+        t0 = time.perf_counter() if perf_enabled else 0.0
         self._register_new_requests(scheduler_output)
         self._cleanup_finished_requests(scheduler_output)
         self._mark_preemptions(scheduler_output)
         self._mark_resumed(scheduler_output)
         signals = self._consume_signals(scheduler_output)
-        t_state_ms = (time.perf_counter() - t0) * 1000.0
-        t0 = time.perf_counter()
+        t_state_ms = (time.perf_counter() - t0) * 1000.0 if perf_enabled else 0.0
+        t0 = time.perf_counter() if perf_enabled else 0.0
         self._execute_compression_actions(scheduler_output, signals)
-        t_compress_ms = (time.perf_counter() - t0) * 1000.0
+        t_compress_ms = (time.perf_counter() - t0) * 1000.0 if perf_enabled else 0.0
         self._perf.record_compression_events(self._pending_compression_events)
-        t0 = time.perf_counter()
+        t0 = time.perf_counter() if perf_enabled else 0.0
         self._apply_worker_block_reclaim_events()
-        t_reclaim_ms = (time.perf_counter() - t0) * 1000.0
+        t_reclaim_ms = (time.perf_counter() - t0) * 1000.0 if perf_enabled else 0.0
         need_effective_overrides = self._needs_effective_input_overrides(scheduler_output)
         self._ensure_runtime_input_patch_if_needed(need_effective_overrides)
-        bridge_perf: dict[str, float] = {}
+        bridge_perf: dict[str, float] | None = {} if perf_enabled else None
         output = execute_base_model_with_effective_overrides(
             base_runner=self._base_runner,
             state_store=self.state_store,
@@ -183,7 +184,7 @@ class TriAttentionModelRunner:
             perf_out=bridge_perf,
         )
         self._perf.record_model_output(output)
-        t_total_exec_ms = (time.perf_counter() - t_total) * 1000.0
+        t_total_exec_ms = (time.perf_counter() - t_total) * 1000.0 if perf_enabled else 0.0
         has_trigger = any(bool(sig.should_compress) for sig in signals.values()) if signals else False
         self._perf.record_step(
             has_trigger=has_trigger,
@@ -191,8 +192,8 @@ class TriAttentionModelRunner:
             t_state_ms=t_state_ms,
             t_compress_ms=t_compress_ms,
             t_reclaim_ms=t_reclaim_ms,
-            t_override_prep_ms=float(bridge_perf.get("override_prep_ms", 0.0)),
-            t_base_exec_ms=float(bridge_perf.get("base_exec_ms", 0.0)),
+            t_override_prep_ms=float((bridge_perf or {}).get("override_prep_ms", 0.0)),
+            t_base_exec_ms=float((bridge_perf or {}).get("base_exec_ms", 0.0)),
             t_total_exec_ms=t_total_exec_ms,
         )
         output, self._pending_compression_events = attach_execute_model_compression_events(
