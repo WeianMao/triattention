@@ -1,44 +1,89 @@
-"""TriAttention: Efficient KV cache compression for vLLM.
+"""TriAttention shared core package (current default import path).
 
-This package implements the TriAttention (SpeckV) algorithm for KV cache compression
-with Triton kernel optimization and vLLM integration.
+This package now serves two purposes:
+1. Shared scoring/compressor utilities used by the current runtime implementation.
+2. A stable public import path (`triattention`) while the current vLLM runtime
+   implementation remains in the internal compatibility package `triattention_v2`.
 
-Supports both vLLM V0 and V1 APIs:
-- V0: Use patch_vllm_attention() for monkey patching
-- V1: Use --attention-backend TRIATTENTION with pip install -e .
-
-Phase 1: Core implementation with Triton scoring + PyTorch TopK/Gather
-Phase 2: Advanced optimizations and edge case handling
+Legacy V0/V1 vLLM integrations are intentionally retired from the active package
+surface. Compatibility symbols remain as explicit error stubs to avoid silent misuse.
 """
+
+from __future__ import annotations
 
 from .compressor import TriAttentionCompressor
 from .config import TriAttentionConfig
 from .state import CompressionState
-from .vllm_integration import (
-    PagedKVCacheCompressor,
-    TriAttentionWrapper,
-    create_triattention_wrapper,
-    patch_vllm_attention,
-)
+from .utils import load_frequency_stats, normalize_scores
 
-# V1 Backend exports (lazy import to avoid import errors if vLLM V1 not available)
+
+def _legacy_api_removed(*_args, **_kwargs):
+    raise RuntimeError(
+        "Legacy TriAttention V0/V1 vLLM integrations were removed from the active package. "
+        "Use the current runtime via "
+        "`evaluation/runner/vllm_triattention_runner.py` (or the dispatcher configs), "
+        "and keep legacy code under repository_archive if needed."
+    )
+
+
+# Explicit legacy stubs (kept only to fail clearly for stale imports).
+TriAttentionWrapper = _legacy_api_removed
+PagedKVCacheCompressor = _legacy_api_removed
+create_triattention_wrapper = _legacy_api_removed
+patch_vllm_attention = _legacy_api_removed
+
+
 def _get_v1_backend():
-    """Lazy import of V1 backend to avoid import errors."""
-    from .v1_backend import TriAttentionBackend, TriAttentionImpl
-    return TriAttentionBackend, TriAttentionImpl
+    _legacy_api_removed()
 
 
 __version__ = "0.1.0"
 __all__ = [
-    # Core components
+    # Shared scoring/compression primitives
     "TriAttentionCompressor",
     "TriAttentionConfig",
     "CompressionState",
-    # V0 integration
+    "normalize_scores",
+    "load_frequency_stats",
+    # Current/default runtime exports
+    "TriAttentionRuntimeConfig",
+    "TriAttentionV2Config",
+    "install_vllm_integration_monkeypatches",
+    "install_runner_compression_hook",
+    # Legacy stub exports (explicit fail-fast)
     "TriAttentionWrapper",
     "PagedKVCacheCompressor",
     "create_triattention_wrapper",
     "patch_vllm_attention",
-    # V1 backend (lazy import)
     "_get_v1_backend",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy-export current runtime symbols to avoid import cycles with triattention_v2."""
+    if name in {
+        "TriAttentionRuntimeConfig",
+        "TriAttentionV2Config",
+        "install_runner_compression_hook",
+    }:
+        from triattention_v2 import (  # type: ignore
+            TriAttentionConfig as _TriAttentionRuntimeConfig,
+        )
+        from triattention_v2 import (  # type: ignore
+            TriAttentionV2Config as _TriAttentionV2Config,
+            install_runner_compression_hook as _install_runner_compression_hook,
+        )
+
+        mapping = {
+            "TriAttentionRuntimeConfig": _TriAttentionRuntimeConfig,
+            "TriAttentionV2Config": _TriAttentionV2Config,
+            "install_runner_compression_hook": _install_runner_compression_hook,
+        }
+        return mapping[name]
+    if name == "install_vllm_integration_monkeypatches":
+        from triattention_v2.integration_monkeypatch import (  # type: ignore
+            install_vllm_integration_monkeypatches as _install,
+        )
+
+        return _install
+    raise AttributeError(name)

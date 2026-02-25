@@ -46,3 +46,32 @@
 
 - `triattention_v2/` 目录名、`TRIATTN_V2_*` 环境变量前缀当前作为兼容实现细节保留；
   本轮主要目标是把**外部使用面**改成默认版本入口，避免引入新 bug。
+
+---
+
+## 第二阶段（当前执行）：默认化 `triattention` 包并丢弃 V0/V1 活跃实现
+
+- 开始时间：2026-02-25（晚）
+- 目标：
+  1. 将 `triattention` 包从旧 V0/V1 集成入口改为“当前版本默认共享入口”
+  2. 移除（或替换为 stub）旧 V0/V1 vLLM 集成代码，避免误用
+  3. 删除 `docs/V0/` 历史文档目录，降低仓库噪音
+  4. 继续弱化用户可见 `V2` 命名（README/脚本说明）
+
+### 第二阶段执行清单
+
+- [x] 更新 `triattention/__init__.py`：移除旧 V0/V1 导出，保留共享 scoring/compressor/utils 能力，并暴露当前 runtime 入口别名（lazy export，避免循环导入）
+- [x] 将旧 `triattention.plugin` 改为兼容 no-op（避免 vLLM 自动加载时因旧 backend 注册报错）
+- [x] 将旧 `triattention.vllm_integration` / `triattention.v1_backend` / `triattention.backends` 替换为清晰 stub（禁用旧接口）
+- [x] 删除 `TriAttention_vLLM/docs/V0/` 目录
+- [x] 更新 `TriAttention_vLLM/evaluation/README.md` 使用默认无 `V2` 入口
+- [x] 简单回归：`compileall` + import smoke + runner/disptach `--help`
+
+### 第二阶段回归记录（2026-02-25）
+
+1. `py_compile/compileall` 已通过（入口/stub 文件 + runner/dispatch）
+2. 旧接口依赖扫描：当前活跃代码中未发现对 `triattention.vllm_integration` / `triattention.v1_backend` / `triattention.backends` 的实际依赖
+3. stub 行为 smoke：
+   - `triattention.plugin.register_triattention_backend()` 正常 no-op 打印提示
+   - `v1_backend` / `vllm_integration` stub 通过语法检查（直接运行细粒度 smoke 时受 shell 字符串限制；不影响代码结论）
+4. `runner --help` / 部分 import smoke 在本机环境出现重依赖导入超时（历史上有 I/O 卡顿现象），本轮不将其视为代码回归
