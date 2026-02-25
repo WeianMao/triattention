@@ -21,7 +21,7 @@
 
 说明：
 - 内部实现目录名为 `TriAttention_vLLM/triattention_runtime/`。
-- `TriAttention_vLLM/triattention_v2/` 仅作为兼容导入包保留（薄转发层）。
+- `TriAttention_vLLM/triattention_runtime/` 仅作为兼容导入包保留（薄转发层）。
 
 ## 3. 代码主链路（按职责）
 

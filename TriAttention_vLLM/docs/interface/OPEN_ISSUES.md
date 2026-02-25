@@ -9,7 +9,7 @@
 ## [P0] 1. V2 触发链路需要从原型走向稳定版
 - 背景：V2 要求由 scheduler 侧决定何时压缩，runner 侧执行压缩。
 - 影响：没有该链路就无法验证“显存触发压缩”主能力。
-- 现状证据：`triattention_v2/scheduler.py` 已挂载 `triattention_signals` 并接入 effective len tracker；`triattention_v2/runner.py` 已消费信号并调用 executor。
+- 现状证据：`triattention_runtime/scheduler.py` 已挂载 `triattention_signals` 并接入 effective len tracker；`triattention_runtime/runner.py` 已消费信号并调用 executor。
 - 下一步：将当前 experimental compaction 从原型升级为稳定实现，并覆盖多层/多组 KV cache 场景。
 - 验收标准：可在日志中观测到“达到阈值 -> 触发压缩 -> 执行 hook -> 压缩执行完成”的稳定流程，且行为可回归验证。
 - 状态：In Progress
@@ -21,8 +21,8 @@
   2. 修复一个局部问题时容易引入新的语义漂移或热路径开销；
   3. 新同事接手成本高，开发效率下降。
 - 现状证据：
-  - `triattention_v2/gpu_seq_len_patch.py` 已承载 worker 热路径主逻辑（decode 每步介入 `seq_lens/slot_mapping` 修正）；
-  - `triattention_v2/hook_impl.py` 体量与职责明显过载（HF 语义、compaction、reclaim、guard、debug 同处一层）；
+  - `triattention_runtime/gpu_seq_len_patch.py` 已承载 worker 热路径主逻辑（decode 每步介入 `seq_lens/slot_mapping` 修正）；
+  - `triattention_runtime/hook_impl.py` 体量与职责明显过载（HF 语义、compaction、reclaim、guard、debug 同处一层）；
   - `effective length / absolute progress / physical block state` 的事实源分散在 scheduler/runner/worker patch/hook。
   - HF selector 仍存在对 base_runner/active runtime state 的隐式上下文依赖（ambient context），会增加 HF 偏差定位成本（属架构收敛中的未完成项）。
 - 下一步：
@@ -52,14 +52,14 @@
 
 ## [P0] 1.1 V2 与 HF 等价性验证仍未完成
 - 背景：项目终极目标是与 HF SpeckV 等价。
-- 现状证据：已具备 V2 quick 评测入口（`evaluation/runner/vllm_triattention_v2_runner.py` + quick dispatch 配置），可快速产出对比样本。
+- 现状证据：已具备 V2 quick 评测入口（`evaluation/runner/vllm_triattention_runtime_runner.py` + quick dispatch 配置），可快速产出对比样本。
 - 差距：V2 当前压缩执行仍是原型 compaction，尚未接入完整 SpeckV score/topk 语义。
 - 2026-02-22 补充（已修复一项确定性语义偏差）：
-  - `triattention_v2/hook_impl.py` 的 `per_layer` paged streaming 选点路径在 `sparse_normalize_scores=True` 时曾错误跳过归一化；
+  - `triattention_runtime/hook_impl.py` 的 `per_layer` paged streaming 选点路径在 `sparse_normalize_scores=True` 时曾错误跳过归一化；
   - 该假设仅在“每头独立 top-k”时近似成立，但对跨 head 聚合（尤其 `max`）不成立，会造成 HF 对齐偏差；
   - 已改为两遍 chunk 统计（mean/std）+ 分块归一化，避免物化全序列分数。
 - 2026-02-22 补充（已修复一项高风险 pre-step 语义错误）：
-  - `triattention_v2/hook_impl.py` 在 `execute_model()` 前执行压缩时，曾使用 `signal.estimated_cache_len`（= pre-step effective len + scheduled_tokens）直接作为 gather/score/select/compaction 的 `total_tokens`；
+  - `triattention_runtime/hook_impl.py` 在 `execute_model()` 前执行压缩时，曾使用 `signal.estimated_cache_len`（= pre-step effective len + scheduled_tokens）直接作为 gather/score/select/compaction 的 `total_tokens`；
   - 这会把“本轮尚未写入 KV 的 scheduled token”错误计入压缩语义（decode 常见为 +1），同时把 `round_start` 也带偏；
   - 已修复为：
     1) 压缩执行使用 `pre-step effective len`（由 `estimated_cache_len - scheduled_tokens` 反推）；
@@ -84,7 +84,7 @@
   - 在新架构下重新评估事件回传/有效长度同步与 compaction 热路径开销；
   - 重跑全量实验验证吞吐是否恢复。
 - 2026-02-22 进展补充：
-  - T2/T3 架构重构阶段已形成稳定代码基线（`tests_v2` 全量 + `run_smoke.py` 均通过）；
+  - T2/T3 架构重构阶段已形成稳定代码基线（`tests_runtime` 全量 + `run_smoke.py` 均通过）；
   - 当前仍有一轮较早启动的 full-run 在运行（旧代码启动），其结果不可直接用于评估本轮重构后的性能/正确性。
 - 验收标准：在相同配置下，全量运行时长回到可接受区间，且日志显示稳定产出增长。
 - 状态：In Progress
@@ -106,7 +106,7 @@
 - 当前状态：
   - 已落地“attention-head 打分 -> 组内（KV group）max -> 跨层 mean -> per-head topk”路径；
   - 已补齐头维适配：当 stats 头数与 runtime KV 头数不一致时，不再隐式使用前几个头；
-  - 代码与单测已落地（`triattention_v2/hook_impl.py`、`tests_v2/test_hook_impl.py`），待全量 AIME24 sample8 复跑验证指标。
+  - 代码与单测已落地（`triattention_runtime/hook_impl.py`、`tests_runtime/test_hook_impl.py`），待全量 AIME24 sample8 复跑验证指标。
 - 验收标准：在同一参数集下，V2 与 HF 的差异收敛到可解释范围，且 legacy 结果可复现。
 - 状态：In Progress
 
@@ -129,7 +129,7 @@
 - 背景：V2 在 `enable_experimental_block_reclaim=true` 时，会走 `preserve_dropped_tokens=False` 的 fill-in-place 快路径，再截断 tail blocks。
 - 问题：当前 fill-in-place 仅保证“保留集合正确”，未保证“保留 token 顺序与 keep_indices 一致”。
 - 代码证据：
-  - `triattention_v2/kv_compaction.py` 中 `compact_request_kv_in_place(..., preserve_dropped_tokens=False)` 逻辑：
+  - `triattention_runtime/kv_compaction.py` 中 `compact_request_kv_in_place(..., preserve_dropped_tokens=False)` 逻辑：
     - 保留前缀内已存在 token 原地不动；
     - 仅把 tail survivor 回填到空槽；
     - 该过程会改变保留 token 的相对顺序。
@@ -141,7 +141,7 @@
 - 最新排查结论（2026-02-22 更新）：
   - 已验证“仅修 recent-window 语义（改为 R 集合，不依赖逻辑尾部顺序）”仍不足以消除问题；
   - 在恢复低搬运 fill-hole 后，观测到 `recent_unabsorbed` 已稳定在合理值（首轮后约 134，符合调度/块粒度偏差），但单样本 strict reclaim 仍持续 runaway（压缩 step 持续上升）；
-  - 新增证据：`tests_v2/test_kv_compaction.py` 随机对照已验证低搬运 fill-hole 与全排列路径在“前缀有效区保留集合”上等价（shared/per-head 均通过），因此“compaction 前缀写坏数据”嫌疑下降；
+  - 新增证据：`tests_runtime/test_kv_compaction.py` 随机对照已验证低搬运 fill-hole 与全排列路径在“前缀有效区保留集合”上等价（shared/per-head 均通过），因此“compaction 前缀写坏数据”嫌疑下降；
   - 当前更可疑根因转向“长度语义混用”：vLLM worker GPU 输入准备将 `num_computed_tokens` 同时用于绝对位置与 `seq_lens`，而 V2 压缩只在 scheduler/hook 层维护 effective length。
 - 当前判断：
   - 不能把问题简单归因于“乱序不安全”；更可能是模块边界内仍存在长度/状态不同步 bug；
@@ -163,9 +163,9 @@
     - `pos = num_computed_tokens + block`
   - `vllm/vllm/v1/worker/gpu/model_runner.py:587-595` 同步调用该路径。
 - 当前修复方向（已落地代码，作为过渡方案）：
-  - 新增 `triattention_v2/gpu_seq_len_patch.py` 修正 `seq_lens/slot_mapping` 口径；
-  - `triattention_v2/runner.py` 在 `execute_model` 前为当前 step 提供 effective 语义覆盖；
-  - `triattention_v2/worker.py` 在注入 runner 时安装补丁。
+  - 新增 `triattention_runtime/gpu_seq_len_patch.py` 修正 `seq_lens/slot_mapping` 口径；
+  - `triattention_runtime/runner.py` 在 `execute_model` 前为当前 step 提供 effective 语义覆盖；
+  - `triattention_runtime/worker.py` 在注入 runner 时安装补丁。
 - 新判断（2026-02-22）：
   - 该补丁解决了部分确定性语义错误，但已演变为 decode 热路径长期主逻辑，成为性能与维护复杂度的主要来源之一；
   - 后续需按 `1.0` 转向 Runtime Input Adapter 方案，将 patch 降级为兼容路径。
@@ -187,7 +187,7 @@
 ## [P0] 2. 请求级状态生命周期尚未在 V2 代码闭环
 - 背景：V1 历史问题证明 request state 处理是高风险点。
 - 影响：状态污染会直接导致压缩策略错误或结果漂移。
-- 现状证据：`triattention_v2/state.py` + `triattention_v2/runner.py` 已接入生命周期骨架，覆盖 new/finished/preempt/resume。
+- 现状证据：`triattention_runtime/state.py` + `triattention_runtime/runner.py` 已接入生命周期骨架，覆盖 new/finished/preempt/resume。
 - 下一步：补齐与真实压缩执行联动后的状态一致性校验。
 - 验收标准：长跑测试无跨请求状态污染；请求结束后状态可回收。
 - 状态：In Progress
@@ -195,7 +195,7 @@
 ## [P0] 3. Phase 1 回归门禁缺失
 - 背景：多人并行开发需要固定最小回归集。
 - 影响：修改后可能破坏核心路径且无人感知。
-- 现状证据：`tests_v2/run_smoke.py` 已恢复可用，支持自动跳过需要 pytest fixture 的测试函数（当前可运行并输出 `smoke passed`）。
+- 现状证据：`tests_runtime/run_smoke.py` 已恢复可用，支持自动跳过需要 pytest fixture 的测试函数（当前可运行并输出 `smoke passed`）。
 - 下一步：将该脚本接入 CI 或统一 pre-merge 流程，形成强制门禁。
 - 验收标准：PR 可自动/半自动执行并给出通过结论。
 - 状态：In Progress
@@ -203,7 +203,7 @@
 ## [P1] 4. prefill 裁剪策略未落地
 - 背景：V2 支持 `protect_prefill=false`，但 Phase 1 默认先保护。
 - 影响：影响后续压缩率与策略实验。
-- 现状证据：`triattention_v2/kv_compaction.py` 已实现裁剪语义，`tests_v2/test_kv_compaction.py` 与 `tests_v2/test_hook_impl.py` 已覆盖关键路径。
+- 现状证据：`triattention_runtime/kv_compaction.py` 已实现裁剪语义，`tests_runtime/test_kv_compaction.py` 与 `tests_runtime/test_hook_impl.py` 已覆盖关键路径。
 - 下一步：在真实 vLLM 端到端链路中验证该模式（不仅是单元/冒烟）。
 - 验收标准：两种 prefill 模式可配置切换且行为可验证。
 - 状态：In Progress
@@ -211,7 +211,7 @@
 ## [P1] 4.1 `scheduled_tokens > 1` 场景下的 prefill 兼容风险
 - 背景：当前 V2 触发链路包含 scheduler 估算长度 + runner 前置执行压缩的路径；在 chunked prefill 或单轮执行多 token 场景中，估算口径与真实执行口径可能出现偏差。
 - 影响：可能导致压缩触发步与 HF strict 语义不一致，进而在 prefill 边界下出现“触发延后一轮/选点集合不同”的行为偏差；在极端场景可能放大为容量控制不稳定。
-- 现状证据：`triattention_v2/scheduler.py` 使用 `estimated_cache_len = effective_base_len + scheduled_tokens`，`triattention_v2/hook_impl.py` 再基于 `req_state.num_computed_tokens` 做 clamp 后执行。
+- 现状证据：`triattention_runtime/scheduler.py` 使用 `estimated_cache_len = effective_base_len + scheduled_tokens`，`triattention_runtime/hook_impl.py` 再基于 `req_state.num_computed_tokens` 做 clamp 后执行。
 - 下一步：先记录为 P1，不在本轮 P0 修复中改动；后续设计 post-forward strict 模式，按真实执行增量（含 prefill/decode 拆分）决定触发。
 - 验收标准：`scheduled_tokens > 1` 下，容量轨迹与触发语义可解释且有保护阈值（overflow guard），并可与 strict 参考链路对照验证。
 - 状态：Open
@@ -219,7 +219,7 @@
 ## [P1] 4.2 `enable_experimental_block_reclaim=false` 时 `effective_len_regression` 门禁可能误杀
 - 背景：为定位 strict reclaim 精度问题，执行单样本 A/B（同题同 seed，仅切 `enable_experimental_block_reclaim`）时，`reclaim=false` 分支在中途崩溃。
 - 现象：
-  - `triattention_v2/hook_impl.py` 抛出 `TRIATTN_FATAL_TRITON_SCORING_REQUIRED:effective_len_regressed`
+  - `triattention_runtime/hook_impl.py` 抛出 `TRIATTN_FATAL_TRITON_SCORING_REQUIRED:effective_len_regressed`
   - 示例：`effective_tokens=2511`, `num_computed_tokens=2511`, `guard_upper=2490`（step≈4655）
 - 影响：
   - 会阻断 no-reclaim 对照实验（A/B baseline），造成 shard 失败或结果缺失；
@@ -227,7 +227,7 @@
 - 初步判断：
   - `effective_len_guard` 在 no-reclaim 模式下过严，scheduler/runner 异步步进与 block 粒度 slack 不足，触发 false positive。
 - 已修复（2026-02-22）：
-  - `triattention_v2/hook_impl.py` 的 `effective_len_regression` 门禁仅在 `enable_experimental_block_reclaim=true` 时启用；
+  - `triattention_runtime/hook_impl.py` 的 `effective_len_regression` 门禁仅在 `enable_experimental_block_reclaim=true` 时启用；
   - no-reclaim A/B 对照路径不再因该门禁 false positive 中断。
 - 说明：
   - 该门禁本意是保护 strict reclaim 长度语义，no-reclaim 路径中触发误杀并不能指示真实错误。
@@ -236,7 +236,7 @@
 ## [P1] 5. batch>1 行为验证缺失
 - 背景：V2 明确需要支持 batch>1。
 - 影响：不验证将导致线上并发场景风险。
-- 现状证据：`tests_v2/test_runner.py::test_runner_batch_signals_keep_request_isolation` 已覆盖 batch 信号下的状态隔离。
+- 现状证据：`tests_runtime/test_runner.py::test_runner_batch_signals_keep_request_isolation` 已覆盖 batch 信号下的状态隔离。
 - 下一步：补齐 scheduler 端 batch>1 触发一致性测试与长跑回归。
 - 验收标准：batch>1 下结果稳定，且无 request identity 混淆。
 - 状态：In Progress
@@ -244,9 +244,9 @@
 ## [P1] 6. 配置导致性能损失：默认 `enforce_eager=True`
 - 背景：V2 评测链路为保守稳定，历史上默认开启 eager 执行。
 - 影响：会压低吞吐上限，导致 full-run 时长偏长，且更容易误判为“压缩逻辑慢”。
-- 现状证据：`evaluation/runner/vllm_triattention_v2_runner.py` 在未显式覆盖时沿用 eager 配置；近期慢跑样本中该项与低利用率同时出现。
+- 现状证据：`evaluation/runner/vllm_triattention_runtime_runner.py` 在未显式覆盖时沿用 eager 配置；近期慢跑样本中该项与低利用率同时出现。
 - 已完成（代码默认值调整，2026-02-22）：
-  - `evaluation/runner/vllm_triattention_v2_runner.py` 默认 `--enforce-eager=False`；
+  - `evaluation/runner/vllm_triattention_runtime_runner.py` 默认 `--enforce-eager=False`；
   - 保留 CLI 开关，必要时可显式回退。
 - 待验证：
   - 仍需执行 `false/true` A/B 冒烟并记录吞吐差异，形成量化结论。

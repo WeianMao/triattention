@@ -24,18 +24,18 @@
 ## 环境变量
 
 ```bash
-TRIATTN_V2_KV_BUDGET=2048
-TRIATTN_V2_DIVIDE_LENGTH=128
-TRIATTN_V2_PROTECT_PREFILL=true
-TRIATTN_V2_ENABLE_KV_USAGE_TRIGGER=false
-TRIATTN_V2_KV_USAGE_TRIGGER=0.98
-TRIATTN_V2_KV_USAGE_RELEASE=0.90
-TRIATTN_V2_PER_HEAD_SELECTION_SEMANTICS=legacy_layer_local
-TRIATTN_V2_ENABLE_EXPERIMENTAL_KV_COMPACTION=false
-TRIATTN_V2_LOG_DECISIONS=true
+TRIATTN_RUNTIME_KV_BUDGET=2048
+TRIATTN_RUNTIME_DIVIDE_LENGTH=128
+TRIATTN_RUNTIME_PROTECT_PREFILL=true
+TRIATTN_RUNTIME_ENABLE_KV_USAGE_TRIGGER=false
+TRIATTN_RUNTIME_KV_USAGE_TRIGGER=0.98
+TRIATTN_RUNTIME_KV_USAGE_RELEASE=0.90
+TRIATTN_RUNTIME_PER_HEAD_SELECTION_SEMANTICS=legacy_layer_local
+TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION=false
+TRIATTN_RUNTIME_LOG_DECISIONS=true
 ```
 
-`TRIATTN_V2_PER_HEAD_SELECTION_SEMANTICS`：
+`TRIATTN_RUNTIME_PER_HEAD_SELECTION_SEMANTICS`：
 
 1. `legacy_layer_local`：历史 V2 行为（每层独立做 per-head 选择）。
 2. `hf_aligned_global_per_head`：HF 对齐行为（跨层聚合后做 per-head 选择，同一组 per-head 索引应用到组内各层）。
@@ -59,7 +59,7 @@ triattention_apply_compression(req_id: str, signal: CompressionSignal, scheduler
 
 若 hook 缺失或执行失败，系统自动降级为 no-op，不中断主推理流程。
 
-默认 `TRIATTN_V2_ENABLE_EXPERIMENTAL_KV_COMPACTION=false`：
+默认 `TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION=false`：
 
 1. 只做压缩计划（plan-only），不直接修改底层 KV cache。
 2. 开启后才执行实验性 in-place compaction（仅 Phase 1B 原型能力）。
@@ -69,7 +69,7 @@ triattention_apply_compression(req_id: str, signal: CompressionSignal, scheduler
 ## Phase 1 冒烟回归
 
 ```bash
-python tests_v2/run_smoke.py
+python tests_runtime/run_smoke.py
 ```
 
 该脚本不依赖 pytest，适合作为本地最小回归门禁。
@@ -78,11 +78,11 @@ python tests_v2/run_smoke.py
 
 ```bash
 # 仅跑 V2 quick 小样本（默认 2 题 x 1 sample）
-TriAttention_vLLM/evaluation/scripts/run_v2_hf_alignment_quick.sh
+TriAttention_vLLM/evaluation/scripts/run_hf_alignment_quick.sh
 
 # 先做 dry-run（仅检查命令链路）
-TriAttention_vLLM/evaluation/scripts/run_v2_hf_alignment_quick.sh --dry-run
+TriAttention_vLLM/evaluation/scripts/run_hf_alignment_quick.sh --dry-run
 
 # 跑 V2 quick 并与 HF 结果做对比报告
-TriAttention_vLLM/evaluation/scripts/run_v2_hf_alignment_quick.sh /path/to/hf_merged.jsonl
+TriAttention_vLLM/evaluation/scripts/run_hf_alignment_quick.sh /path/to/hf_merged.jsonl
 ```

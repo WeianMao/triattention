@@ -18,7 +18,7 @@
 重点确认：
 1. 当前默认目标模式是 `per_head`
 2. `per_layer_per_head` 需要支持（代码路径已修关键风险）
-3. 内部实现目录已重命名为 `triattention_runtime/`，`triattention_v2/` 仅作兼容导入层
+3. 内部实现目录已重命名为 `triattention_runtime/`，`triattention_runtime/` 仅作兼容导入层
 
 ## Step 2（5 分钟）看 HF 对齐状态
 
@@ -36,7 +36,7 @@
    - 默认配置：`TriAttention_vLLM/evaluation/dispatch/configs/triattention_aime24.yaml`
 2. Runner：
    - `TriAttention_vLLM/evaluation/runner/vllm_triattention_runner.py`
-   - 兼容实现：`TriAttention_vLLM/evaluation/runner/vllm_triattention_v2_runner.py`
+   - 兼容实现：`TriAttention_vLLM/evaluation/runner/vllm_triattention_runtime_runner.py`
 3. 集成接入与主链路：
    - `TriAttention_vLLM/triattention_runtime/integration_monkeypatch.py`
    - `TriAttention_vLLM/triattention_runtime/scheduler.py`

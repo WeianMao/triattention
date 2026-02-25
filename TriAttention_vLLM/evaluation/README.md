@@ -70,11 +70,11 @@ python TriAttention_vLLM/evaluation/runner/vllm_triattention_runner.py \
 - 默认目标模式为 `per_head`（`per_layer` 需显式放行，否则报错）
 - 历史 `per_layer` strict 配置文件仍可能存在于仓库中，仅用于回溯，不作为默认实验入口
 - 输出字段与 HF/R-KV 兼容风格保持一致；详细字段定义请直接参考：
-  - `TriAttention_vLLM/evaluation/runner/vllm_triattention_v2_runner.py`
+  - `TriAttention_vLLM/evaluation/runner/vllm_triattention_runtime_runner.py`
   - `TriAttention_vLLM/evaluation/eval/eval_math_multi.py`
 
 ## 兼容说明
 
-- `vllm_triattention_v2_runner.py` 与 `triattention_v2_*` 配置文件仍可运行（兼容）
+- `vllm_triattention_runtime_runner.py` 与 `triattention_runtime_*` 配置文件仍可运行（兼容）
 - 当前实现内部目录名为 `triattention_runtime/`
-- `triattention_v2/` 保留为兼容导入包（薄转发层），不代表旧版本逻辑
+- `triattention_runtime/` 保留为兼容导入包（薄转发层），不代表旧版本逻辑

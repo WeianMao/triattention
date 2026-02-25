@@ -591,7 +591,7 @@ def main() -> None:
     allowed_current_runners = {
         "vllm_triattention_runner.py",
         "vllm_triattention_runtime_runner.py",
-        "vllm_triattention_v2_runner.py",
+        "vllm_triattention_runtime_runner.py",
     }
     if (runner_path.name not in allowed_current_runners and not args.allow_legacy_v1):
         raise RuntimeError(

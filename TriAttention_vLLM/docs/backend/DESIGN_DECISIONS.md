@@ -64,10 +64,10 @@
 - 影响范围：文档导航、任务分配、实现优先级。
 - 状态：Accepted
 
-## D-008：V2 新代码落位到独立目录 `triattention_v2/`
+## D-008：V2 新代码落位到独立目录 `triattention_runtime/`
 - 日期：2026-02-13
 - 问题：继续在旧目录叠加会造成新旧实现耦合和交付歧义。
-- 决策：所有 V2 新功能统一放在 `triattention_v2/`，旧版目录冻结为参考。
+- 决策：所有 V2 新功能统一放在 `triattention_runtime/`，旧版目录冻结为参考。
 - 影响范围：代码组织、评审边界、多人协作。
 - 状态：Accepted
 
@@ -90,7 +90,7 @@
 ## D-011：KV compaction 采用“默认 plan-only + 实验开关”
 - 日期：2026-02-13
 - 问题：直接启用 in-place KV 改写存在高风险，需要先验证方向。
-- 决策：默认只输出压缩计划（plan-only），不改写底层 KV；通过 `TRIATTN_V2_ENABLE_EXPERIMENTAL_KV_COMPACTION=true` 才启用原型 compaction。
+- 决策：默认只输出压缩计划（plan-only），不改写底层 KV；通过 `TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION=true` 才启用原型 compaction。
 - 影响范围：线上稳定性、灰度测试路径、Phase 1B 验证节奏。
 - 状态：Accepted
 
@@ -105,7 +105,7 @@
 - 日期：2026-02-16
 - 问题：在 vLLM 现有调度语义下，请求逻辑长度仍按原 `num_computed_tokens` 前进；若 compaction 后将尾部 K/V 置零，这些位置仍参与 softmax，导致分布被系统性污染。
 - 决策：Phase 1 原型 compaction 改为“全量重排（kept + dropped permutation）”，不再写 zero tail。先保证语义正确，再在后续阶段引入可验证的物理长度收缩方案。
-- 影响范围：`triattention_v2/kv_compaction.py` 的共享/分头路径行为定义与回归测试预期。
+- 影响范围：`triattention_runtime/kv_compaction.py` 的共享/分头路径行为定义与回归测试预期。
 - 替代方案：继续 zero-tail（拒绝）。
 - 状态：Accepted
 
@@ -116,7 +116,7 @@
   - 新增 `per_head_selection_semantics` 配置开关；
   - `legacy_layer_local` 保留历史行为用于复现；
   - `hf_aligned_global_per_head` 用于 HF 对齐实验。
-- 影响范围：`triattention_v2/hook_impl.py` 组内选择逻辑、`evaluation/runner/vllm_triattention_v2_runner.py` 参数与 env 映射、`tests_v2/test_hook_impl.py`。
+- 影响范围：`triattention_runtime/hook_impl.py` 组内选择逻辑、`evaluation/runner/vllm_triattention_runtime_runner.py` 参数与 env 映射、`tests_runtime/test_hook_impl.py`。
 - 状态：Accepted
 
 ## D-015：物理回收采用“半侵入继承层”路线
@@ -126,7 +126,7 @@
   - 不直接修改上游 vLLM 源码文件；
   - 通过 TriAttention 继承层（scheduler/worker/runner）扩展运行时契约；
   - 先落地“回收事件 -> scheduler 应用 -> block_pool 回收”闭环，再迭代 fill-in-place 优化。
-- 影响范围：`triattention_v2/scheduler.py`、`triattention_v2/runner.py`、`triattention_v2/hook_impl.py` 以及相关回归测试。
+- 影响范围：`triattention_runtime/scheduler.py`、`triattention_runtime/runner.py`、`triattention_runtime/hook_impl.py` 以及相关回归测试。
 - 替代方案：
   - 仅 hook 层实现回收（拒绝，状态不同步风险高）；
   - 直接 fork/修改 vLLM 主源码（暂缓）。
@@ -140,7 +140,7 @@
   - executor 保留 hook `details`；
   - runner 将 `block_reclaim` 透传到 `ModelRunnerOutput.triattention_compression_events`；
   - scheduler 在 `update_from_output()` 消费并执行 tail block 回收（受实验开关保护）。
-- 影响范围：`triattention_v2/{executor.py,hook_impl.py,runner.py,scheduler.py}` 与对应单测。
+- 影响范围：`triattention_runtime/{executor.py,hook_impl.py,runner.py,scheduler.py}` 与对应单测。
 - 替代方案：仅在 worker 侧更新 `req_state.block_ids`（拒绝，调度侧状态不同步）。
 - 状态：Accepted
 
@@ -156,9 +156,9 @@
   3. `gpu_seq_len_patch.py` 降级为过渡兼容路径，不再作为长期热路径主设计；
   4. `hook_impl.py` 后续按执行计划拆分为编排层 + 语义层 + 布局层。
 - 影响范围：
-  - `triattention_v2/hook_impl.py`
-  - `triattention_v2/gpu_seq_len_patch.py`
-  - `triattention_v2/runner.py`
+  - `triattention_runtime/hook_impl.py`
+  - `triattention_runtime/gpu_seq_len_patch.py`
+  - `triattention_runtime/runner.py`
   - 新增 `selector/layout/input_adapter` 相关模块
   - 文档 SSOT：`interface/V2_OVERVIEW.md`, `interface/OPEN_ISSUES.md`
 - 替代方案：
@@ -189,8 +189,8 @@
   - 不将物理保序作为正确性条件；
   - page/block 级重排仅作为可选 fast path（表达能力足够时使用）。
 - 影响范围：
-  - `triattention_v2/kv_compaction.py`
-  - `triattention_v2/layout_engine.py`
+  - `triattention_runtime/kv_compaction.py`
+  - `triattention_runtime/layout_engine.py`
   - strict reclaim 验收口径（关注 keep 集合一致性而非物理顺序）
 - 替代方案：
   - 全量保序重写前缀（拒绝，搬运量过大）
@@ -206,11 +206,11 @@
   - 允许使用 monkey patch，但 patch 仅做薄适配，不再承担复杂推导与时序敏感状态管理主逻辑；
   - 将 step-local `ACTIVE_*` override 路径降级为过渡兼容/调试路径，逐步退出主热路径。
 - 影响范围：
-  - `triattention_v2/input_adapter.py`
-  - `triattention_v2/effective_overrides.py`
-  - `triattention_v2/input_patch_state.py`
-  - `triattention_v2/input_patch_vllm_backend.py`
-  - `triattention_v2/runner_output_bridge.py`
+  - `triattention_runtime/input_adapter.py`
+  - `triattention_runtime/effective_overrides.py`
+  - `triattention_runtime/input_patch_state.py`
+  - `triattention_runtime/input_patch_vllm_backend.py`
+  - `triattention_runtime/runner_output_bridge.py`
 - 替代方案：
   - 完全不改 decode 输入准备逻辑，仅压缩时 hack 单一状态（拒绝，无法同时满足 positions/seq_lens/slot_mapping 分叉语义）
   - 继续沿用 step-local override 主路径（拒绝，性能与稳定性风险持续）
@@ -225,10 +225,10 @@
   - 运行时适配优先使用 request-local 持久状态增量表达，不在每步重建稀疏映射/字典；
   - 若少量 monkey patch 能在保持薄适配的前提下减少热路径开销与实现复杂度，允许使用。
 - 影响范围：
-  - `triattention_v2/input_adapter.py`
-  - `triattention_v2/effective_overrides.py`
-  - `triattention_v2/input_patch_*`
-  - `triattention_v2/runner_output_bridge.py`
+  - `triattention_runtime/input_adapter.py`
+  - `triattention_runtime/effective_overrides.py`
+  - `triattention_runtime/input_patch_*`
+  - `triattention_runtime/runner_output_bridge.py`
   - 后续所有 decode 热路径相关实现评审标准
 - 替代方案：
   - 为通用性预先引入额外每步 metadata（拒绝）

@@ -56,7 +56,6 @@ dataset2max_length = {
 
 RUN_SEED_STRIDE = 1_000_000
 RUNTIME_ENV_PREFIX = "TRIATTN_RUNTIME_"
-LEGACY_RUNTIME_ENV_PREFIX = "TRIATTN_V2_"
 
 
 def set_seed(seed: int) -> None:
@@ -412,7 +411,6 @@ def parse_arguments() -> argparse.Namespace:
                         help="Run without TriAttention scheduler/worker injection (fullkv baseline).")
     parser.add_argument(
         "--force-runtime-integration",
-        "--force-v2-integration",
         dest="force_runtime_integration",
         type=str2bool,
         default=False,
@@ -420,7 +418,6 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--force-runtime-worker",
-        "--force-v2-worker",
         dest="force_runtime_worker",
         type=str2bool,
         default=False,
@@ -428,7 +425,6 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--force-runtime-scheduler",
-        "--force-v2-scheduler",
         dest="force_runtime_scheduler",
         type=str2bool,
         default=False,
@@ -479,18 +475,11 @@ def _apply_runtime_env(args: argparse.Namespace) -> None:
     }
     for key, value in env_values.items():
         os.environ[RUNTIME_ENV_PREFIX + key] = value
-        os.environ[LEGACY_RUNTIME_ENV_PREFIX + key] = value
     if args.sparse_stats_path:
         sparse_stats_path = str(resolve_path(args.sparse_stats_path))
         os.environ[RUNTIME_ENV_PREFIX + "SPARSE_STATS_PATH"] = sparse_stats_path
-        os.environ[LEGACY_RUNTIME_ENV_PREFIX + "SPARSE_STATS_PATH"] = sparse_stats_path
     else:
         os.environ.pop(RUNTIME_ENV_PREFIX + "SPARSE_STATS_PATH", None)
-        os.environ.pop(LEGACY_RUNTIME_ENV_PREFIX + "SPARSE_STATS_PATH", None)
-
-
-# Backward-compat alias for older tests/scripts importing the helper directly.
-_apply_v2_env = _apply_runtime_env
 
 
 def setup_vllm_engine(args: argparse.Namespace):
@@ -519,13 +508,13 @@ def setup_vllm_engine(args: argparse.Namespace):
     )
 
     force_runtime_integration = bool(
-        getattr(args, "force_runtime_integration", getattr(args, "force_v2_integration", False))
+        getattr(args, "force_runtime_integration", False)
     )
     force_runtime_worker = bool(
-        getattr(args, "force_runtime_worker", getattr(args, "force_v2_worker", False))
+        getattr(args, "force_runtime_worker", False)
     )
     force_runtime_scheduler = bool(
-        getattr(args, "force_runtime_scheduler", getattr(args, "force_v2_scheduler", False))
+        getattr(args, "force_runtime_scheduler", False)
     )
     force_any_runtime = bool(force_runtime_integration or force_runtime_worker or force_runtime_scheduler)
     use_runtime_integration = (not args.disable_compression) or force_any_runtime

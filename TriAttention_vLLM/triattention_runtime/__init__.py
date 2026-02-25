@@ -9,13 +9,11 @@ from .planner import CompressionPlanner
 from .signals import CompressionSignal
 from .state import RequestCompressionState, RequestStateStore
 
-# Public aliases for the current/default runtime config name.
+# Public alias for the current/default runtime config name.
 TriAttentionConfig = TriAttentionRuntimeConfig
-TriAttentionV2Config = TriAttentionRuntimeConfig
 
 __all__ = [
     "TriAttentionRuntimeConfig",
-    "TriAttentionV2Config",
     "TriAttentionConfig",
     "EffectiveCacheLenTracker",
     "CompressionExecutionResult",

@@ -61,17 +61,9 @@ class TriAttentionRuntimeConfig:
     @classmethod
     def from_env(cls, prefix: str = "TRIATTN_RUNTIME_") -> "TriAttentionRuntimeConfig":
         env = os.environ
-        fallback_prefixes = ("TRIATTN_V2_",) if prefix == "TRIATTN_RUNTIME_" else ()
 
         def _get_raw(name: str) -> str | None:
-            raw = env.get(prefix + name)
-            if raw is not None:
-                return raw
-            for fallback_prefix in fallback_prefixes:
-                raw = env.get(fallback_prefix + name)
-                if raw is not None:
-                    return raw
-            return None
+            return env.get(prefix + name)
 
         def maybe_int(name: str, default: int) -> int:
             raw = _get_raw(name)
@@ -216,8 +208,7 @@ class TriAttentionRuntimeConfig:
             raise ValueError(
                 "pruning_mode='per_layer' is disabled by default in the runtime to prevent "
                 "accidental use. Set allow_per_layer_mode=True "
-                "(env TRIATTN_RUNTIME_ALLOW_PER_LAYER_MODE=1; legacy "
-                "TRIATTN_V2_ALLOW_PER_LAYER_MODE also supported) for explicit opt-in."
+                "(env TRIATTN_RUNTIME_ALLOW_PER_LAYER_MODE=1) for explicit opt-in."
             )
         if self.sparse_score_aggregation not in {"mean", "max"}:
             raise ValueError(
@@ -280,7 +271,3 @@ class TriAttentionRuntimeConfig:
                 "enable_experimental_block_reclaim=True when "
                 "require_physical_reclaim=True"
             )
-
-
-# Backward-compat alias retained for older tests/config imports.
-TriAttentionV2Config = TriAttentionRuntimeConfig

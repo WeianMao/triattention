@@ -47,7 +47,6 @@ __all__ = [
     "load_frequency_stats",
     # Current/default runtime exports
     "TriAttentionRuntimeConfig",
-    "TriAttentionV2Config",
     "install_vllm_integration_monkeypatches",
     "install_runner_compression_hook",
     # Legacy stub exports (explicit fail-fast)
@@ -63,20 +62,18 @@ def __getattr__(name: str):
     """Lazy-export current runtime symbols to avoid import cycles."""
     if name in {
         "TriAttentionRuntimeConfig",
-        "TriAttentionV2Config",
         "install_runner_compression_hook",
     }:
         from triattention_runtime import (  # type: ignore
             TriAttentionConfig as _TriAttentionRuntimeConfig,
         )
         from triattention_runtime import (  # type: ignore
-            TriAttentionV2Config as _TriAttentionV2Config,
+            TriAttentionRuntimeConfig as _TriAttentionRuntimeConfig,
             install_runner_compression_hook as _install_runner_compression_hook,
         )
 
         mapping = {
             "TriAttentionRuntimeConfig": _TriAttentionRuntimeConfig,
-            "TriAttentionV2Config": _TriAttentionV2Config,
             "install_runner_compression_hook": _install_runner_compression_hook,
         }
         return mapping[name]

@@ -2,7 +2,7 @@
 
 - 更新时间：2026-02-25
 - 适用版本：vLLM `0.15.x`
-- 说明：当前默认实现的内部目录名为 `triattention_runtime/`；`triattention_v2/` 保留为兼容导入层。
+- 说明：当前默认实现的内部目录名为 `triattention_runtime/`；`triattention_runtime/` 保留为兼容导入层。
 
 ## 1. 默认入口（建议使用）
 
@@ -11,7 +11,7 @@
    - 默认配置：`TriAttention_vLLM/evaluation/dispatch/configs/triattention_aime24.yaml`
 2. Runner：
    - `TriAttention_vLLM/evaluation/runner/vllm_triattention_runner.py`
-   - 兼容转发到现有实现：`TriAttention_vLLM/evaluation/runner/vllm_triattention_v2_runner.py`
+   - 兼容转发到现有实现：`TriAttention_vLLM/evaluation/runner/vllm_triattention_runtime_runner.py`
 
 ## 2. 模块边界（代码即文档）
 
@@ -56,7 +56,7 @@
 
 ## 4. 维护建议（简版）
 
-1. 对外入口优先保持稳定；内部实现目录现已统一为 `triattention_runtime/`，`triattention_v2/` 仅作兼容层。
+1. 对外入口优先保持稳定；内部实现目录现已统一为 `triattention_runtime/`，`triattention_runtime/` 仅作兼容层。
 2. decode 热路径改动要极少，性能问题先检查：
    - `integration_monkeypatch.py`
    - `worker.py`

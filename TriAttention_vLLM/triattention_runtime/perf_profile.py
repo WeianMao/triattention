@@ -13,10 +13,6 @@ from typing import Any
 
 def _env_enabled(name: str, default: str = "0") -> bool:
     raw = os.environ.get(name)
-    if raw is None and name.startswith("TRIATTN_V2_"):
-        raw = os.environ.get(name.replace("TRIATTN_V2_", "TRIATTN_RUNTIME_", 1))
-    if raw is None and name.startswith("TRIATTN_RUNTIME_"):
-        raw = os.environ.get(name.replace("TRIATTN_RUNTIME_", "TRIATTN_V2_", 1))
     if raw is None:
         raw = default
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
@@ -24,10 +20,6 @@ def _env_enabled(name: str, default: str = "0") -> bool:
 
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
-    if raw is None and name.startswith("TRIATTN_V2_"):
-        raw = os.environ.get(name.replace("TRIATTN_V2_", "TRIATTN_RUNTIME_", 1))
-    if raw is None and name.startswith("TRIATTN_RUNTIME_"):
-        raw = os.environ.get(name.replace("TRIATTN_RUNTIME_", "TRIATTN_V2_", 1))
     if raw is None:
         return default
     try:
@@ -62,10 +54,7 @@ class TriAttentionPerfProfile:
 
     @classmethod
     def from_env(cls, logger: logging.Logger) -> "TriAttentionPerfProfile":
-        sink_dir = (
-            os.environ.get("TRIATTN_RUNTIME_PERF_SINK_DIR")
-            or os.environ.get("TRIATTN_V2_PERF_SINK_DIR")
-        )
+        sink_dir = os.environ.get("TRIATTN_RUNTIME_PERF_SINK_DIR")
         return cls(
             logger=logger,
             enabled=_env_enabled("TRIATTN_RUNTIME_PERF_PROFILE", "0"),
