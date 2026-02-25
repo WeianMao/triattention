@@ -5,14 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .config import TriAttentionV2Config
+from .config import TriAttentionRuntimeConfig
 from .constants import TRITON_SCORING_REQUIRED_MARKER
 from .request_key_compat import get_scheduled_token_items
 from .signals import CompressionSignal
 
 
 def effective_budget_for_signal(
-    config: TriAttentionV2Config,
+    config: TriAttentionRuntimeConfig,
     signal: CompressionSignal,
     total_tokens: int,
 ) -> int:
@@ -23,7 +23,7 @@ def effective_budget_for_signal(
 
 
 def effective_len_guard_upper(
-    config: TriAttentionV2Config,
+    config: TriAttentionRuntimeConfig,
     signal: CompressionSignal,
 ) -> int:
     budget = config.kv_budget
@@ -88,7 +88,7 @@ class HookRuntimeContext:
 def build_hook_runtime_context(
     *,
     base_runner: Any,
-    config: TriAttentionV2Config,
+    config: TriAttentionRuntimeConfig,
     req_id: str,
     req_state: Any,
     req_runtime_state: Any,

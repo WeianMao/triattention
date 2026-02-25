@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Any
 
-from .config import TriAttentionV2Config
+from .config import TriAttentionRuntimeConfig
 from .executor import CompressionExecutor, RunnerHookCompressionExecutor
 from .input_patch_backend import install_runtime_input_patch
 from .request_key_compat import get_scheduled_token_items
@@ -37,9 +37,9 @@ class TriAttentionModelRunner:
     - keep vLLM forward path untouched.
     """
 
-    def __init__(self, base_runner: Any, config: TriAttentionV2Config | None = None):
+    def __init__(self, base_runner: Any, config: TriAttentionRuntimeConfig | None = None):
         self._base_runner = base_runner
-        self.config = config or TriAttentionV2Config.from_env()
+        self.config = config or TriAttentionRuntimeConfig.from_env()
         self.state_store = RequestStateStore()
         # Expose request-level compression state to the installed hook so it can
         # apply recent-window semantics without relying on logical token order.

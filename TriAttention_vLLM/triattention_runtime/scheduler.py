@@ -13,7 +13,7 @@ from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.structured_output import StructuredOutputManager
 
-from .config import TriAttentionV2Config
+from .config import TriAttentionRuntimeConfig
 from .effective_len_tracker import EffectiveCacheLenTracker
 from .planner import CompressionPlanner
 from .request_key_compat import iter_scheduled_token_items
@@ -44,7 +44,7 @@ class TriAttentionScheduler(Scheduler):
             include_finished_set=include_finished_set,
             log_stats=log_stats,
         )
-        self.triattention_config = TriAttentionV2Config.from_env()
+        self.triattention_config = TriAttentionRuntimeConfig.from_env()
         self._planner = CompressionPlanner(self.triattention_config)
         self._effective_len_tracker = EffectiveCacheLenTracker()
         self._prefill_lens: dict[str, int] = {}

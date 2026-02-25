@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from .config import TriAttentionV2Config
+from .config import TriAttentionRuntimeConfig
 from .signals import CompressionSignal
 
 
 class CompressionPlanner:
     """Builds per-request trigger decisions from scheduler-side signals."""
 
-    def __init__(self, config: TriAttentionV2Config) -> None:
+    def __init__(self, config: TriAttentionRuntimeConfig) -> None:
         self.config = config
         self._kv_pressure_armed = False
 

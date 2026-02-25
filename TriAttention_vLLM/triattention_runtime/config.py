@@ -1,4 +1,4 @@
-"""Configuration for TriAttention v2 integration."""
+"""Configuration for TriAttention runtime integration."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def _parse_bool(raw: str) -> bool:
 
 
 @dataclass
-class TriAttentionV2Config:
+class TriAttentionRuntimeConfig:
     """Runtime config loaded by scheduler and worker.
 
     Phase 1B provides lifecycle + trigger signaling, with an optional
@@ -43,7 +43,7 @@ class TriAttentionV2Config:
     effective_len_guard_divide_multiples: int = 2
     score_chunk_max_tokens: int = 4096
 
-    # Optional SpeckV-style scoring path (used by V2 hook when enabled).
+    # Optional SpeckV-style scoring path (used by runtime hook when enabled).
     sparse_stats_path: Path | None = None
     pruning_mode: str = "per_head"
     sparse_score_aggregation: str = "mean"
@@ -59,7 +59,7 @@ class TriAttentionV2Config:
     disable_top_n_high_freq: int = 0
 
     @classmethod
-    def from_env(cls, prefix: str = "TRIATTN_V2_") -> "TriAttentionV2Config":
+    def from_env(cls, prefix: str = "TRIATTN_V2_") -> "TriAttentionRuntimeConfig":
         env = os.environ
 
         def maybe_int(name: str, default: int) -> int:
@@ -203,7 +203,7 @@ class TriAttentionV2Config:
             )
         if self.pruning_mode == "per_layer" and not self.allow_per_layer_mode:
             raise ValueError(
-                "pruning_mode='per_layer' is disabled by default in V2 to prevent "
+                "pruning_mode='per_layer' is disabled by default in the runtime to prevent "
                 "accidental use. Set allow_per_layer_mode=True "
                 "(env TRIATTN_V2_ALLOW_PER_LAYER_MODE=1) for explicit opt-in."
             )
@@ -268,3 +268,7 @@ class TriAttentionV2Config:
                 "enable_experimental_block_reclaim=True when "
                 "require_physical_reclaim=True"
             )
+
+
+# Backward-compat alias retained for older tests/config imports.
+TriAttentionV2Config = TriAttentionRuntimeConfig

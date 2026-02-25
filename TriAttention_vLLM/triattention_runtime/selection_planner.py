@@ -7,7 +7,7 @@ from typing import Any, Callable, Iterable
 
 import torch
 
-from .config import TriAttentionV2Config
+from .config import TriAttentionRuntimeConfig
 from .constants import TRITON_SCORING_REQUIRED_MARKER
 from .kv_compaction import build_keep_token_indices, gather_request_k_dense
 from .layout_engine import PreparedLayerCompaction
@@ -32,7 +32,7 @@ def prepare_group_layer_compactions(
     protect_prefill: bool,
     round_start: int,
     group_budget_total: int,
-    config: TriAttentionV2Config,
+    config: TriAttentionRuntimeConfig,
     strict_triton_required: bool,
     select_keep_indices: Callable[..., dict[str, Any] | None] | None,
     select_keep_indices_for_group: Callable[..., dict[str, Any] | None] | None,

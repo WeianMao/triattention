@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from vllm.logger import init_logger
 
-from .config import TriAttentionV2Config
+from .config import TriAttentionRuntimeConfig
 from .effective_len_tracker import EffectiveCacheLenTracker
 from .planner import CompressionPlanner
 from .request_key_compat import iter_scheduled_token_items
@@ -33,7 +33,7 @@ _ORIG_WORKER_EXECUTE_MODEL: Callable[..., Any] | None = None
 def _patched_scheduler_init(self, *args, **kwargs):
     assert _ORIG_SCHED_INIT is not None
     _ORIG_SCHED_INIT(self, *args, **kwargs)
-    cfg = TriAttentionV2Config.from_env()
+    cfg = TriAttentionRuntimeConfig.from_env()
     # Always attach config/state once patched to keep behavior deterministic.
     self.triattention_config = cfg
     self._planner = CompressionPlanner(cfg)
@@ -108,7 +108,7 @@ def _patched_worker_init_device(self):
     if getattr(self, "_triattention_runner_proxy_installed", False):
         return
     # Reuse TriAttentionWorker lazy-injection fields on native Worker instance.
-    self._triattention_v2_config = TriAttentionV2Config.from_env()
+    self._triattention_runtime_config = TriAttentionRuntimeConfig.from_env()
     self._triattention_runner_proxy_installed = False
 
 

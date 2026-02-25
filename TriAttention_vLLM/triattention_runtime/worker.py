@@ -5,7 +5,7 @@ from __future__ import annotations
 from vllm.logger import init_logger
 from vllm.v1.worker.gpu_worker import Worker as VLLMGPUWorker
 
-from .config import TriAttentionV2Config
+from .config import TriAttentionRuntimeConfig
 from .hook_impl import install_runner_compression_hook
 from .runner import TriAttentionModelRunner
 
@@ -24,7 +24,7 @@ class TriAttentionWorker(VLLMGPUWorker):
         # pre-trigger decode. We lazily wrap on the first step that carries a
         # TriAttention signal (trigger/compressed-request update), which minimizes
         # impact on the common no-compression path.
-        self._triattention_v2_config = TriAttentionV2Config.from_env()
+        self._triattention_runtime_config = TriAttentionRuntimeConfig.from_env()
         self._triattention_runner_proxy_installed = False
 
     def _ensure_triattention_runner_proxy(self) -> None:
@@ -33,7 +33,7 @@ class TriAttentionWorker(VLLMGPUWorker):
         if isinstance(self.model_runner, TriAttentionModelRunner):
             self._triattention_runner_proxy_installed = True
             return
-        config = getattr(self, "_triattention_v2_config", None) or TriAttentionV2Config.from_env()
+        config = getattr(self, "_triattention_runtime_config", None) or TriAttentionRuntimeConfig.from_env()
         base_runner = self.model_runner
         install_runner_compression_hook(base_runner=base_runner, config=config)
         self.model_runner = TriAttentionModelRunner(

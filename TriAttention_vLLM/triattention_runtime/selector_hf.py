@@ -8,12 +8,12 @@ from typing import Any, Callable, Iterable
 
 import torch
 
-from .config import TriAttentionV2Config
+from .config import TriAttentionRuntimeConfig
 from .constants import TRITON_SCORING_REQUIRED_MARKER
 from .kv_compaction import gather_request_k_dense, gather_request_k_dense_range
 
 def build_speckv_selector(
-    config: TriAttentionV2Config,
+    config: TriAttentionRuntimeConfig,
     base_runner: Any | None = None,
 ) -> tuple[
     Callable[..., dict[str, Any] | None] | None,

@@ -1,6 +1,6 @@
 """Current TriAttention vLLM runtime implementation (default internal package)."""
 
-from .config import TriAttentionV2Config
+from .config import TriAttentionRuntimeConfig
 from .effective_len_tracker import EffectiveCacheLenTracker
 from .executor import CompressionExecutionResult, CompressionExecutor
 from .hook_impl import install_runner_compression_hook
@@ -10,13 +10,13 @@ from .signals import CompressionSignal
 from .state import RequestCompressionState, RequestStateStore
 
 # Public aliases for the current/default runtime config name.
-TriAttentionConfig = TriAttentionV2Config
-TriAttentionRuntimeConfig = TriAttentionV2Config
+TriAttentionConfig = TriAttentionRuntimeConfig
+TriAttentionV2Config = TriAttentionRuntimeConfig
 
 __all__ = [
+    "TriAttentionRuntimeConfig",
     "TriAttentionV2Config",
     "TriAttentionConfig",
-    "TriAttentionRuntimeConfig",
     "EffectiveCacheLenTracker",
     "CompressionExecutionResult",
     "CompressionExecutor",

@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 import torch
 
-from .config import TriAttentionV2Config
+from .config import TriAttentionRuntimeConfig
 from .constants import TRITON_SCORING_REQUIRED_MARKER
 from .layout_engine import execute_group_compaction
 from .plan_models import PlacementPlan, ReclaimEvent, ReclaimGroup
@@ -43,7 +43,7 @@ def run_group_compaction_pipeline(
     *,
     req_id: str,
     signal: CompressionSignal,
-    config: TriAttentionV2Config,
+    config: TriAttentionRuntimeConfig,
     strict_triton_required: bool,
     num_computed_tokens: int,
     effective_tokens: int,
@@ -159,7 +159,7 @@ def finalize_hook_placement_result(
     *,
     req_state: Any,
     original_block_ids_by_group: Any,
-    config: TriAttentionV2Config,
+    config: TriAttentionRuntimeConfig,
     selector_status: str,
     outcome: GroupPipelineOutcome,
     effective_tokens: int,

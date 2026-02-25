@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import torch
 
-from .config import TriAttentionV2Config
+from .config import TriAttentionRuntimeConfig
 from .constants import TRITON_SCORING_REQUIRED_MARKER
 from .kv_compaction import (
     build_keep_token_indices,
@@ -28,7 +28,7 @@ from .signals import CompressionSignal
 
 def make_runner_compression_hook(
     base_runner: Any,
-    config: TriAttentionV2Config,
+    config: TriAttentionRuntimeConfig,
 ) -> Callable[..., dict[str, Any]]:
     """Create a hook function bound to a concrete base runner."""
     # Route through extracted selector module. `_build_speckv_selector` symbol is
@@ -169,7 +169,7 @@ _build_speckv_selector = _build_speckv_selector_impl
 
 def install_runner_compression_hook(
     base_runner: Any,
-    config: TriAttentionV2Config,
+    config: TriAttentionRuntimeConfig,
 ) -> None:
     """Install default hook on the underlying base runner if missing."""
     if hasattr(base_runner, "triattention_apply_compression"):
