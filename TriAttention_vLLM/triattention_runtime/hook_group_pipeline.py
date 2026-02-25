@@ -1,4 +1,4 @@
-"""Group-level compaction pipeline orchestration for TriAttention V2 hook."""
+"""Group-level compaction pipeline orchestration for TriAttention runtime hook."""
 
 from __future__ import annotations
 

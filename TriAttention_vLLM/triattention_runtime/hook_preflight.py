@@ -1,4 +1,4 @@
-"""Preflight helpers for TriAttention V2 compression hook."""
+"""Preflight helpers for TriAttention runtime compression hook."""
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,4 +1,4 @@
-"""Runner state/lifecycle updates for TriAttention V2."""
+"""Runner state/lifecycle updates for TriAttention runtime."""
 
 from __future__ import annotations
 

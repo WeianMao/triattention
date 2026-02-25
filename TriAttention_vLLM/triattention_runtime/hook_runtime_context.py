@@ -1,4 +1,4 @@
-"""Runtime length/guard context preparation for TriAttention V2 hook."""
+"""Runtime length/guard context preparation for TriAttention runtime hook."""
 
 from __future__ import annotations
 

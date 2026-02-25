@@ -1,4 +1,4 @@
-"""Installer for vLLM runtime input patch hooks used by TriAttention V2."""
+"""Installer for vLLM runtime input patch hooks used by TriAttention runtime."""
 from __future__ import annotations
 
 from typing import Any, Callable

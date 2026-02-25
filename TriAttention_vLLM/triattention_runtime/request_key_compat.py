@@ -4,7 +4,7 @@ vLLM may expose `num_scheduled_tokens` with keys that are:
 - request-id strings, or
 - request objects / wrappers carrying `request_id` / `req_id`.
 
-TriAttention V2 uses these helpers to normalize keys consistently across
+TriAttention runtime uses these helpers to normalize keys consistently across
 scheduler/runtime/hook codepaths.
 """
 

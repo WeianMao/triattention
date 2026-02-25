@@ -1,4 +1,4 @@
-"""Resolve vLLM KV cache tensors grouped by kv-cache group/layer for TriAttention V2."""
+"""Resolve vLLM KV cache tensors grouped by kv-cache group/layer for TriAttention runtime."""
 
 from __future__ import annotations
 

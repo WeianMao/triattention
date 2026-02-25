@@ -1,7 +1,7 @@
-"""Monkey patch vLLM V1 scheduler/worker for TriAttention V2 integration.
+"""Monkey patch vLLM V1 scheduler/worker for TriAttention runtime integration.
 
 This keeps vLLM class identities unchanged (native Scheduler/Worker) while
-injecting the minimum TriAttention hooks needed for V2 behavior.
+injecting the minimum TriAttention hooks needed for current runtime behavior.
 """
 
 from __future__ import annotations
@@ -168,7 +168,7 @@ def install_vllm_integration_monkeypatches(
     _PATCHED_WORKER_ACTIVE = bool(patch_worker)
     _PATCHED = True
     logger.info(
-        "Installed TriAttention V2 monkeypatch integration: patch_scheduler=%s patch_worker=%s",
+        "Installed TriAttention runtime monkeypatch integration: patch_scheduler=%s patch_worker=%s",
         patch_scheduler,
         patch_worker,
     )

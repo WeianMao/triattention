@@ -1,4 +1,4 @@
-"""vLLM patch backend closures for TriAttention V2 input overrides."""
+"""vLLM patch backend closures for TriAttention runtime input overrides."""
 
 from __future__ import annotations
 

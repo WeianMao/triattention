@@ -1,4 +1,4 @@
-"""Structured plan/result models for V2 selector/layout/reclaim pipeline.
+"""Structured plan/result models for runtime selector/layout/reclaim pipeline.
 
 These models are intentionally lightweight and keep hook return compatibility
 by exposing `to_dict()` / `to_hook_result_dict()` helpers.

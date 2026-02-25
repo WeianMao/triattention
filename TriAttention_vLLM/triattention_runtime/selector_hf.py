@@ -1,4 +1,4 @@
-"""HF-aligned SpeckV selector implementation for TriAttention V2."""
+"""HF-aligned SpeckV selector implementation for TriAttention runtime."""
 
 from __future__ import annotations
 

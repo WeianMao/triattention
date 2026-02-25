@@ -1,4 +1,4 @@
-"""Runner output bridge helpers for TriAttention V2.
+"""Runner output bridge helpers for TriAttention runtime.
 
 Keeps `TriAttentionModelRunner` focused on orchestration while this module owns:
 - base runner execute_model invocation under effective-input overrides

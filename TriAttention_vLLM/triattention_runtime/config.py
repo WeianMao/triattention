@@ -59,23 +59,34 @@ class TriAttentionRuntimeConfig:
     disable_top_n_high_freq: int = 0
 
     @classmethod
-    def from_env(cls, prefix: str = "TRIATTN_V2_") -> "TriAttentionRuntimeConfig":
+    def from_env(cls, prefix: str = "TRIATTN_RUNTIME_") -> "TriAttentionRuntimeConfig":
         env = os.environ
+        fallback_prefixes = ("TRIATTN_V2_",) if prefix == "TRIATTN_RUNTIME_" else ()
+
+        def _get_raw(name: str) -> str | None:
+            raw = env.get(prefix + name)
+            if raw is not None:
+                return raw
+            for fallback_prefix in fallback_prefixes:
+                raw = env.get(fallback_prefix + name)
+                if raw is not None:
+                    return raw
+            return None
 
         def maybe_int(name: str, default: int) -> int:
-            raw = env.get(prefix + name)
+            raw = _get_raw(name)
             return default if raw is None else int(raw)
 
         def maybe_float(name: str, default: float) -> float:
-            raw = env.get(prefix + name)
+            raw = _get_raw(name)
             return default if raw is None else float(raw)
 
         def maybe_bool(name: str, default: bool) -> bool:
-            raw = env.get(prefix + name)
+            raw = _get_raw(name)
             return default if raw is None else _parse_bool(raw)
 
         def maybe_str(name: str, default: str | None) -> str | None:
-            raw = env.get(prefix + name)
+            raw = _get_raw(name)
             if raw is None:
                 return default
             raw = raw.strip()
@@ -205,7 +216,8 @@ class TriAttentionRuntimeConfig:
             raise ValueError(
                 "pruning_mode='per_layer' is disabled by default in the runtime to prevent "
                 "accidental use. Set allow_per_layer_mode=True "
-                "(env TRIATTN_V2_ALLOW_PER_LAYER_MODE=1) for explicit opt-in."
+                "(env TRIATTN_RUNTIME_ALLOW_PER_LAYER_MODE=1; legacy "
+                "TRIATTN_V2_ALLOW_PER_LAYER_MODE also supported) for explicit opt-in."
             )
         if self.sparse_score_aggregation not in {"mean", "max"}:
             raise ValueError(

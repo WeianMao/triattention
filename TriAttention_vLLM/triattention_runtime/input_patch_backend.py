@@ -1,4 +1,4 @@
-"""Backend facade for TriAttention V2 runtime input patch integration.
+"""Backend facade for TriAttention runtime input patch integration.
 
 This gives runner/worker/input_adapter a stable interface while the underlying
 implementation transitions away from patch-heavy logic.

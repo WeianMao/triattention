@@ -1,4 +1,4 @@
-"""Runtime input adapter entry points for TriAttention V2.
+"""Runtime input adapter entry points for TriAttention runtime.
 
 This module centralizes runner-side preparation of effective-length/slot
 semantics before worker input prep. It currently wraps the existing

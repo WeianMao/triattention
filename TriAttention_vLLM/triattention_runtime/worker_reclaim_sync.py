@@ -1,4 +1,4 @@
-"""Worker-side block-table reclaim synchronization helpers for TriAttention V2."""
+"""Worker-side block-table reclaim synchronization helpers for TriAttention runtime."""
 
 from __future__ import annotations
 

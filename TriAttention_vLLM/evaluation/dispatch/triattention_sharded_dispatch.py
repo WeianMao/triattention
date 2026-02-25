@@ -588,7 +588,11 @@ def main() -> None:
     conda_env = experiment.get("conda_env", "rkv")
     eval_conda_env = experiment.get("eval_conda_env", conda_env)
     runner_path = resolve_path(experiment["runner_path"])
-    allowed_current_runners = {"vllm_triattention_runner.py", "vllm_triattention_v2_runner.py"}
+    allowed_current_runners = {
+        "vllm_triattention_runner.py",
+        "vllm_triattention_runtime_runner.py",
+        "vllm_triattention_v2_runner.py",
+    }
     if (runner_path.name not in allowed_current_runners and not args.allow_legacy_v1):
         raise RuntimeError(
             "Refusing to run legacy V1 runner by default. "

@@ -1,4 +1,4 @@
-"""Layout/compaction execution helpers for TriAttention V2.
+"""Layout/compaction execution helpers for TriAttention runtime.
 
 This module is the first step of splitting layout/reclaim logic out of
 `hook_impl.py`. It intentionally keeps APIs narrow and compatibility-focused.

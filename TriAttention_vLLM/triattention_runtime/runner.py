@@ -146,7 +146,7 @@ class TriAttentionModelRunner:
         patch_ok = install_runtime_input_patch()
         if not patch_ok:
             raise RuntimeError(
-                "TriAttention V2 requires gpu seq_len/slot_mapping patch when "
+                "TriAttention runtime requires gpu seq_len/slot_mapping patch when "
                 "effective-length overrides are active, but patch installation failed"
             )
         self._runtime_input_patch_installed = True
