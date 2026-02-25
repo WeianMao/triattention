@@ -1,5 +1,5 @@
-# TriAttention V2 HF-aligned sample8 config for AIME24.
-# Goal: keep runner/scheduler path as V2, while matching HF baseline
+# TriAttention Runtime HF-aligned sample8 config for AIME24.
+# Goal: keep runner/scheduler path as runtime, while matching HF baseline
 # generation/evaluation settings as closely as possible.
 
 experiment:

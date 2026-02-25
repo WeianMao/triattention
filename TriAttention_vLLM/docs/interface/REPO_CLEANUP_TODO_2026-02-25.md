@@ -131,3 +131,28 @@
 6. `trivllm` 关键 pytest（需 `PYTHONPATH=TriAttention_vLLM`）：
    - `tests_runtime/test_config.py` → `8 passed`
    - `tests_runtime/test_runtime_eval_runner.py -k 'test_apply_runtime_env or test_setup_vllm_engine_force_runtime_scheduler_only_installs_scheduler_patch'` → `2 passed`
+
+---
+
+## 第五阶段（当前执行）：活跃文档/注释热点去旧命名（不改逻辑）
+
+- 开始时间：2026-02-25（深夜）
+- 目标（第一优先级）：
+  1. 清理活跃文档、README、配置注释中的旧 `V2` 命名与旧路径引用
+  2. 不改算法逻辑与运行行为，仅做文案/引用规整
+  3. 完成后跑基础回归（路径扫描 + `compileall` + `trivllm` 关键 pytest）
+
+### 第五阶段执行清单
+
+- [x] 在活跃文档中将 `V2_*` 文档路径引用更新为 `RUNTIME_*`
+- [x] 清理 `triattention_runtime/README.md`、`evaluation/README.md`、配置注释中的旧 `V2` 文案
+- [x] 修正文案替换后出现的不自然表述（如“已不再使用 Runtime 命名”）
+- [x] 更新本节回归记录（扫描 / compileall / pytest）
+
+### 第五阶段回归记录（2026-02-25）
+
+1. 残留扫描：排除 `REPO_CLEANUP_TODO` 历史记录与 `repository_archive/docs/archive` 后，活跃代码/文档/测试路径未再发现旧 `V2` 命名残留。
+2. `compileall`：已覆盖 `triattention_runtime/`、`evaluation/runner`、`evaluation/dispatch`、`tests_runtime/`，通过。
+3. `trivllm` 关键 pytest（需 `PYTHONPATH=TriAttention_vLLM`）：
+   - `tests_runtime/test_config.py` → `8 passed`
+   - `tests_runtime/test_runtime_eval_runner.py -k 'test_apply_runtime_env or test_setup_vllm_engine_force_runtime_scheduler_only_installs_scheduler_patch'` → `2 passed`

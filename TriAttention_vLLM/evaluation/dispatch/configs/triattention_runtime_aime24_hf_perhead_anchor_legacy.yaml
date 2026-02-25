@@ -1,5 +1,5 @@
-# TriAttention V2 legacy anchor config.
-# Purpose: reproduce historical V2 per_head behavior (~45% anchor).
+# TriAttention Runtime legacy anchor config.
+# Purpose: reproduce historical Runtime per_head behavior (~45% anchor).
 # This keeps layer-local per_head selection semantics.
 
 experiment:

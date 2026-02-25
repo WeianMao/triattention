@@ -1,5 +1,5 @@
-# TriAttention V2 quick alignment config for AIME24
-# Purpose: fast validation run to check whether V2 path can track HF behavior.
+# TriAttention Runtime quick alignment config for AIME24
+# Purpose: fast validation run to check whether Runtime path can track HF behavior.
 
 experiment:
   name: triattention_runtime_aime24_quick

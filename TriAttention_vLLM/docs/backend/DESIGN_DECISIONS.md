@@ -1,4 +1,4 @@
-# TriAttention_vLLM 设计决策日志（V2）
+# TriAttention_vLLM 设计决策日志（Runtime）
 
 - 更新时间：2026-02-23
 - 状态：Active
@@ -9,7 +9,7 @@
 
 ---
 
-## D-001：V2 主线采用非侵入式扩展
+## D-001：Runtime 主线采用非侵入式扩展
 - 日期：2026-02-13
 - 问题：如何避免高维护成本并支持多人并行开发。
 - 决策：通过 `worker_cls + scheduler_cls` 扩展接入，不修改 vLLM 源码。
@@ -33,7 +33,7 @@
 - 替代方案：使用 batch_idx 或 first_block_id（拒绝）。
 - 状态：Accepted
 
-## D-004：V2 分阶段推进
+## D-004：Runtime 分阶段推进
 - 日期：2026-02-13
 - 问题：需求复杂，无法一轮交付。
 - 决策：
@@ -60,14 +60,14 @@
 ## D-007：V1 方案定位为历史参考，不再作为主线
 - 日期：2026-02-13
 - 问题：V1 对项目有贡献但边界不适合后续主线扩展。
-- 决策：保留 V1 资产用于参考与回归对比，主线迁移 V2。
+- 决策：保留 V1 资产用于参考与回归对比，主线迁移到 Runtime。
 - 影响范围：文档导航、任务分配、实现优先级。
 - 状态：Accepted
 
-## D-008：V2 新代码落位到独立目录 `triattention_runtime/`
+## D-008：Runtime 新代码落位到独立目录 `triattention_runtime/`
 - 日期：2026-02-13
 - 问题：继续在旧目录叠加会造成新旧实现耦合和交付歧义。
-- 决策：所有 V2 新功能统一放在 `triattention_runtime/`，旧版目录冻结为参考。
+- 决策：所有 Runtime 新功能统一放在 `triattention_runtime/`，旧版目录冻结为参考。
 - 影响范围：代码组织、评审边界、多人协作。
 - 状态：Accepted
 
@@ -111,7 +111,7 @@
 
 ## D-014：`per_head` 语义双轨并存，默认保留 legacy
 - 日期：2026-02-16
-- 问题：V2 旧实现中的 `per_head` 为“层内独立选择”，与 HF RKV-style 的“跨层聚合后按 KV head 统一选择”存在结构差异；但旧实验（约 45% 锚点）仍需可复现。
+- 问题：Runtime 旧实现中的 `per_head` 为“层内独立选择”，与 HF RKV-style 的“跨层聚合后按 KV head 统一选择”存在结构差异；但旧实验（约 45% 锚点）仍需可复现。
 - 决策：
   - 新增 `per_head_selection_semantics` 配置开关；
   - `legacy_layer_local` 保留历史行为用于复现；
@@ -144,12 +144,12 @@
 - 替代方案：仅在 worker 侧更新 `req_state.block_ids`（拒绝，调度侧状态不同步）。
 - 状态：Accepted
 
-## D-017：V2 进入“方案重置”阶段，采用三层分离最终架构
+## D-017：Runtime 进入“方案重置”阶段，采用三层分离最终架构
 - 日期：2026-02-22
-- 问题：当前 V2 虽已实现大量原型能力，但出现方案级复杂度漂移：worker 热路径 `gpu_seq_len_patch.py` 承担长期主逻辑、`hook_impl.py` 职责过载、`effective/absolute/physical` 语义事实源分散，导致对齐/性能/规范难以同时满足。
+- 问题：当前 Runtime 虽已实现大量原型能力，但出现方案级复杂度漂移：worker 热路径 `gpu_seq_len_patch.py` 承担长期主逻辑、`hook_impl.py` 职责过载、`effective/absolute/physical` 语义事实源分散，导致对齐/性能/规范难以同时满足。
 - 决策：
   1. 保留现有最终目标不变（HF 对齐优先、物理回收、非侵入式优先）；
-  2. 将 V2 最终架构重构为“三层分离”：
+  2. 将 Runtime 最终架构重构为“三层分离”：
      - HF 语义层（selector，输出 `KeepPlan`）
      - 布局/回收层（layout engine，输出 `PlacementPlan/ReclaimEvent`）
      - 运行时输入适配层（runtime input adapter，显式维护 `absolute_progress/effective_cache_len/effective_slot_base`）
@@ -160,13 +160,13 @@
   - `triattention_runtime/gpu_seq_len_patch.py`
   - `triattention_runtime/runner.py`
   - 新增 `selector/layout/input_adapter` 相关模块
-  - 文档 SSOT：`interface/V2_OVERVIEW.md`, `interface/OPEN_ISSUES.md`
+  - 文档 SSOT：`interface/RUNTIME_OVERVIEW.md`, `interface/OPEN_ISSUES.md`
 - 替代方案：
   - 继续在现有 patch-heavy 路径上叠修复（拒绝，复杂度持续上升）
   - 回退到 V1 / Attention 层主方案（拒绝）
 - 状态：Accepted
 
-## D-018：V2 主线目标模式限定为 `per_head` / `per_layer_per_head`
+## D-018：Runtime 主线目标模式限定为 `per_head` / `per_layer_per_head`
 - 日期：2026-02-23
 - 问题：重构执行顺序中曾出现“先收敛 `per_layer` strict reclaim 再扩到 `per_head`”的临时思路，但该模式不属于实际交付目标，继续作为主线阶段门槛会误导实现优先级。
 - 决策：
@@ -174,8 +174,8 @@
   - `per_layer` 不作为交付目标，也不作为合理中间收敛态；
   - 任务拆分与里程碑不得再以 `per_layer` full-run 作为主线验收门槛。
 - 影响范围：
-  - `docs/backend/V2_FINAL_ARCHITECTURE.md`
-  - `docs/interface/V2_REFACTOR_EXECUTION_PLAN_2026-02-22.md`
+  - `docs/backend/RUNTIME_FINAL_ARCHITECTURE.md`
+  - `docs/interface/RUNTIME_REFACTOR_EXECUTION_PLAN_2026-02-22.md`
   - 相关任务分解、验收口径、接手沟通
 - 替代方案：先以 `per_layer` 跑通再迁移（拒绝，目标偏离且可能引入无效工程工作）。
 - 状态：Accepted
@@ -218,7 +218,7 @@
 
 ## D-021：decode 热路径最小修改原则（代码改动与 metadata 最小化）
 - 日期：2026-02-23
-- 问题：当前 V2 性能瓶颈与复杂度问题的核心来自 decode 热路径持续承载 patch-heavy 逻辑与额外状态/metadata 构造，导致 CPU 拖 GPU。
+- 问题：当前 Runtime 性能瓶颈与复杂度问题的核心来自 decode 热路径持续承载 patch-heavy 逻辑与额外状态/metadata 构造，导致 CPU 拖 GPU。
 - 决策：
   - decode 热路径代码改动与新增 metadata 引入必须最小化；
   - 若某 metadata 仅服务压缩触发步或调试，不得默认进入每步 decode 主路径；
@@ -244,5 +244,5 @@
 - 参考：`archive/snapshots/2026-02-13/interface/OPEN_ISSUES.md`
 
 ### H-002：V1 对“Attention 层后置压缩”可行性进行了充分探索
-- 结论：验证了部分可行性，但不满足 V2 长期可维护边界。
+- 结论：验证了部分可行性，但不满足 Runtime 长期可维护边界。
 - 参考：`archive/snapshots/2026-02-13/backend/ARCHITECTURE_REDESIGN.md`

@@ -1,18 +1,18 @@
-# V2 重构执行计划（方案重置后）
+# Runtime 重构执行计划（方案重置后）
 
 - 更新时间：2026-02-23
 - 状态：Draft
 - 适用范围：vLLM 0.15.x（V1 Engine）
 
-> 本文是 `backend/V2_FINAL_ARCHITECTURE.md` 的落地计划，聚焦“怎么改代码、先改哪里、每步怎么验收”。
+> 本文是 `backend/RUNTIME_FINAL_ARCHITECTURE.md` 的落地计划，聚焦“怎么改代码、先改哪里、每步怎么验收”。
 >
-> 2026-02-23 调整：执行主线与阶段顺序已按 `interface/V2_SCHEME_ADJUSTMENT_2026-02-23.md` 更新（不再以 `per_layer` 为中间收敛目标）。
+> 2026-02-23 调整：执行主线与阶段顺序已按 `interface/RUNTIME_SCHEME_ADJUSTMENT_2026-02-23.md` 更新（不再以 `per_layer` 为中间收敛目标）。
 
 ---
 
 ## 1. 本轮目标（重构阶段，不是继续补丁）
 
-1. 把 V2 的复杂度从“worker 热路径 patch + 巨型 hook”迁回清晰边界。
+1. 把 Runtime 的复杂度从“worker 热路径 patch + 巨型 hook”迁回清晰边界。
 2. 保持 HF 对齐优先，不通过改语义换性能。
 3. 为 `per_head/per_layer_per_head` 共用同一架构打基础。
 4. 明确将 decode 热路径改动与新增 metadata 压到最小集合（性能优先）。
@@ -172,7 +172,7 @@
 
 ## 6. 负责人视角的里程碑（便于汇报）
 
-1. M-Reset-1：方案定稿文档完成（本文 + `backend/V2_FINAL_ARCHITECTURE.md`）
+1. M-Reset-1：方案定稿文档完成（本文 + `backend/RUNTIME_FINAL_ARCHITECTURE.md`）
 2. M-Reset-2：`hook_impl.py` 拆分完成，结构化计划对象落地
 3. M-Reset-3：状态一致性验证门禁落地（压缩后 keep/seq_lens/slot_mappings 一致）
 4. M-Reset-4：Runtime Adapter 新路径接管主热路径（thin adapter + 持久状态）

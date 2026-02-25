@@ -6,7 +6,7 @@
 
 ## 1. 当前结论（简版）
 
-1. 当前默认实现已经是以 `per_head` 为主目标的版本（对外入口已不再使用 `V2` 命名）。
+1. 当前默认实现已经是以 `per_head` 为主目标的版本（对外入口已不再使用旧版本命名）。
 2. 推理吞吐主问题（decode 热路径 wrapper/subclass 接入拖慢）已修复，当前主线采用 monkeypatch 最小接入。
 3. `per_head` 全量 anchor（AIME24 sampled8）已跑通，结果在 HF 参考线附近。
 4. `per_layer_per_head` 代码路径已修复关键 GQA 聚合风险，但端到端实验验收可后置。

@@ -1,4 +1,4 @@
-# TriAttention_vLLM 文档维护规范（V2）
+# TriAttention_vLLM 文档维护规范（Runtime）
 
 > 这是强约束规范。后续开发同事必须遵守。
 
@@ -55,7 +55,7 @@
 
 ## 5. 单一信息源规则（SSOT）
 
-- 当前方案定义：`interface/V2_OVERVIEW.md`
+- 当前方案定义：`interface/RUNTIME_OVERVIEW.md`
 - 当前状态：`interface/CURRENT_STATUS.md`
 - 当前问题：`interface/OPEN_ISSUES.md`
 - 待决策：`interface/PENDING_DECISIONS.md`

@@ -5,7 +5,7 @@
 **状态**: 📋 定义完成
 
 > 说明（2026-02-13）：本文件只定义长期目标与验收口径，不作为当前实施方案文档。  
-> 当前执行方案请以 `interface/V2_OVERVIEW.md` 与 `backend/ARCHITECTURE_REDESIGN.md` 为准。
+> 当前执行方案请以 `interface/RUNTIME_OVERVIEW.md` 与 `backend/ARCHITECTURE_REDESIGN.md` 为准。
 
 ---
 
@@ -488,8 +488,8 @@ TriAttention_vLLM/test/
 
 ### 7.3 关键文档
 
-**当前主文档（V2）**:
-- `docs/interface/V2_OVERVIEW.md` - V2 方案总览（当前执行方案）
+**当前主文档（Runtime）**:
+- `docs/interface/RUNTIME_OVERVIEW.md` - Runtime 方案总览（当前执行方案）
 - `docs/interface/CURRENT_STATUS.md` - 当前进度
 - `docs/interface/OPEN_ISSUES.md` - 当前问题
 - `docs/interface/PENDING_DECISIONS.md` - 待决策项

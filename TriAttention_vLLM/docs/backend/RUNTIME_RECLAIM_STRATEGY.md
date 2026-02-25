@@ -1,4 +1,4 @@
-# V2 物理回收策略（半侵入继承层）
+# Runtime 物理回收策略（半侵入继承层）
 
 - 更新时间：2026-02-16
 - 状态：Active
@@ -8,7 +8,7 @@
 
 ## 1. 背景与目标
 
-当前 V2 已具备 request 级 in-place compaction（逻辑压缩）能力，但尚未完成“物理回收 block/page”闭环。  
+当前 Runtime 已具备 request 级 in-place compaction（逻辑压缩）能力，但尚未完成“物理回收 block/page”闭环。
 目标是在不直接修改上游 vLLM 源码文件的前提下，实现可运行、可验证的回收路径。
 
 本阶段采用“半侵入继承层”策略：
@@ -82,15 +82,14 @@
 
 1. 功能：压缩触发后可观测到 `block_reclaim` 事件，并完成 scheduler 侧回收。
 2. 正确性：基础 smoke/单测通过；无 request 级崩溃或明显状态污染。
-3. 兼容性：默认开关关闭时行为与当前 V2 主线一致。
+3. 兼容性：默认开关关闭时行为与当前 Runtime 主线一致。
 
 ---
 
 ## 7. 关联文档
 
 1. `docs/backend/DESIGN_DECISIONS.md`
-2. `docs/backend/V2_IMPLEMENTATION_BLUEPRINT.md`
+2. `docs/backend/RUNTIME_IMPLEMENTATION_BLUEPRINT.md`
 3. `docs/interface/CURRENT_STATUS.md`
 4. `docs/interface/OPEN_ISSUES.md`
 5. `docs/backend/reference/implementation/fill_in_place.md`
-

@@ -1,18 +1,18 @@
-# TriAttention_vLLM V2 最终架构方案（重构定稿）
+# TriAttention_vLLM Runtime 最终架构方案（重构定稿）
 
 - 更新时间：2026-02-23
 - 状态：Draft
 - 适用范围：vLLM 0.15.x（V1 Engine）
 
-> 目的：在不改变项目最终目标（HF 对齐 / 物理回收 / 高性能 / 非侵入式优先）的前提下，重置 V2 的实现边界，避免继续在补丁链上叠复杂度。
+> 目的：在不改变项目最终目标（HF 对齐 / 物理回收 / 高性能 / 非侵入式优先）的前提下，重置 Runtime 的实现边界，避免继续在补丁链上叠复杂度。
 >
-> 2026-02-23 补充：执行计划已明确收敛到 `per_head` / `per_layer_per_head` 两种目标模式；`per_layer` 不作为主线交付或中间态。具体落地调整见 `interface/V2_SCHEME_ADJUSTMENT_2026-02-23.md`。
+> 2026-02-23 补充：执行计划已明确收敛到 `per_head` / `per_layer_per_head` 两种目标模式；`per_layer` 不作为主线交付或中间态。具体落地调整见 `interface/RUNTIME_SCHEME_ADJUSTMENT_2026-02-23.md`。
 
 ---
 
 ## 1. 适用背景（为什么需要重构方案）
 
-当前 V2 已验证了大量关键能力（调度触发、hook 压缩、reclaim 闭环、HF 打分路径、Triton 打分），但实现复杂度明显偏高，且出现如下结构性问题：
+当前 Runtime 已验证了大量关键能力（调度触发、hook 压缩、reclaim 闭环、HF 打分路径、Triton 打分），但实现复杂度明显偏高，且出现如下结构性问题：
 
 1. `worker` 热路径长期依赖 `gpu_seq_len_patch.py` 修正 `seq_lens/slot_mapping` 语义，decode 全程引入额外 CPU/Python 开销。
 2. `hook_impl.py` 同时承担 HF 语义、压缩执行、reclaim、guard、debug 等职责，边界混杂。
@@ -128,7 +128,7 @@
 
 ### 4.1 recent/prefill 的语义定义
 
-V2 运行时状态需要显式维护：
+Runtime 运行时状态需要显式维护：
 
 1. `S`：稳定已吸收集合（长期保留语义）
 2. `R`：recent 未吸收集合（自上次压缩后新增 decode token）
@@ -248,10 +248,10 @@ V2 运行时状态需要显式维护：
 
 ## 9. 与当前文档的关系（SSOT）
 
-1. `interface/V2_OVERVIEW.md`
+1. `interface/RUNTIME_OVERVIEW.md`
    - 保留为负责人视角总览，增加对本文件的指向。
 2. `backend/ARCHITECTURE_REDESIGN.md`
-   - 保留 V2 原始边界定义；本文件补充“方案偏航后的重构定稿”。
+   - 保留 Runtime 原始边界定义；本文件补充“方案偏航后的重构定稿”。
 3. `interface/OPEN_ISSUES.md`
    - 需将“方案偏航类问题”与“实现 bug”分组，避免继续混写。
 

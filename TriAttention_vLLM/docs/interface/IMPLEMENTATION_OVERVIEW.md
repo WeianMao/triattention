@@ -56,7 +56,7 @@
 
 ## 4. 维护建议（简版）
 
-1. 对外入口优先保持稳定；内部实现目录现已统一为 `triattention_runtime/`，`triattention_runtime/` 仅作兼容层。
+1. 对外入口优先保持稳定；内部实现目录现已统一为 `triattention_runtime/` 仅作兼容层。
 2. decode 热路径改动要极少，性能问题先检查：
    - `integration_monkeypatch.py`
    - `worker.py`

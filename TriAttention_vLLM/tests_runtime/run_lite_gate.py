@@ -1,4 +1,4 @@
-"""Stable lite regression gate for TriAttention V2.
+"""Stable lite regression gate for TriAttention Runtime.
 
 This script avoids environment-dependent pytest plugin hangs by:
 1) forcing PYTEST_DISABLE_PLUGIN_AUTOLOAD=1;

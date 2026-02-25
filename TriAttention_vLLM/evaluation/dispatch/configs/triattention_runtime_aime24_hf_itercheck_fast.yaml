@@ -1,4 +1,4 @@
-# Fast itercheck config for V2 HF-alignment debugging.
+# Fast itercheck config for Runtime HF-alignment debugging.
 # Keeps compaction enabled but shortens max_length to reduce turnaround time.
 
 experiment:

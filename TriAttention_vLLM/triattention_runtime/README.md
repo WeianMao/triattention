@@ -1,6 +1,6 @@
 # TriAttention v2
 
-该目录是 V2 新工程目录，目标是通过 vLLM 可配置扩展点实现非侵入式接入。
+该目录是 Runtime 新工程目录，目标是通过 vLLM 可配置扩展点实现非侵入式接入。
 
 ## 当前范围（Phase 1 骨架）
 
@@ -37,7 +37,7 @@ TRIATTN_RUNTIME_LOG_DECISIONS=true
 
 `TRIATTN_RUNTIME_PER_HEAD_SELECTION_SEMANTICS`：
 
-1. `legacy_layer_local`：历史 V2 行为（每层独立做 per-head 选择）。
+1. `legacy_layer_local`：历史 Runtime 行为（每层独立做 per-head 选择）。
 2. `hf_aligned_global_per_head`：HF 对齐行为（跨层聚合后做 per-head 选择，同一组 per-head 索引应用到组内各层）。
 
 ## 说明
@@ -46,7 +46,7 @@ TRIATTN_RUNTIME_LOG_DECISIONS=true
 
 ## Runner Hook 协议（Phase 1B）
 
-如果底层 runner 实现了以下方法，V2 runner 会在触发命中时调用：
+如果底层 runner 实现了以下方法，runtime runner 会在触发命中时调用：
 
 ```python
 triattention_apply_compression(req_id: str, signal: CompressionSignal, scheduler_output) -> bool | dict
@@ -74,15 +74,15 @@ python tests_runtime/run_smoke.py
 
 该脚本不依赖 pytest，适合作为本地最小回归门禁。
 
-## 快速对齐实验（V2）
+## 快速对齐实验（Runtime）
 
 ```bash
-# 仅跑 V2 quick 小样本（默认 2 题 x 1 sample）
+# 仅跑 Runtime quick 小样本（默认 2 题 x 1 sample）
 TriAttention_vLLM/evaluation/scripts/run_hf_alignment_quick.sh
 
 # 先做 dry-run（仅检查命令链路）
 TriAttention_vLLM/evaluation/scripts/run_hf_alignment_quick.sh --dry-run
 
-# 跑 V2 quick 并与 HF 结果做对比报告
+# 跑 Runtime quick 并与 HF 结果做对比报告
 TriAttention_vLLM/evaluation/scripts/run_hf_alignment_quick.sh /path/to/hf_merged.jsonl
 ```

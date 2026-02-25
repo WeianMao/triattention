@@ -1,4 +1,4 @@
-# TriAttention_vLLM 开发原则（V2）
+# TriAttention_vLLM 开发原则（Runtime）
 
 - 更新时间：2026-02-13
 - 状态：Active

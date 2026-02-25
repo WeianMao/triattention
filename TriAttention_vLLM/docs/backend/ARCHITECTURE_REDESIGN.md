@@ -1,4 +1,4 @@
-# TriAttention_vLLM V2 架构规格
+# TriAttention_vLLM Runtime 架构规格
 
 - 更新时间：2026-02-13
 - 状态：Active
@@ -8,7 +8,7 @@
 
 ## 1. 设计目标
 
-V2 架构目标：
+Runtime 架构目标：
 
 1. 保持对 vLLM **非侵入式**（不改上游源码）。
 2. 将压缩策略与执行拆分，避免职责混乱。
@@ -49,13 +49,13 @@ Attention Backend (FlashAttention)
 
 1. `--worker-cls triattention_runtime.worker.TriAttentionWorker`
 2. `--scheduler-cls triattention_runtime.scheduler.TriAttentionScheduler`
-3. `--attention-backend` 保持标准路径（V2 默认不承载压缩主逻辑）
+3. `--attention-backend` 保持标准路径（runtime 默认不承载压缩主逻辑）
 
 约束：
 
 - 不允许通过 monkey patch vLLM 源码路径实现核心能力。
 - 不允许在 Attention.forward 中挂主压缩流程。
-- V2 新代码统一落位：`TriAttention_vLLM/triattention_runtime/`。
+- Runtime 新代码统一落位：`TriAttention_vLLM/triattention_runtime/`。
 
 ---
 
@@ -236,7 +236,7 @@ Attention Backend (FlashAttention)
 ## 13. 与历史方案关系
 
 1. V1 方案保留为参考资产与回归基线。
-2. V2 方案是当前唯一主线。
+2. Runtime 方案是当前唯一主线。
 3. 历史细节追溯见：
    - `docs/archive/snapshots/2026-02-13/`
    - `docs/backend/reference/`

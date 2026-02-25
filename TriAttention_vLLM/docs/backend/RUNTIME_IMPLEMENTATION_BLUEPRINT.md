@@ -1,4 +1,4 @@
-# V2 实现蓝图（代码映射）
+# Runtime 实现蓝图（代码映射）
 
 - 更新时间：2026-02-13
 - 状态：Active
@@ -15,7 +15,7 @@
 模块映射：
 
 1. `config.py`
-- 职责：统一读取/校验 V2 环境配置。
+- 职责：统一读取/校验 Runtime 环境配置。
 - 输出：`TriAttentionRuntimeConfig`。
 
 2. `planner.py`
