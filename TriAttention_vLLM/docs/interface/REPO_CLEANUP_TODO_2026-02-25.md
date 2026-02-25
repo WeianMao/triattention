@@ -78,26 +78,56 @@
 
 ---
 
-## 第三阶段（当前执行）：重命名内部实现目录 `triattention_runtime`
+## 第三阶段（已完成）：重命名内部实现目录 `triattention_runtime`
 
 - 目标：
-  1. 将内部实现目录从 `triattention_runtime/` 重命名为更清晰的默认命名（计划：`triattention_runtime/`）
-  2. 保留最小兼容包 `triattention_runtime/`（仅转发，不承载实现），避免历史导入路径立即失效
+  1. 将内部实现目录从 `triattention_v2/` 重命名为更清晰的默认命名 `triattention_runtime/`
+  2. （阶段性）保留最小兼容包 `triattention_v2/`（仅转发，不承载实现），避免历史导入路径立即失效
   3. 只修改命名与导入，不改算法逻辑/执行行为
 
 ### 第三阶段执行清单
 
-- [x] `git mv TriAttention_vLLM/triattention_runtime -> TriAttention_vLLM/triattention_runtime`
-- [x] 新增 `triattention_runtime/__init__.py` 兼容包（通过 `__path__` 转发子模块）
+- [x] `git mv TriAttention_vLLM/triattention_v2 -> TriAttention_vLLM/triattention_runtime`
+- [x] 新增 `triattention_v2/__init__.py` 兼容包（通过 `__path__` 转发子模块）
 - [x] 更新当前默认入口与活跃文档中的内部目录引用（最小必要范围）
 - [x] 更新 `triattention/__init__.py` 的 lazy export 导入路径（改为 `triattention_runtime`）
 - [x] 简单回归：`compileall` + `triattention_runtime`/`triattention_runtime` shim import smoke
 
 ### 第三阶段回归记录（2026-02-25）
 
-1. `compileall` 已覆盖 `triattention_runtime/`、`triattention_runtime/__init__.py`、`triattention/__init__.py`
+1. `compileall` 已覆盖 `triattention_runtime/`、`triattention_v2/__init__.py`、`triattention/__init__.py`
 2. shim 机制 smoke（fake `triattention_runtime`）通过：`__path__` 转发与 `from ... import *` 行为正常
 3. 真实导入 smoke 通过：
    - `import triattention_runtime.kv_compaction`
-   - `import triattention_runtime`
+   - `import triattention_v2`（阶段性兼容包）
    - `import triattention; triattention.TriAttentionRuntimeConfig`（lazy export）
+
+---
+
+## 第四阶段（当前执行）：三处热点规整（历史产物命名 + 缓存目录）
+
+- 开始时间：2026-02-25（夜）
+- 目标（第一优先级）：
+  1. 清理当前活跃仓库树中显眼的 `V2` 命名热点（`evaluation/logs`、`evaluation/outputs`、`__pycache__`）
+  2. 不改算法逻辑、不改运行路径，仅做路径命名与缓存清理
+  3. 完成后做基础回归（路径扫描 + `compileall` + 关键 pytest）
+
+### 第四阶段执行清单
+
+- [x] 预检查 `evaluation/logs` 与 `evaluation/outputs` 中含 `v2` 的路径并做冲突检查
+- [x] 批量重命名历史产物路径（`triattention_v2_* -> triattention_runtime_*`、`v2_* -> runtime_*` 等）
+- [x] 删除 `TriAttention_vLLM` 源码树下所有 `__pycache__` 目录
+- [x] 更新本节回归记录（路径扫描 / compileall / pytest）
+
+### 第四阶段回归记录（2026-02-25）
+
+1. 预检查：候选路径 `130` 个，重命名冲突 `0`，目标已存在冲突 `0`
+2. 批量重命名：已完成 `130` 个历史产物路径重命名（仅 `evaluation/logs` 与 `evaluation/outputs`）
+3. `__pycache__`：已删除 `TriAttention_vLLM` 下 `8` 个缓存目录
+4. 路径扫描：
+   - `evaluation/logs` + `evaluation/outputs` 中 basename 含 `v2` 的路径数量：`0`
+   - 活跃代码/测试/配置中 `triattention_v2/tests_v2/TRIATTN_V2_` 仅剩本清单历史记录与 `repository_archive` 备份说明
+5. `compileall`：已覆盖 `triattention_runtime/`、`triattention/`、`evaluation/runner`、`evaluation/dispatch`、`tests_runtime/`，通过
+6. `trivllm` 关键 pytest（需 `PYTHONPATH=TriAttention_vLLM`）：
+   - `tests_runtime/test_config.py` → `8 passed`
+   - `tests_runtime/test_runtime_eval_runner.py -k 'test_apply_runtime_env or test_setup_vllm_engine_force_runtime_scheduler_only_installs_scheduler_patch'` → `2 passed`
