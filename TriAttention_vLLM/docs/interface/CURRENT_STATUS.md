@@ -20,38 +20,39 @@
    - `TriAttention_vLLM/evaluation/runner/vllm_triattention_runner.py`
 
 说明：
-- 内部实现目录名仍为 `TriAttention_vLLM/triattention_v2/`（兼容保留，不代表旧版本）。
+- 内部实现目录名为 `TriAttention_vLLM/triattention_runtime/`。
+- `TriAttention_vLLM/triattention_v2/` 仅作为兼容导入包保留（薄转发层）。
 
 ## 3. 代码主链路（按职责）
 
 1. 集成接入（性能优先）
-   - `TriAttention_vLLM/triattention_v2/integration_monkeypatch.py`
+   - `TriAttention_vLLM/triattention_runtime/integration_monkeypatch.py`
 2. 调度与触发
-   - `TriAttention_vLLM/triattention_v2/scheduler.py`
-   - `TriAttention_vLLM/triattention_v2/planner.py`
-   - `TriAttention_vLLM/triattention_v2/effective_len_tracker.py`
+   - `TriAttention_vLLM/triattention_runtime/scheduler.py`
+   - `TriAttention_vLLM/triattention_runtime/planner.py`
+   - `TriAttention_vLLM/triattention_runtime/effective_len_tracker.py`
 3. 执行编排
-   - `TriAttention_vLLM/triattention_v2/worker.py`
-   - `TriAttention_vLLM/triattention_v2/runner.py`
-   - `TriAttention_vLLM/triattention_v2/runner_output_bridge.py`
+   - `TriAttention_vLLM/triattention_runtime/worker.py`
+   - `TriAttention_vLLM/triattention_runtime/runner.py`
+   - `TriAttention_vLLM/triattention_runtime/runner_output_bridge.py`
 4. HF 对齐选择与布局/压缩
-   - `TriAttention_vLLM/triattention_v2/selector_hf.py`
-   - `TriAttention_vLLM/triattention_v2/selection_planner.py`
-   - `TriAttention_vLLM/triattention_v2/layout_engine.py`
-   - `TriAttention_vLLM/triattention_v2/kv_compaction.py`
+   - `TriAttention_vLLM/triattention_runtime/selector_hf.py`
+   - `TriAttention_vLLM/triattention_runtime/selection_planner.py`
+   - `TriAttention_vLLM/triattention_runtime/layout_engine.py`
+   - `TriAttention_vLLM/triattention_runtime/kv_compaction.py`
 
 ## 4. 模式状态
 
 1. `per_head`
    - 当前主目标模式
-   - 默认模式（见 `TriAttention_vLLM/triattention_v2/config.py:48`）
+   - 默认模式（见 `TriAttention_vLLM/triattention_runtime/config.py:48`）
 2. `per_layer_per_head`
    - 需要支持
    - 关键代码路径已修（GQA 聚合顺序风险）
    - 端到端实验可后置
 3. `per_layer`
    - 保留能力但默认禁止误用
-   - 未显式放行会报错（见 `TriAttention_vLLM/triattention_v2/config.py:204`）
+   - 未显式放行会报错（见 `TriAttention_vLLM/triattention_runtime/config.py:204`）
 
 ## 5. 文档入口（当前）
 

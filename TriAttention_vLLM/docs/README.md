@@ -21,7 +21,8 @@
    - `TriAttention_vLLM/evaluation/runner/vllm_triattention_runner.py`
 
 说明：
-- 当前实现内部兼容目录名仍为 `triattention_v2/`（为降低重构风险保留）。
+- 当前实现内部目录名为 `triattention_runtime/`。
+- `triattention_v2/` 仅作为兼容导入包保留（薄转发层）。
 - `vllm_triattention_v2_runner.py`、`triattention_v2_*` 配置文件仍可用，但不再是默认入口。
 
 ## 文档取舍（本轮整理后）

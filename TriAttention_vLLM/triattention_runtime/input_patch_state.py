@@ -28,6 +28,7 @@ ACTIVE_EXPECTED_QUERY_LENS_CPU: torch.Tensor | None = None
 ACTIVE_EXPECTED_QUERY_LENS_DEVICE_CACHE: dict[tuple[str, int | None], torch.Tensor] = {}
 ACTIVE_EFFECTIVE_OVERRIDES_ENABLED: bool = False
 ACTIVE_EFFECTIVE_OVERRIDES_CONSUMED: bool = False
+ACTIVE_EFFECTIVE_MAPPING_VALIDATED: bool = False
 
 
 def set_active_effective_num_computed_tokens(tensor: torch.Tensor | None) -> None:
@@ -42,9 +43,13 @@ def set_active_effective_positions(tensor: torch.Tensor | None) -> None:
 
 def set_active_effective_overrides_enabled(enabled: bool) -> None:
     global ACTIVE_EFFECTIVE_OVERRIDES_ENABLED, ACTIVE_EFFECTIVE_OVERRIDES_CONSUMED
+    global ACTIVE_EFFECTIVE_MAPPING_VALIDATED
     ACTIVE_EFFECTIVE_OVERRIDES_ENABLED = bool(enabled)
     if not enabled:
         ACTIVE_EFFECTIVE_OVERRIDES_CONSUMED = False
+        ACTIVE_EFFECTIVE_MAPPING_VALIDATED = False
+    else:
+        ACTIVE_EFFECTIVE_MAPPING_VALIDATED = False
 
 
 def mark_active_effective_overrides_consumed() -> None:
@@ -54,6 +59,15 @@ def mark_active_effective_overrides_consumed() -> None:
 
 def active_effective_overrides_consumed() -> bool:
     return bool(ACTIVE_EFFECTIVE_OVERRIDES_CONSUMED)
+
+
+def mark_active_effective_mapping_validated() -> None:
+    global ACTIVE_EFFECTIVE_MAPPING_VALIDATED
+    ACTIVE_EFFECTIVE_MAPPING_VALIDATED = True
+
+
+def active_effective_mapping_validated() -> bool:
+    return bool(ACTIVE_EFFECTIVE_MAPPING_VALIDATED)
 
 
 def _build_sparse_lookup_cpu_tensors(

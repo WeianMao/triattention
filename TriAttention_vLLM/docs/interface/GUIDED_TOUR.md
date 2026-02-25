@@ -18,7 +18,7 @@
 重点确认：
 1. 当前默认目标模式是 `per_head`
 2. `per_layer_per_head` 需要支持（代码路径已修关键风险）
-3. 内部实现目录名仍是 `triattention_v2/`，但对外入口已去 `V2`
+3. 内部实现目录已重命名为 `triattention_runtime/`，`triattention_v2/` 仅作兼容导入层
 
 ## Step 2（5 分钟）看 HF 对齐状态
 
@@ -38,21 +38,21 @@
    - `TriAttention_vLLM/evaluation/runner/vllm_triattention_runner.py`
    - 兼容实现：`TriAttention_vLLM/evaluation/runner/vllm_triattention_v2_runner.py`
 3. 集成接入与主链路：
-   - `TriAttention_vLLM/triattention_v2/integration_monkeypatch.py`
-   - `TriAttention_vLLM/triattention_v2/scheduler.py`
-   - `TriAttention_vLLM/triattention_v2/worker.py`
-   - `TriAttention_vLLM/triattention_v2/runner.py`
+   - `TriAttention_vLLM/triattention_runtime/integration_monkeypatch.py`
+   - `TriAttention_vLLM/triattention_runtime/scheduler.py`
+   - `TriAttention_vLLM/triattention_runtime/worker.py`
+   - `TriAttention_vLLM/triattention_runtime/runner.py`
 
 ## Step 4（按任务深入）
 
 1. 对齐问题先看：
-   - `TriAttention_vLLM/triattention_v2/selector_hf.py`
-   - `TriAttention_vLLM/triattention_v2/selection_planner.py`
+   - `TriAttention_vLLM/triattention_runtime/selector_hf.py`
+   - `TriAttention_vLLM/triattention_runtime/selection_planner.py`
 2. 布局/回收问题先看：
-   - `TriAttention_vLLM/triattention_v2/layout_engine.py`
-   - `TriAttention_vLLM/triattention_v2/kv_compaction.py`
-   - `TriAttention_vLLM/triattention_v2/worker_reclaim_sync.py`
+   - `TriAttention_vLLM/triattention_runtime/layout_engine.py`
+   - `TriAttention_vLLM/triattention_runtime/kv_compaction.py`
+   - `TriAttention_vLLM/triattention_runtime/worker_reclaim_sync.py`
 3. 运行时语义/映射问题先看：
-   - `TriAttention_vLLM/triattention_v2/effective_overrides.py`
-   - `TriAttention_vLLM/triattention_v2/input_adapter.py`
-   - `TriAttention_vLLM/triattention_v2/input_patch_vllm_backend.py`
+   - `TriAttention_vLLM/triattention_runtime/effective_overrides.py`
+   - `TriAttention_vLLM/triattention_runtime/input_adapter.py`
+   - `TriAttention_vLLM/triattention_runtime/input_patch_vllm_backend.py`

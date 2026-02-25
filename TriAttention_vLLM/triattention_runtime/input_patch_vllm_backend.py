@@ -60,6 +60,23 @@ def _validate_query_start_loc_matches_expected_q_lens(
         )
 
 
+def _validate_mapping_once(
+    idx_mapping: torch.Tensor,
+    query_start_loc: torch.Tensor,
+) -> None:
+    if os.environ.get("TRIATTN_RUNTIME_VALIDATE_MAPPING", "0") != "1":
+        return
+    # Both patched vLLM hooks observe the same per-step request packing. Running
+    # the validation once per active override window preserves fail-fast
+    # guarantees while avoiding duplicate host/device sync in the decode hot
+    # path.
+    if _patch_state.active_effective_mapping_validated():
+        return
+    _validate_idx_mapping_matches_expected_rows(idx_mapping)
+    _validate_query_start_loc_matches_expected_q_lens(idx_mapping, query_start_loc)
+    _patch_state.mark_active_effective_mapping_validated()
+
+
 def make_patched_prepare_pos_seq_lens(
     original_prepare_pos_seq_lens: Callable[..., None],
 ) -> Callable[..., None]:
@@ -82,8 +99,7 @@ def make_patched_prepare_pos_seq_lens(
             )
             return
         _patch_state.mark_active_effective_overrides_consumed()
-        _validate_idx_mapping_matches_expected_rows(idx_mapping)
-        _validate_query_start_loc_matches_expected_q_lens(idx_mapping, query_start_loc)
+        _validate_mapping_once(idx_mapping, query_start_loc)
         original_prepare_pos_seq_lens(
             idx_mapping,
             query_start_loc,
@@ -143,8 +159,7 @@ def make_patched_compute_slot_mappings(
         if not _patch_state.ACTIVE_EFFECTIVE_OVERRIDES_ENABLED:
             return original_compute_slot_mappings(self, idx_mapping, query_start_loc, positions)
         _patch_state.mark_active_effective_overrides_consumed()
-        _validate_idx_mapping_matches_expected_rows(idx_mapping)
-        _validate_query_start_loc_matches_expected_q_lens(idx_mapping, query_start_loc)
+        _validate_mapping_once(idx_mapping, query_start_loc)
         eff_positions = _patch_state.ACTIVE_EFFECTIVE_POSITIONS
         if (
             isinstance(eff_positions, torch.Tensor)

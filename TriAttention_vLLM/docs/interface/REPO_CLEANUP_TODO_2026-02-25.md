@@ -34,7 +34,7 @@
 ### C. 代码命名与文案整洁化（保守）
 
 - [x] 调整用户可见日志/CLI 文案中的 `V2` 表述（不改环境变量/内部兼容名）
-- [x] 保留 `triattention_v2` 内部实现目录（兼容优先），避免大规模重命名引入风险
+- [x] （后续已升级）先保留 `triattention_v2` 内部实现目录以降低风险；第三阶段已重命名为 `triattention_runtime/`
 
 ### D. 回归检查
 
@@ -44,7 +44,7 @@
 
 ## 备注
 
-- `triattention_v2/` 目录名、`TRIATTN_V2_*` 环境变量前缀当前作为兼容实现细节保留；
+- （已更新）内部实现目录为 `triattention_runtime/`；`triattention_v2/` 与 `TRIATTN_V2_*` 前缀作为兼容层保留；
   本轮主要目标是把**外部使用面**改成默认版本入口，避免引入新 bug。
 
 ---
@@ -75,3 +75,29 @@
    - `triattention.plugin.register_triattention_backend()` 正常 no-op 打印提示
    - `v1_backend` / `vllm_integration` stub 通过语法检查（直接运行细粒度 smoke 时受 shell 字符串限制；不影响代码结论）
 4. `runner --help` / 部分 import smoke 在本机环境出现重依赖导入超时（历史上有 I/O 卡顿现象），本轮不将其视为代码回归
+
+---
+
+## 第三阶段（当前执行）：重命名内部实现目录 `triattention_v2`
+
+- 目标：
+  1. 将内部实现目录从 `triattention_v2/` 重命名为更清晰的默认命名（计划：`triattention_runtime/`）
+  2. 保留最小兼容包 `triattention_v2/`（仅转发，不承载实现），避免历史导入路径立即失效
+  3. 只修改命名与导入，不改算法逻辑/执行行为
+
+### 第三阶段执行清单
+
+- [x] `git mv TriAttention_vLLM/triattention_v2 -> TriAttention_vLLM/triattention_runtime`
+- [x] 新增 `triattention_v2/__init__.py` 兼容包（通过 `__path__` 转发子模块）
+- [x] 更新当前默认入口与活跃文档中的内部目录引用（最小必要范围）
+- [x] 更新 `triattention/__init__.py` 的 lazy export 导入路径（改为 `triattention_runtime`）
+- [x] 简单回归：`compileall` + `triattention_runtime`/`triattention_v2` shim import smoke
+
+### 第三阶段回归记录（2026-02-25）
+
+1. `compileall` 已覆盖 `triattention_runtime/`、`triattention_v2/__init__.py`、`triattention/__init__.py`
+2. shim 机制 smoke（fake `triattention_runtime`）通过：`__path__` 转发与 `from ... import *` 行为正常
+3. 真实导入 smoke 通过：
+   - `import triattention_v2.kv_compaction`
+   - `import triattention_runtime`
+   - `import triattention; triattention.TriAttentionV2Config`（lazy export）

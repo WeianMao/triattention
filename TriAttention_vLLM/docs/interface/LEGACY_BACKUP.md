@@ -31,5 +31,5 @@
 ## 3. 使用规则
 
 1. 该压缩包仅用于追溯与回归参考。
-2. 当前默认入口使用无 `V2` 命名的 runner/config；内部兼容实现目录仍为 `triattention_v2/`。
+2. 当前默认入口使用无 `V2` 命名的 runner/config；内部实现目录为 `triattention_runtime/`，`triattention_v2/` 仅作兼容层。
 3. 禁止将新功能继续写入旧版目录。

@@ -24,7 +24,7 @@ from .kv_group_resolver import resolve_group_tensors as _resolve_group_tensors
 from .selector_hf import build_speckv_selector as _build_speckv_selector_impl
 from .signals import CompressionSignal
 
-# Selector implementation moved to triattention_v2/selector_hf.py (D-017).
+# Selector implementation moved to triattention_runtime/selector_hf.py (D-017).
 
 def make_runner_compression_hook(
     base_runner: Any,

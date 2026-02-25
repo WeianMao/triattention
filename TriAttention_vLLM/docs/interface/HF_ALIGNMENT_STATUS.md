@@ -13,15 +13,15 @@
 ## 2. 已确认的关键实现点（代码引用）
 
 1. `per_head` 默认模式
-   - `TriAttention_vLLM/triattention_v2/config.py:48`
+   - `TriAttention_vLLM/triattention_runtime/config.py:48`
 2. `per_layer` 默认禁用（避免误用）
-   - `TriAttention_vLLM/triattention_v2/config.py:204`
-   - `TriAttention_vLLM/triattention_v2/selector_hf.py:30`
+   - `TriAttention_vLLM/triattention_runtime/config.py:204`
+   - `TriAttention_vLLM/triattention_runtime/selector_hf.py:30`
 3. `per_layer_per_head` 在 GQA 下使用“先打分再按 KV-head 聚合”
-   - 分组开关决策：`TriAttention_vLLM/triattention_v2/selector_hf.py:237`
-   - 分组聚合实现：`TriAttention_vLLM/triattention_v2/selector_hf.py:263`
-   - `per_layer_per_head` 聚合模式入口：`TriAttention_vLLM/triattention_v2/selector_hf.py:280`
-   - 打分后聚合调用：`TriAttention_vLLM/triattention_v2/selector_hf.py:345`
+   - 分组开关决策：`TriAttention_vLLM/triattention_runtime/selector_hf.py:237`
+   - 分组聚合实现：`TriAttention_vLLM/triattention_runtime/selector_hf.py:263`
+   - `per_layer_per_head` 聚合模式入口：`TriAttention_vLLM/triattention_runtime/selector_hf.py:280`
+   - 打分后聚合调用：`TriAttention_vLLM/triattention_runtime/selector_hf.py:345`
 
 ## 3. `per_head` 全量 anchor 结果（记录）
 

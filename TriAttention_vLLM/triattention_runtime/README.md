@@ -17,8 +17,8 @@
 ## 启动方式（class path）
 
 ```bash
---worker-cls triattention_v2.worker.TriAttentionWorker \
---scheduler-cls triattention_v2.scheduler.TriAttentionScheduler
+--worker-cls triattention_runtime.worker.TriAttentionWorker \
+--scheduler-cls triattention_runtime.scheduler.TriAttentionScheduler
 ```
 
 ## 环境变量

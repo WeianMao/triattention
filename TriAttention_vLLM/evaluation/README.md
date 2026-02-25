@@ -76,5 +76,5 @@ python TriAttention_vLLM/evaluation/runner/vllm_triattention_runner.py \
 ## 兼容说明
 
 - `vllm_triattention_v2_runner.py` 与 `triattention_v2_*` 配置文件仍可运行（兼容）
-- 当前实现内部兼容目录名仍为 `triattention_v2/`（为了降低重构风险），不代表旧版本逻辑
-
+- 当前实现内部目录名为 `triattention_runtime/`
+- `triattention_v2/` 保留为兼容导入包（薄转发层），不代表旧版本逻辑

@@ -3,7 +3,7 @@
 This package now serves two purposes:
 1. Shared scoring/compressor utilities used by the current runtime implementation.
 2. A stable public import path (`triattention`) while the current vLLM runtime
-   implementation remains in the internal compatibility package `triattention_v2`.
+   implementation lives in the internal package `triattention_runtime`.
 
 Legacy V0/V1 vLLM integrations are intentionally retired from the active package
 surface. Compatibility symbols remain as explicit error stubs to avoid silent misuse.
@@ -60,16 +60,16 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """Lazy-export current runtime symbols to avoid import cycles with triattention_v2."""
+    """Lazy-export current runtime symbols to avoid import cycles."""
     if name in {
         "TriAttentionRuntimeConfig",
         "TriAttentionV2Config",
         "install_runner_compression_hook",
     }:
-        from triattention_v2 import (  # type: ignore
+        from triattention_runtime import (  # type: ignore
             TriAttentionConfig as _TriAttentionRuntimeConfig,
         )
-        from triattention_v2 import (  # type: ignore
+        from triattention_runtime import (  # type: ignore
             TriAttentionV2Config as _TriAttentionV2Config,
             install_runner_compression_hook as _install_runner_compression_hook,
         )
@@ -81,7 +81,7 @@ def __getattr__(name: str):
         }
         return mapping[name]
     if name == "install_vllm_integration_monkeypatches":
-        from triattention_v2.integration_monkeypatch import (  # type: ignore
+        from triattention_runtime.integration_monkeypatch import (  # type: ignore
             install_vllm_integration_monkeypatches as _install,
         )
 
