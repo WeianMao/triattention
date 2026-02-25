@@ -1,4 +1,4 @@
-"""TriAttention v2: non-invasive vLLM integration scaffolding."""
+"""Current TriAttention vLLM integration implementation (compat package name: triattention_v2)."""
 
 from .config import TriAttentionV2Config
 from .effective_len_tracker import EffectiveCacheLenTracker
@@ -9,8 +9,12 @@ from .planner import CompressionPlanner
 from .signals import CompressionSignal
 from .state import RequestCompressionState, RequestStateStore
 
+# Public alias for the current/default runtime config name.
+TriAttentionConfig = TriAttentionV2Config
+
 __all__ = [
     "TriAttentionV2Config",
+    "TriAttentionConfig",
     "EffectiveCacheLenTracker",
     "CompressionExecutionResult",
     "CompressionExecutor",

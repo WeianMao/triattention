@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 import time
-from collections import deque
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, TextIO
@@ -28,7 +28,7 @@ if str(RKV_ROOT) not in sys.path:
 
 from weian_development.process_utils import mask_process_command
 
-DEFAULT_CONFIG = TRIATTENTION_ROOT / "evaluation" / "dispatch" / "configs" / "triattention_v2_aime24.yaml"
+DEFAULT_CONFIG = TRIATTENTION_ROOT / "evaluation" / "dispatch" / "configs" / "triattention_aime24.yaml"
 MERGE_SCRIPT = TRIATTENTION_ROOT / "evaluation" / "merge" / "merge_shards.py"
 MULTI_EVAL_SCRIPT = RKV_ROOT / "HuggingFace" / "evaluation" / "eval_math_multi.py"
 PATH_ARG_KEYS = {"output_dir", "dataset_path", "model_path", "tokenizer_path", "sparse_stats_path"}
@@ -82,7 +82,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--allow-legacy-v1",
         action="store_true",
-        help="Allow legacy V1 runner config. Default behavior enforces V2 runner.",
+        help="Allow legacy V1 runner config. Default behavior enforces current TriAttention runner.",
     )
     # TriAttention-specific args
     parser.add_argument(
@@ -109,6 +109,13 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Override runner arg: recent token window size.",
+    )
+    parser.add_argument(
+        "--enforce-eager",
+        type=str,
+        default=None,
+        choices=["true", "false"],
+        help="Override runner arg: enforce eager execution.",
     )
     return parser.parse_args()
 
@@ -457,6 +464,87 @@ def merge_outputs(shard_output_dir: Path, merged_dir_name: str, skip_merge: bool
     subprocess.check_call(cmd, cwd=str(TRIATTENTION_ROOT))
 
 
+def _record_sample_idx(record: dict) -> int | None:
+    value = record.get("sample_idx", record.get("idx"))
+    return value if isinstance(value, int) else None
+
+
+def _record_draw_idx(record: dict) -> int | None:
+    value = record.get("draw_idx", 0)
+    return value if isinstance(value, int) else None
+
+
+def validate_merged_output_completeness(base_dir: Path, expected_num_samples: int | None) -> None:
+    """Fail fast before evaluation when merged outputs are incomplete.
+
+    HF eval script only warns on incomplete draw counts; dispatch should stop
+    early to avoid publishing misleading metrics from half-finished shards.
+    """
+    if not expected_num_samples or expected_num_samples <= 0:
+        return
+    if not base_dir.exists():
+        raise FileNotFoundError(f"merged base_dir not found: {base_dir}")
+    jsonl_files = sorted(base_dir.glob("*.jsonl"))
+    if not jsonl_files:
+        raise FileNotFoundError(f"no merged jsonl found under {base_dir}")
+
+    grouped_draws: dict[int, set[int]] = defaultdict(set)
+    duplicate_pairs = 0
+    missing_sample_idx = 0
+    invalid_draw_idx = 0
+    total_records = 0
+    for path in jsonl_files:
+        with path.open() as fp:
+            for line in fp:
+                line = line.strip()
+                if not line:
+                    continue
+                total_records += 1
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    raise RuntimeError(f"invalid json line in merged file: {path}") from None
+                if not isinstance(rec, dict):
+                    continue
+                sample_idx = _record_sample_idx(rec)
+                if sample_idx is None:
+                    missing_sample_idx += 1
+                    continue
+                draw_idx = _record_draw_idx(rec)
+                if draw_idx is None or draw_idx < 0:
+                    invalid_draw_idx += 1
+                    continue
+                draws = grouped_draws[sample_idx]
+                before = len(draws)
+                draws.add(draw_idx)
+                if len(draws) == before:
+                    duplicate_pairs += 1
+
+    if missing_sample_idx or invalid_draw_idx:
+        raise RuntimeError(
+            "Merged outputs contain invalid indexing fields: "
+            f"missing_sample_idx={missing_sample_idx} invalid_draw_idx={invalid_draw_idx} "
+            f"base_dir={base_dir}"
+        )
+    if total_records <= 0 or not grouped_draws:
+        raise RuntimeError(
+            "Merged outputs contain no valid records before evaluation: "
+            f"total_records={total_records} valid_questions={len(grouped_draws)} "
+            f"base_dir={base_dir}"
+        )
+
+    bad_counts = [sid for sid, draws in grouped_draws.items() if len(draws) != expected_num_samples]
+    if duplicate_pairs or bad_counts:
+        preview = bad_counts[:10]
+        raise RuntimeError(
+            "Merged outputs incomplete or duplicate before evaluation: "
+            f"questions={len(grouped_draws)} total_records={total_records} "
+            f"expected_draws_per_question={expected_num_samples} "
+            f"bad_question_count={len(bad_counts)} bad_question_preview={preview} "
+            f"duplicate_pairs={duplicate_pairs} base_dir={base_dir}"
+        )
+
+
 def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Optional[Path], conda_env: str, dry_run: bool, num_samples: int | None = None) -> None:
     if not base_dir.exists():
         print(f"[eval] skip, base_dir not found: {base_dir}")
@@ -464,6 +552,8 @@ def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Opti
     if not any(base_dir.glob("*.jsonl")):
         print(f"[eval] skip, no jsonl under {base_dir}")
         return
+    if not dry_run:
+        validate_merged_output_completeness(base_dir, num_samples)
     cmd = [
         "conda",
         "run",
@@ -498,11 +588,11 @@ def main() -> None:
     conda_env = experiment.get("conda_env", "rkv")
     eval_conda_env = experiment.get("eval_conda_env", conda_env)
     runner_path = resolve_path(experiment["runner_path"])
-    if (runner_path.name != "vllm_triattention_v2_runner.py"
-            and not args.allow_legacy_v1):
+    allowed_current_runners = {"vllm_triattention_runner.py", "vllm_triattention_v2_runner.py"}
+    if (runner_path.name not in allowed_current_runners and not args.allow_legacy_v1):
         raise RuntimeError(
             "Refusing to run legacy V1 runner by default. "
-            "Use a V2 config/runner or pass --allow-legacy-v1 explicitly."
+            "Use the current TriAttention runner/config or pass --allow-legacy-v1 explicitly."
         )
     total_shards = args.num_shards or experiment.get("num_shards", 1)
     gpus = determine_gpus(args, experiment)
@@ -523,13 +613,15 @@ def main() -> None:
         runner_args["divide_length"] = args.divide_length
     if args.window_size is not None:
         runner_args["window_size"] = args.window_size
+    if args.enforce_eager is not None:
+        runner_args["enforce_eager"] = args.enforce_eager.lower() == "true"
 
     base_env = prepare_environment(experiment.get("env", {}))
     base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 
     # TriAttention environment variables for legacy V1 backend only.
-    # V2 runner path must avoid V1 env coupling.
-    if runner_path.name != "vllm_triattention_v2_runner.py":
+    # Current runner path must avoid V1 env coupling.
+    if runner_path.name not in allowed_current_runners:
         if runner_args.get("sparse_stats_path"):
             base_env["TRIATTENTION_STATS_PATH"] = str(resolve_path(runner_args["sparse_stats_path"]))
         if runner_args.get("kv_budget"):

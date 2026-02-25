@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Shard-aware vLLM runner for TriAttention V2 evaluation.
+"""Shard-aware vLLM runner for TriAttention evaluation.
 
-This runner is intentionally V2-only:
+This runner is the current/default TriAttention integration runner:
 - uses vLLM configurable extension points (worker_cls/scheduler_cls);
 - does not rely on V1 custom attention backend path.
 """
@@ -242,7 +242,7 @@ def load_dataset(
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="vLLM TriAttention V2 Sharded Runner")
+    parser = argparse.ArgumentParser(description="vLLM TriAttention Sharded Runner")
 
     # Core parameters
     parser.add_argument("--seed", type=int, default=42)
@@ -276,7 +276,7 @@ def parse_arguments() -> argparse.Namespace:
         default=DEFAULT_SYSTEM_PROMPT,
     )
 
-    # V2 compression parameters
+    # TriAttention compression parameters
     parser.add_argument("--kv-budget", dest="kv_budget", type=int, default=2048)
     parser.add_argument("--divide-length", dest="divide_length", type=int, default=128)
     parser.add_argument("--protect-prefill", dest="protect_prefill", type=str2bool, default=True)
@@ -407,27 +407,27 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--tensor-parallel-size", dest="tensor_parallel_size", type=int, default=1)
     parser.add_argument("--gpu-memory-utilization", dest="gpu_memory_utilization", type=float, default=0.9)
     parser.add_argument("--disable-compression", dest="disable_compression", type=str2bool, default=False,
-                        help="Run without V2 scheduler/worker injection (fullkv baseline).")
+                        help="Run without TriAttention scheduler/worker injection (fullkv baseline).")
     parser.add_argument(
         "--force-v2-integration",
         dest="force_v2_integration",
         type=str2bool,
         default=False,
-        help="Use V2 worker/scheduler even when compression is disabled (diagnostic).",
+        help="Use TriAttention worker/scheduler even when compression is disabled (diagnostic).",
     )
     parser.add_argument(
         "--force-v2-worker",
         dest="force_v2_worker",
         type=str2bool,
         default=False,
-        help="Use only V2 worker injection as a diagnostic (works with disable_compression=true).",
+        help="Use only TriAttention worker injection as a diagnostic (works with disable_compression=true).",
     )
     parser.add_argument(
         "--force-v2-scheduler",
         dest="force_v2_scheduler",
         type=str2bool,
         default=False,
-        help="Use only V2 scheduler injection as a diagnostic (works with disable_compression=true).",
+        help="Use only TriAttention scheduler injection as a diagnostic (works with disable_compression=true).",
     )
 
     return parser.parse_args()
@@ -489,7 +489,7 @@ def _apply_v2_env(args: argparse.Namespace) -> None:
 
 
 def setup_vllm_engine(args: argparse.Namespace):
-    """Initialize vLLM engine with optional TriAttention V2 injection."""
+    """Initialize vLLM engine with optional TriAttention injection."""
     from vllm import LLM
 
     max_model_len = args.max_length if args.max_length > 0 else 32768
@@ -498,7 +498,7 @@ def setup_vllm_engine(args: argparse.Namespace):
         major, _minor = torch.cuda.get_device_capability()
         if major < 8:
             print(
-                "[TriAttention V2] GPU capability < 8.0, "
+                "[TriAttention] GPU capability < 8.0, "
                 "fallback dtype bfloat16 -> float16"
             )
             load_dtype = "float16"
@@ -521,12 +521,12 @@ def setup_vllm_engine(args: argparse.Namespace):
     if use_v2_integration:
         if not args.enable_experimental_kv_compaction and not args.disable_compression:
             raise RuntimeError(
-                "TriAttention V2 strict mode requires "
+                "TriAttention strict mode requires "
                 "enable_experimental_kv_compaction=true"
             )
         if not args.require_triton_scoring and not args.disable_compression:
             raise RuntimeError(
-                "TriAttention V2 strict mode requires require_triton_scoring=true"
+                "TriAttention strict mode requires require_triton_scoring=true"
             )
         if (
             args.require_physical_reclaim
@@ -534,7 +534,7 @@ def setup_vllm_engine(args: argparse.Namespace):
             and not args.disable_compression
         ):
             raise RuntimeError(
-                "TriAttention V2 strict mode requires "
+                "TriAttention strict mode requires "
                 "enable_experimental_block_reclaim=true when "
                 "require_physical_reclaim=true"
             )
@@ -550,7 +550,7 @@ def setup_vllm_engine(args: argparse.Namespace):
             patch_scheduler=bool(want_v2_scheduler),
         )
         print(
-            "[TriAttention V2] enabled: "
+            "[TriAttention] enabled: "
             f"budget={args.kv_budget}, divide={args.divide_length}, "
             f"protect_prefill={args.protect_prefill}, "
             f"experimental_compaction={args.enable_experimental_kv_compaction}, "
@@ -568,7 +568,7 @@ def setup_vllm_engine(args: argparse.Namespace):
             "integration_mode=monkeypatch"
         )
     else:
-        print("[TriAttention V2] disabled (fullkv mode)")
+        print("[TriAttention] disabled (fullkv mode)")
 
     llm = LLM(**llm_kwargs)
     return llm
@@ -633,7 +633,7 @@ def main(args: argparse.Namespace) -> None:
         f"records {start_record}-{record_end} ({local_records} total)"
     )
 
-    print("[INFO] Initializing vLLM engine (V2)...")
+    print("[INFO] Initializing vLLM engine (TriAttention)...")
     llm = setup_vllm_engine(args)
     llm_tokenizer = llm.get_tokenizer()
     eos_token_id = getattr(llm_tokenizer, "eos_token_id", None)

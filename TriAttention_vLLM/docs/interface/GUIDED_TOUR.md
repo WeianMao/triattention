@@ -1,86 +1,58 @@
-# TriAttention_vLLM 接手导读（V2）
+# TriAttention_vLLM 接手导读（当前默认版本）
 
-- 更新时间：2026-02-23
+- 更新时间：2026-02-25
 - 状态：Active
 
----
+## 目标（15~30 分钟内接手）
 
-## 目标
+你需要先搞清楚三件事：
+1. 当前默认入口怎么跑
+2. HF 对齐状态到哪一步
+3. 核心代码模块各自负责什么
 
-让新同事在 20~30 分钟内完成接手，不需要先读历史长文。
+## Step 1（5 分钟）先看目标与当前实现
 
----
+1. `TriAttention_vLLM/docs/interface/PROJECT_GOAL.md`
+2. `TriAttention_vLLM/docs/interface/IMPLEMENTATION_OVERVIEW.md`
 
-## Step 1（5 分钟）：先看项目目标
+重点确认：
+1. 当前默认目标模式是 `per_head`
+2. `per_layer_per_head` 需要支持（代码路径已修关键风险）
+3. 内部实现目录名仍是 `triattention_v2/`，但对外入口已去 `V2`
 
-阅读：`interface/PROJECT_GOAL.md`
+## Step 2（5 分钟）看 HF 对齐状态
 
-你需要确认：
+阅读：`TriAttention_vLLM/docs/interface/HF_ALIGNMENT_STATUS.md`
 
-1. 项目终极目标是“与 HF SpeckV 行为对齐 + vLLM 工程化落地”。
-2. 当前阶段优先级已明确为：
-   - HF `per_head` / `per_layer_per_head` 对齐优先；
-   - decode 性能（热路径极简）第二；
-   - 工程侵入性/开发复杂度平衡第三。
+重点确认：
+1. 当前对齐参照脚本是哪一个
+2. `per_head` 全量 anchor 的结果与结论
+3. 哪些项当前不作为阻塞（脚本未用到的 ablation 参数）
 
----
+## Step 3（5~10 分钟）直接看代码入口
 
-## Step 2（5 分钟）：看 V2 方案
+1. Dispatch：
+   - `TriAttention_vLLM/evaluation/dispatch/triattention_sharded_dispatch.py`
+   - 默认配置：`TriAttention_vLLM/evaluation/dispatch/configs/triattention_aime24.yaml`
+2. Runner：
+   - `TriAttention_vLLM/evaluation/runner/vllm_triattention_runner.py`
+   - 兼容实现：`TriAttention_vLLM/evaluation/runner/vllm_triattention_v2_runner.py`
+3. 集成接入与主链路：
+   - `TriAttention_vLLM/triattention_v2/integration_monkeypatch.py`
+   - `TriAttention_vLLM/triattention_v2/scheduler.py`
+   - `TriAttention_vLLM/triattention_v2/worker.py`
+   - `TriAttention_vLLM/triattention_v2/runner.py`
 
-阅读：
+## Step 4（按任务深入）
 
-1. `interface/V2_OVERVIEW.md`
-2. `interface/V2_REFACTOR_EXECUTION_PLAN_2026-02-22.md`
-3. `interface/V2_SCHEME_ADJUSTMENT_2026-02-23.md`
-
-你需要确认：
-
-1. V2 不再把压缩主逻辑放在 Attention 层。
-2. V2 采用 worker/scheduler/runner 扩展点，保持对 vLLM 非侵入。
-3. 当前主线目标模式是 `per_head` / `per_layer_per_head`（`per_layer` 非中间态）。
-4. 当前方案调整强调“fill-hole + thin runtime adapter”，复杂度尽量放在压缩触发时。
-5. decode 热路径代码改动与新增 metadata 必须最小化（性能约束）。
-6. 新开发目录为 `triattention_v2/`，旧版只做参考。
-
----
-
-## Step 3（5 分钟）：看当前状态与问题
-
-阅读：
-
-1. `interface/CURRENT_STATUS.md`
-2. `interface/OPEN_ISSUES.md`
-3. `interface/PENDING_DECISIONS.md`
-
-你需要确认：
-
-1. 当前阻塞是工程落位，不是算法公式。
-2. 哪些问题是 P0，先做哪些。
-3. 有哪些决策需要负责人拍板。
-
----
-
-## Step 4（10 分钟）：看开发约束与技术规格
-
-阅读：
-
-1. `backend/DEVELOPMENT_PRINCIPLES.md`
-2. `backend/ARCHITECTURE_REDESIGN.md`
-3. `backend/DESIGN_DECISIONS.md`
-4. `backend/V2_IMPLEMENTATION_BLUEPRINT.md`
-
-你需要确认：
-
-1. 每个模块职责边界（scheduler 决策 / runner 执行 / attention 保持纯计算）。
-2. 禁止的实现方式（例如 request 标识使用 batch_idx 等）。
-3. 本次任务涉及哪些决策与验收标准。
-
----
-
-## 开发前自检
-
-1. 我能复述 V2 主链路吗？
-2. 我知道本次任务更新哪些文档吗？
-3. 我知道完成后如何更新 `CURRENT_STATUS/OPEN_ISSUES` 吗？
-
-如果以上任一问题回答不了，先不要写代码。
+1. 对齐问题先看：
+   - `TriAttention_vLLM/triattention_v2/selector_hf.py`
+   - `TriAttention_vLLM/triattention_v2/selection_planner.py`
+2. 布局/回收问题先看：
+   - `TriAttention_vLLM/triattention_v2/layout_engine.py`
+   - `TriAttention_vLLM/triattention_v2/kv_compaction.py`
+   - `TriAttention_vLLM/triattention_v2/worker_reclaim_sync.py`
+3. 运行时语义/映射问题先看：
+   - `TriAttention_vLLM/triattention_v2/effective_overrides.py`
+   - `TriAttention_vLLM/triattention_v2/input_adapter.py`
+   - `TriAttention_vLLM/triattention_v2/input_patch_vllm_backend.py`

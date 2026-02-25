@@ -120,7 +120,7 @@
 - 下一步：
   - 已落地“半侵入继承层”回收原型闭环（runner 事件 + scheduler 应用 + block_pool 回收），下一步做端到端压测验证；
   - 以实验开关保护，默认保持主线行为不变；
-  - 执行过程同步记录到 `interface/V2_WORKLOG.md`，确保多人可追踪接手；
+  - 执行过程同步记录到 `interface/CURRENT_STATUS.md` 与 `interface/IMPLEMENTATION_OVERVIEW.md`（必要时补 `backend/DESIGN_DECISIONS.md`）；
   - 闭环稳定后再推进更严格 fill-in-place 页整理。
 - 验收标准：压缩触发后可观测到回收事件并实际归还 tail blocks；默认关开时行为保持兼容。
 - 状态：In Progress
