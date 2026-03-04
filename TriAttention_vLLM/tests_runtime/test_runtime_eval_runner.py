@@ -71,6 +71,9 @@ def _args(disable_compression: bool) -> SimpleNamespace:
         load_dtype="bfloat16",
         tensor_parallel_size=1,
         gpu_memory_utilization=0.9,
+        prefill_auto_chunk=False,
+        prefill_chunk_threshold=2048,
+        prefill_chunk_size=2048,
         seed=123,
         max_length=1024,
         disable_compression=disable_compression,
@@ -150,6 +153,31 @@ def test_setup_vllm_engine_without_compression():
         assert "scheduler_cls" not in captured
         assert captured["enforce_eager"] is False
         assert "TRIATTN_RUNTIME_KV_BUDGET" not in os.environ
+
+
+def test_setup_vllm_engine_prefill_auto_chunk_sets_vllm_chunk_kwargs():
+    args = _args(disable_compression=True)
+    args.prefill_auto_chunk = True
+    args.prefill_chunk_threshold = 2048
+    args.prefill_chunk_size = 2048
+    with _patched_environ(), _fake_vllm_module() as captured:
+        setup_vllm_engine(args)
+        assert captured["enable_chunked_prefill"] is True
+        assert captured["max_num_batched_tokens"] == 2048
+
+
+def test_setup_vllm_engine_prefill_auto_chunk_rejects_mismatched_threshold_and_chunk_size():
+    args = _args(disable_compression=True)
+    args.prefill_auto_chunk = True
+    args.prefill_chunk_threshold = 4096
+    args.prefill_chunk_size = 2048
+    with _patched_environ(), _fake_vllm_module():
+        try:
+            setup_vllm_engine(args)
+        except ValueError as exc:
+            assert "prefill_chunk_threshold == prefill_chunk_size" in str(exc)
+        else:
+            raise AssertionError("expected ValueError for mismatched prefill threshold/chunk size")
 
 
 def test_setup_vllm_engine_respects_enforce_eager_flag():

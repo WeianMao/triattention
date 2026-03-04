@@ -21,3 +21,6 @@ class CompressionSignal:
     kv_usage: float | None
     protect_prefill: bool
     prefill_len: int
+    # Number of tokens scheduled for this request in the current scheduler step.
+    # For chunked prefill this can be >1.
+    scheduled_tokens: int = 1

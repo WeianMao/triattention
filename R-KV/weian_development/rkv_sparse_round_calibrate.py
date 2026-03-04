@@ -96,6 +96,15 @@ def parse_args() -> argparse.Namespace:
         default=2048,
         help="KV budget expected to be used at inference time (stored in stats metadata for validation).",
     )
+    parser.add_argument(
+        "--device-map",
+        type=str,
+        default=None,
+        help=(
+            "Optional transformers device_map (for example: auto). "
+            "When provided, model placement is delegated to transformers/accelerate."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -146,8 +155,9 @@ def capture_qk_single(
     precision: torch.dtype,
 ) -> LayerCaptureBuffer:
     encoded = tokenizer(text, return_tensors="pt", add_special_tokens=True)
-    input_ids = encoded["input_ids"].to(model.device)
-    attention_mask = encoded["attention_mask"].to(model.device)
+    input_device = _resolve_model_input_device(model)
+    input_ids = encoded["input_ids"].to(input_device)
+    attention_mask = encoded["attention_mask"].to(input_device)
     text_config = model.config.get_text_config()
     num_layers = text_config.num_hidden_layers
     num_heads = text_config.num_attention_heads
@@ -164,6 +174,21 @@ def capture_qk_single(
     finally:
         collector.remove()
     return buffer
+
+
+def _resolve_model_input_device(model) -> torch.device:
+    """Resolve a safe input device for single-device and accelerate device-map modes."""
+    hf_device_map = getattr(model, "hf_device_map", None)
+    if isinstance(hf_device_map, dict):
+        for mapped_device in hf_device_map.values():
+            if isinstance(mapped_device, int):
+                return torch.device(f"cuda:{mapped_device}")
+            if isinstance(mapped_device, str) and mapped_device.startswith("cuda"):
+                return torch.device(mapped_device)
+    model_device = getattr(model, "device", None)
+    if isinstance(model_device, torch.device):
+        return model_device
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def aggregate_head_means(
@@ -252,15 +277,23 @@ def main() -> None:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
+    model_kwargs = {
+        "torch_dtype": precision,
+        "low_cpu_mem_usage": True,
+        "attn_implementation": args.attn_implementation,
+        "use_cache": True,
+    }
+    if args.device_map:
+        model_kwargs["device_map"] = args.device_map
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
-        torch_dtype=precision,
-        low_cpu_mem_usage=True,
-        attn_implementation=args.attn_implementation,
-        use_cache=True,
+        **model_kwargs,
     )
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
+    if args.device_map:
+        device = _resolve_model_input_device(model)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model.to(device)
     model.eval()
 
     text_config = model.config.get_text_config()

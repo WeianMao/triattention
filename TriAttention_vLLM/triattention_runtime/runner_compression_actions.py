@@ -67,6 +67,9 @@ def execute_runner_compression_actions(
                     "status": "error",
                     "reason": f"executor_exception:{type(exc).__name__}",
                     "cache_len_after": None,
+                    "scheduled_tokens": int(getattr(signal, "scheduled_tokens", 1)),
+                    "estimated_cache_len": int(getattr(signal, "estimated_cache_len", 0)),
+                    "prefill_len": int(getattr(signal, "prefill_len", 0)),
                 }
             )
             continue
@@ -107,7 +110,8 @@ def execute_runner_compression_actions(
             if log_decisions and isinstance(before_len, int):
                 logger.debug(
                     "TriAttention compression summary req=%s step=%d before=%d after=%d "
-                    "budget=%s reclaimed_blocks=%s recent_unabsorbed=%s reason=%s",
+                    "budget=%s reclaimed_blocks=%s recent_unabsorbed=%s "
+                    "scheduled_tokens=%s estimated_cache_len=%s reason=%s",
                     req_id,
                     signal.step,
                     before_len,
@@ -115,6 +119,8 @@ def execute_runner_compression_actions(
                     budget_total,
                     reclaimed_block_count,
                     recent_unabsorbed_tokens,
+                    int(getattr(signal, "scheduled_tokens", 1)),
+                    int(getattr(signal, "estimated_cache_len", 0)),
                     result.reason,
                 )
             events.append(
@@ -125,6 +131,9 @@ def execute_runner_compression_actions(
                     "reason": result.reason,
                     "cache_len_after": cache_len_after,
                     "details": result.details,
+                    "scheduled_tokens": int(getattr(signal, "scheduled_tokens", 1)),
+                    "estimated_cache_len": int(getattr(signal, "estimated_cache_len", 0)),
+                    "prefill_len": int(getattr(signal, "prefill_len", 0)),
                     "block_reclaim": (
                         result.details.get("block_reclaim")
                         if isinstance(result.details, dict)
@@ -154,6 +163,9 @@ def execute_runner_compression_actions(
                 "reason": result.reason,
                 "cache_len_after": result.cache_len_after,
                 "details": result.details,
+                "scheduled_tokens": int(getattr(signal, "scheduled_tokens", 1)),
+                "estimated_cache_len": int(getattr(signal, "estimated_cache_len", 0)),
+                "prefill_len": int(getattr(signal, "prefill_len", 0)),
                 "block_reclaim": (
                     result.details.get("block_reclaim")
                     if isinstance(result.details, dict)

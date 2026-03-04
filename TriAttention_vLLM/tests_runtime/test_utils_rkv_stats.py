@@ -44,6 +44,20 @@ def test_convert_rkv_stats_freq_scale_sq_not_derived_from_q_abs_mean_sq():
     assert not torch.allclose(freq_scale_sq, q_abs_mean.pow(2))
 
 
+def test_convert_rkv_stats_uses_inv_freq_from_metadata():
+    stats = _minimal_stats()
+    stats["metadata"]["inv_freq"] = [0.5, 0.25]
+    metadata, _head_stats = _convert_rkv_stats(
+        stats=stats,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+        num_kv_heads=1,
+    )
+    inv_freq = metadata.get("inv_freq")
+    assert isinstance(inv_freq, torch.Tensor)
+    assert torch.allclose(inv_freq, torch.tensor([0.5, 0.25], dtype=torch.float32))
+
+
 def test_convert_rkv_stats_invalid_model_path_falls_back_to_ones_freq_scale_sq():
     stats = _minimal_stats(model_path="/tmp/triattention_runtime_nonexistent_model_path")
     _, head_stats = _convert_rkv_stats(

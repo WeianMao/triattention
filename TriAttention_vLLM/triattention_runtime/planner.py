@@ -31,6 +31,7 @@ class CompressionPlanner:
         prefill_len: int,
         step: int,
         kv_usage: float | None = None,
+        scheduled_tokens: int = 1,
     ) -> CompressionSignal:
         length_threshold = self.config.kv_budget + self.config.divide_length
         # Keep scheduler trigger boundary consistent with effective budget
@@ -57,4 +58,5 @@ class CompressionPlanner:
             kv_usage=kv_usage,
             protect_prefill=self.config.protect_prefill,
             prefill_len=prefill_len,
+            scheduled_tokens=max(1, int(scheduled_tokens)),
         )

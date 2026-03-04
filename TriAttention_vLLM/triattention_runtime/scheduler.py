@@ -157,6 +157,7 @@ class TriAttentionScheduler(Scheduler):
                 prefill_len=prefill_len,
                 step=self._triattention_step,
                 kv_usage=kv_usage,
+                scheduled_tokens=scheduled_tokens,
             )
             # Keep scheduler->runner side-channel sparse to reduce per-step IPC
             # metadata overhead in the common no-compression decode path.

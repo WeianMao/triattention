@@ -115,13 +115,44 @@ class TriAttentionCompressor:
         self._initialized = True
 
     def _init_rope(self):
-        """Initialize RoPE frequencies from stats metadata."""
-        rope_theta = self.metadata.get("rope_theta", 10000.0)
-        self.inv_freq = compute_rope_frequencies(
-            self.config.head_dim,
-            rope_theta=rope_theta,
-            device=self.config.device,
-        )
+        """Initialize RoPE frequencies from stats metadata.
+
+        Preference order:
+        1) metadata.inv_freq (if present) for model-exact rotary semantics;
+        2) fallback to legacy rope_theta-based construction.
+        """
+        inv_freq_raw = self.metadata.get("inv_freq")
+        if isinstance(inv_freq_raw, torch.Tensor):
+            inv_freq = inv_freq_raw.to(device=self.config.device, dtype=torch.float32)
+            expected_freq_count = int(self.config.head_dim) // 2
+            if inv_freq.numel() < expected_freq_count:
+                raise ValueError(
+                    "metadata.inv_freq has fewer elements than required by "
+                    f"head_dim={self.config.head_dim}: got {inv_freq.numel()}, "
+                    f"expected at least {expected_freq_count}"
+                )
+            self.inv_freq = inv_freq[:expected_freq_count].contiguous()
+        elif isinstance(inv_freq_raw, (list, tuple)):
+            inv_freq = torch.tensor(
+                inv_freq_raw,
+                device=self.config.device,
+                dtype=torch.float32,
+            )
+            expected_freq_count = int(self.config.head_dim) // 2
+            if inv_freq.numel() < expected_freq_count:
+                raise ValueError(
+                    "metadata.inv_freq has fewer elements than required by "
+                    f"head_dim={self.config.head_dim}: got {inv_freq.numel()}, "
+                    f"expected at least {expected_freq_count}"
+                )
+            self.inv_freq = inv_freq[:expected_freq_count].contiguous()
+        else:
+            rope_theta = self.metadata.get("rope_theta", 10000.0)
+            self.inv_freq = compute_rope_frequencies(
+                self.config.head_dim,
+                rope_theta=rope_theta,
+                device=self.config.device,
+            )
         # omega = 2 * pi * inv_freq (angular frequency)
         self.omega = 2.0 * torch.pi * self.inv_freq
 

@@ -407,6 +407,36 @@ def parse_arguments() -> argparse.Namespace:
     # vLLM-specific parameters
     parser.add_argument("--tensor-parallel-size", dest="tensor_parallel_size", type=int, default=1)
     parser.add_argument("--gpu-memory-utilization", dest="gpu_memory_utilization", type=float, default=0.9)
+    parser.add_argument(
+        "--prefill-auto-chunk",
+        dest="prefill_auto_chunk",
+        type=str2bool,
+        default=False,
+        help=(
+            "Enable vLLM chunked prefill for long prompts. "
+            "When enabled, requests longer than the effective chunk trigger are split."
+        ),
+    )
+    parser.add_argument(
+        "--prefill-chunk-threshold",
+        dest="prefill_chunk_threshold",
+        type=int,
+        default=2048,
+        help=(
+            "Chunk trigger threshold for prefill optimization. "
+            "Current vLLM integration uses max_num_batched_tokens as both trigger and chunk size."
+        ),
+    )
+    parser.add_argument(
+        "--prefill-chunk-size",
+        dest="prefill_chunk_size",
+        type=int,
+        default=2048,
+        help=(
+            "Chunk size for prefill optimization. "
+            "Must match prefill_chunk_threshold in current runtime integration."
+        ),
+    )
     parser.add_argument("--disable-compression", dest="disable_compression", type=str2bool, default=False,
                         help="Run without TriAttention scheduler/worker injection (fullkv baseline).")
     parser.add_argument(
@@ -506,6 +536,22 @@ def setup_vllm_engine(args: argparse.Namespace):
         max_model_len=max_model_len,
         enforce_eager=bool(args.enforce_eager),
     )
+    if bool(getattr(args, "prefill_auto_chunk", False)):
+        chunk_threshold = int(getattr(args, "prefill_chunk_threshold", 0))
+        chunk_size = int(getattr(args, "prefill_chunk_size", 0))
+        if chunk_threshold <= 0 or chunk_size <= 0:
+            raise ValueError(
+                "prefill_chunk_threshold and prefill_chunk_size must both be > 0 "
+                "when prefill_auto_chunk is enabled"
+            )
+        if chunk_threshold != chunk_size:
+            raise ValueError(
+                "Current vLLM integration maps prefill trigger and chunk size to a "
+                "single engine knob (max_num_batched_tokens). Set "
+                "prefill_chunk_threshold == prefill_chunk_size."
+            )
+        llm_kwargs["enable_chunked_prefill"] = True
+        llm_kwargs["max_num_batched_tokens"] = int(chunk_size)
 
     force_runtime_integration = bool(
         getattr(args, "force_runtime_integration", False)
@@ -559,6 +605,9 @@ def setup_vllm_engine(args: argparse.Namespace):
             f"require_physical_reclaim={args.require_physical_reclaim}, "
             f"fail_on_effective_len_regression={args.fail_on_effective_len_regression}, "
             f"enforce_eager={args.enforce_eager}, "
+            f"prefill_auto_chunk={args.prefill_auto_chunk}, "
+            f"prefill_chunk_threshold={args.prefill_chunk_threshold}, "
+            f"prefill_chunk_size={args.prefill_chunk_size}, "
             f"disable_compression={args.disable_compression}, "
             f"force_runtime_integration={force_runtime_integration}, "
             f"force_runtime_worker={force_runtime_worker}, "

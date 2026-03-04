@@ -26,6 +26,7 @@ def _signal() -> CompressionSignal:
         kv_usage=None,
         protect_prefill=True,
         prefill_len=8,
+        scheduled_tokens=2048,
     )
 
 
@@ -53,6 +54,9 @@ def test_execute_runner_compression_actions_applied_event():
     assert len(events) == 1
     assert events[0]["status"] == "applied"
     assert events[0]["cache_len_after"] == 32
+    assert events[0]["scheduled_tokens"] == 2048
+    assert events[0]["estimated_cache_len"] == 64
+    assert events[0]["prefill_len"] == 8
     assert state_store.calls[0][0] == "applied"
 
 

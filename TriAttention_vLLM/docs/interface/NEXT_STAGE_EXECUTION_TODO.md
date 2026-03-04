@@ -1,6 +1,6 @@
 # Next Stage Execution TODO
 
-Updated: 2026-03-01
+Updated: 2026-03-02
 Status: Active
 Owner: Codex + Weian
 
@@ -60,6 +60,13 @@ Owner: Codex + Weian
 11. [x] D1 - Run full-scale TriAttention experiment (all available GPUs) for HF-script alignment check.
 12. [ ] D2 - Produce side-by-side metric comparison against
     `R-KV/weian_script/aime_sampled8_qwen3/speckv/aime24/run_speckv_aime24_qwen_norm_aligned.sh`.
+13. [x] E1 - Run Qwen3-Coder long-prefill stress check (fullkv vs TriAttention)
+    on free GPUs only; fix runtime issues blocking execution.
+14. [x] F1 - Locate canonical R-KV calibration script and confirm expected trace input form.
+15. [x] F2 - Generate Qwen3-Coder calibration stats from
+    `R-KV/outputs/aime_sampled8_qwen3/fullkv/aime24`.
+16. [x] F3 - Re-run TriAttention FP8 long-prefill after stats are wired.
+17. [x] D3 - Execute demo-oriented long-prefill stress comparison (baseline fail vs TriAttention pass).
 
 ## 8) Progress Log
 
@@ -204,6 +211,130 @@ Owner: Codex + Weian
      - `kv_budget = 2048`
      - `top_k = 50`
      - 模型：`/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B`
+14. 2026-03-01:
+   - 执行 Qwen3-Coder 长 prefill 压测（仅使用空闲 GPU）并修复阻塞问题：
+     - 模型：`Qwen/Qwen3-Coder-30B-A3B-Instruct`
+     - 初始单卡 A100-40G 失败：模型初始化 OOM（权重装载阶段）。
+     - 切到 TP=2 后再次失败：默认 cudagraph capture OOM。
+     - 修复：设置 `--enforce-eager true`，规避 cudagraph 额外显存开销。
+     - 发现原随机数据集超长（`decoder prompt length = 306427`），
+       超过 `max_model_len=32768`，并非有效 prefill OOM 场景。
+     - 修复：构造新数据集
+       `evaluation/outputs/qwen3coder_longprefill_30k_dataset.jsonl`
+       （token 长度约 30001）。
+   - 在同一参数基线下完成 fullkv 与 TriAttention 对照（TP=2，空闲卡 1,2）：
+     - fullkv:
+       `evaluation/outputs/qwen3coder_longprefill30k_fullkv_tp2_eager90_20260301_191537/shards/shard00/run000.jsonl`
+       - `prefill_tokens=30053`, `output_tokens=2715`, `total_tokens=32768`
+     - TriAttention + prefill chunk:
+       `evaluation/outputs/qwen3coder_longprefill30k_tri_tp2_eager90_20260301_191537/shards/shard00/run000.jsonl`
+       - `prefill_tokens=30053`, `output_tokens=365`, `total_tokens=30418`
+   - 结论：两条都可稳定完成，无运行时 OOM；压测链路已可复现。
+15. 2026-03-01:
+   - W8A16/FP8 单卡验证（不启用 TP）：
+     - 模型：`Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8`
+     - 运行时日志确认：
+       - `quantization=fp8`
+       - `Using MARLIN Fp8 MoE backend`
+       - A100 上为 `weight-only FP8 compression`（无原生 FP8 计算）。
+   - 已成功运行：
+     - fullkv smoke:
+       `evaluation/outputs/qwen3coder_fp8_fullkv_smoke_tp1_20260301_2012/shards/shard00/run000.jsonl`
+       (`prefill_tokens=62`, `output_tokens=99`, `total_tokens=161`)
+     - TriAttention smoke:
+       `evaluation/outputs/qwen3coder_fp8_tri_smoke_tp1_20260301_2012/shards/shard00/run000.jsonl`
+       (`prefill_tokens=62`, `output_tokens=104`, `total_tokens=166`)
+     - fullkv long prefill (30k):
+       `evaluation/outputs/qwen3coder_fp8_longprefill30k_fullkv_tp1_20260301_2012/shards/shard00/run000.jsonl`
+       (`prefill_tokens=30053`, `output_tokens=2715`, `total_tokens=32768`)
+   - 发现未解决兼容问题（TriAttention + FP8 + long prefill）：
+     - 失败类型 A：
+       `TRIATTN_FATAL_TRITON_SCORING_REQUIRED:stats_path_not_set`
+     - 失败类型 B（显式关闭 triton scoring 后）：
+       `enable_experimental_kv_compaction requires require_triton_scoring=True`
+   - 当前判断：
+     - W8A16 在 fullkv 路径可运行；
+     - TriAttention 压缩路径对 FP8 长 prefill 仍需专项适配（strict 约束链路冲突）。
+16. 2026-03-02:
+   - 已确认 calibration 使用脚本与输入形式：
+     - script:
+       `R-KV/weian_development/rkv_sparse_round_calibrate.py`
+     - 输入支持：
+       `--trace-root <dir>`（优先读取 `merged/merged.jsonl`，否则回退 `shards/*.jsonl`）。
+   - 已按用户给定 trace 目录准备并启动 coder stats 生成（单卡 GPU 4）：
+     - trace root:
+       `R-KV/outputs/aime_sampled8_qwen3/fullkv/aime24`
+     - target stats:
+       `R-KV/outputs/repository/sample8_fullkv_aime24_official_qwen3coder/stats/qwen3_coder_30b_a3b_fp8_plain_stats.pt`
+   - 当前阻塞：
+     - 机器出现明显 NFS I/O wait（进程状态 `D`），包括 `torch/transformers` 导入阶段；
+     - calibration 进程处于 I/O 阻塞，尚未进入有效计算阶段。
+   - 结论：
+     - “缺 stats 导致 strict 报错”已被确认；
+     - 现阶段主阻塞是机器 I/O 状态，不是算法/配置逻辑。
+17. 2026-03-02:
+   - 切换新机器后，按“仅使用空闲 GPU”继续执行：
+     - 空闲卡确认：`4,5,6,7`。
+   - calibration 兼容修复（最小改动，默认行为不变）：
+     - 文件：`R-KV/weian_development/rkv_sparse_round_calibrate.py`
+     - 新增可选参数：`--device-map`（例如 `auto`）
+     - 当设置 `--device-map` 时，将模型放置委托给 transformers/accelerate，
+       并自动解析输入设备；未设置时沿用旧逻辑（单设备 `model.to(device)`）。
+   - 已成功生成 Qwen3-Coder stats：
+     - 输出：
+       `R-KV/outputs/repository/sample8_fullkv_aime24_official_qwen3coder/stats/qwen3_coder_30b_a3b_fp8_plain_stats.pt`
+     - 命令关键参数：
+       - `model-path`：
+         `.../models--Qwen--Qwen3-Coder-30B-A3B-Instruct/snapshots/b2cff646...`
+       - `--device-map auto`
+       - `--num-traces 1`
+   - 已成功复跑 FP8 TriAttention 长 prefill（单卡，无 TP）：
+     - 输出：
+       `TriAttention_vLLM/evaluation/outputs/qwen3coder_fp8_longprefill30k_tri_tp1_statsfix_20260302_104934/shards/shard00/run000.jsonl`
+     - 关键结果：
+       - `prefill_tokens=30053`
+       - `output_tokens=2715`
+       - `total_tokens=32768`
+       - `enable_experimental_kv_compaction=true`
+       - `require_triton_scoring=true`
+   - 结论：
+     - 先前 FP8 TriAttention 长 prefill 失败根因已闭环为“缺 coder stats”；
+     - 产出 coder stats 后，同配置路径可正常完成运行。
+18. 2026-03-02:
+   - 执行目标测试 D（demo 导向：长 prefill 内存压力对照）：
+     - 数据集：
+       `TriAttention_vLLM/evaluation/outputs/qwen3coder_longprefill_120k_dataset.jsonl`
+       （单条样本，问题 prefill 约 120k token）。
+   - Baseline（fullkv）失败样例：
+     - 设定：`disable_compression=true`，并将 prefill chunk 设为近似“不分块”
+       （`prefill_chunk_size=123000`）。
+     - 结果：引擎初始化阶段失败（KV cache memory 不足）。
+     - 关键报错：`ValueError ... max seq len (123000) ... needed 11.26 GiB ... available 7.14 GiB ...`
+     - 可复现日志：
+       `TriAttention_vLLM/evaluation/outputs/qwen3coder_fp8_longprefill120k_fullkv_tp1_demoD_20260302_chunk123k_fail/baseline_fail.log`
+   - TriAttention 成功样例：
+     - 设定：`kv_budget=2048`，`prefill_chunk_size=2048`，启用压缩与 reclaim。
+     - 输出：
+       `TriAttention_vLLM/evaluation/outputs/qwen3coder_fp8_longprefill120k_tri_tp1_demoD_20260302_chunk2048/shards/shard00/run000.jsonl`
+     - 关键结果：
+       - `prefill_tokens=120053`
+       - `output_tokens=2947`
+       - `total_tokens=123000`
+       - `status=complete`
+   - 结论：
+     - 在超长 prefill 压力场景下，baseline 配置可触发显存容量失败；
+     - TriAttention 的 chunk + 压缩路径可在同长度输入下完成运行，满足 demo 目标。
+19. 2026-03-04:
+   - 新增对外交付使用文档（仓库根目录）：
+     - `TRIATTENTION_VLLM_USAGE.md`
+   - 文档覆盖内容：
+     - HF_HOME 规范（`/data/rbg/users/weian/env/huggingface`）
+     - Qwen3 / Qwen3-Coder 下载方式
+     - dispatch 启动命令
+     - FP8 Coder calibration 前置
+     - 压缩激活与运行状态的日志判据
+   - 目的：
+     - 让外部使用者按文档直接完成环境准备与运行，不依赖历史对话上下文。
 
 ## 7) Important Risks to Track
 

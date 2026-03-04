@@ -74,6 +74,19 @@ def load_frequency_stats(
 
     # Extract metadata
     metadata = stats.get("metadata", {})
+    if isinstance(metadata, dict):
+        inv_freq_raw = metadata.get("inv_freq")
+        if isinstance(inv_freq_raw, torch.Tensor):
+            metadata["inv_freq"] = inv_freq_raw.to(
+                device=device,
+                dtype=torch.float32,
+            )
+        elif isinstance(inv_freq_raw, (list, tuple)):
+            metadata["inv_freq"] = torch.tensor(
+                inv_freq_raw,
+                device=device,
+                dtype=torch.float32,
+            )
 
     # Check if this is R-KV format (has 'stats' key with 'layerXX_headYY' keys)
     rkv_stats = stats.get("stats", {})
@@ -165,6 +178,52 @@ def _convert_rkv_stats(
 
     gqa_ratio = num_attention_heads // num_kv_heads if num_kv_heads > 0 else 1
 
+    def _derive_inv_freq_fallback() -> Optional[torch.Tensor]:
+        """Derive rotary inv_freq from model config when possible.
+
+        This keeps runtime scoring aligned with model rotary semantics (e.g. YaRN)
+        when R-KV metadata does not explicitly carry inv_freq.
+        """
+        inv_freq_raw = rkv_metadata.get("inv_freq")
+        if isinstance(inv_freq_raw, torch.Tensor):
+            inv_freq = inv_freq_raw.to(device=device, dtype=torch.float32)
+            return inv_freq[:freq_count].contiguous()
+        if isinstance(inv_freq_raw, (list, tuple)):
+            inv_freq = torch.tensor(
+                inv_freq_raw,
+                device=device,
+                dtype=torch.float32,
+            )
+            return inv_freq[:freq_count].contiguous()
+
+        model_path_raw = rkv_metadata.get("model_path")
+        if model_path_raw:
+            try:
+                from transformers import AutoConfig
+                from weian_development.speckv.round_pruning_utils import build_rotary
+
+                model_path = Path(str(model_path_raw))
+                model_config = AutoConfig.from_pretrained(
+                    str(model_path),
+                    trust_remote_code=True,
+                )
+                rotary = build_rotary(
+                    cache_device=device,
+                    model_path=model_path,
+                    dtype=dtype,
+                    config=model_config,
+                )
+                inv_freq = getattr(rotary, "inv_freq", None)
+                if isinstance(inv_freq, torch.Tensor):
+                    return inv_freq.to(device=device, dtype=torch.float32)[
+                        :freq_count
+                    ].contiguous()
+            except Exception:
+                pass
+        return None
+
+    derived_inv_freq = _derive_inv_freq_fallback()
+
     # Build TriAttention metadata
     metadata = {
         "num_attention_heads": num_attention_heads,
@@ -172,11 +231,14 @@ def _convert_rkv_stats(
         "head_dim": head_dim,
         "num_layers": num_layers,
         "rope_style": rkv_metadata.get("rope_style", "half"),
+        "rope_type": rkv_metadata.get("rope_type"),
         "rope_theta": rkv_metadata.get("rope_theta", 10000.0),
         "gqa_ratio": gqa_ratio,
         # Preserve original metadata
         "rkv_metadata": rkv_metadata,
     }
+    if derived_inv_freq is not None:
+        metadata["inv_freq"] = derived_inv_freq
 
     # Convert to per-layer format with stacked tensors
     # Expected: head_stats[layer_idx] = {

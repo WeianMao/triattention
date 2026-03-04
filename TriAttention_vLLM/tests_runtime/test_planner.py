@@ -14,6 +14,7 @@ def test_length_trigger():
     )
     assert signal.should_compress is True
     assert signal.reason == "length_threshold"
+    assert signal.scheduled_tokens == 1
 
 
 def test_no_trigger_when_under_threshold():
@@ -28,6 +29,7 @@ def test_no_trigger_when_under_threshold():
     )
     assert signal.should_compress is False
     assert signal.reason == "none"
+    assert signal.scheduled_tokens == 1
 
 
 def test_kv_usage_trigger_with_hysteresis():
@@ -94,3 +96,17 @@ def test_length_trigger_respects_prefill_outside_budget_mode():
     assert under.should_compress is False
     assert hit.should_compress is True
     assert hit.reason == "length_threshold"
+
+
+def test_signal_propagates_scheduled_tokens():
+    cfg = TriAttentionRuntimeConfig(kv_budget=16, divide_length=4)
+    planner = CompressionPlanner(cfg)
+
+    signal = planner.build_signal(
+        req_id="r1",
+        estimated_cache_len=20,
+        prefill_len=8,
+        step=1,
+        scheduled_tokens=2048,
+    )
+    assert signal.scheduled_tokens == 2048

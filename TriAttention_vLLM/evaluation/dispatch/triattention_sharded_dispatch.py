@@ -275,6 +275,15 @@ def format_runner_args(args_dict: Dict[str, object], total_shards: int) -> List[
 
 
 def build_base_command(conda_env: str, runner_path: Path, runner_args: List[str]) -> List[str]:
+    """Build shard launch command.
+
+    Default path keeps existing conda-run behavior.
+    Set TRIATTN_DISPATCH_PYTHON_BIN to bypass conda and launch with a direct
+    interpreter path (useful when conda lock contention stalls multi-shard jobs).
+    """
+    direct_python = os.environ.get("TRIATTN_DISPATCH_PYTHON_BIN", "").strip()
+    if direct_python:
+        return [direct_python, str(runner_path)] + runner_args
     return ["conda", "run", "-n", conda_env, "python", str(runner_path)] + runner_args
 
 

@@ -3,17 +3,21 @@ from __future__ import annotations
 import torch
 
 from triattention_runtime.config import TriAttentionRuntimeConfig
+from triattention_runtime.kv_compaction import register_kv_layout_axis_hint
 from triattention_runtime.selection_planner import prepare_group_layer_compactions
 
 
 def _layer_tensors():
     kv = torch.zeros((2, 2, 16, 1, 2), dtype=torch.float32)
+    register_kv_layout_axis_hint(kv, 0)
     return [(0, kv)]
 
 
 def _two_layer_tensors():
     kv0 = torch.zeros((2, 2, 16, 1, 2), dtype=torch.float32)
     kv1 = torch.zeros((2, 2, 16, 1, 2), dtype=torch.float32)
+    register_kv_layout_axis_hint(kv0, 0)
+    register_kv_layout_axis_hint(kv1, 0)
     return [(0, kv0), (1, kv1)]
 
 
