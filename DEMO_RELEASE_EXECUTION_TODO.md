@@ -65,6 +65,7 @@ Status: Active
 1. 同事提到 `DEMO_SETUP.md`，远端实际文件名为 `demo/DEMO_STARTUP.md`。
 2. `linxi-dev` 仍存在 `demo/vllm/vllm/` 双副本结构，需避免继续放大分叉。
 3. `budget=2048` 在部分问题上可能出现后段重复，不作为当前阻断项但需标注。
+4. `run_vllm_serve.sh` 走的是 `vllm serve + plugin` 路径；需与当前 master 的 TriAttention runtime 主线做一次行为确认，避免“可启动但未生效”。
 
 ## 7) Progress Log
 
@@ -82,3 +83,7 @@ Status: Active
      - `TriAttention_vLLM/linxi_dev/run_vllm_serve.sh`
      - `TriAttention_vLLM/linxi_dev/run_vllm_triattention.sh`
    - 下一步进入 B 组：按文档进行本机链路验证与卡顿复现。
+3. 2026-03-06:
+   - 已 push 到 `origin/master`：
+     - `ea6f2fe7` (sync `linxi-dev` docs commit `f80bae11`)
+     - `7a12f90c` (新增执行看板 + 同步 `linxi_dev` 启动包装脚本)
