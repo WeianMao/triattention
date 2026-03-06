@@ -1,0 +1,180 @@
+:root {
+  --bg: #f4f6f8;
+  --ink: #152238;
+  --muted: #5f6d7a;
+  --panel: #ffffff;
+  --line: #d5dde5;
+  --primary: #0f766e;
+  --primary-soft: #d8f3f0;
+  --danger: #b91c1c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at 15% 15%, #e0f2fe 0%, transparent 35%),
+    radial-gradient(circle at 90% 10%, #dcfce7 0%, transparent 25%),
+    var(--bg);
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.hero h1 {
+  margin: 0 0 6px;
+  font-size: 32px;
+}
+
+.hero p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.controls,
+.panel,
+.metric-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(21, 34, 56, 0.05);
+}
+
+.controls {
+  margin-top: 18px;
+  padding: 16px;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+textarea,
+input {
+  width: 100%;
+  border: 1px solid #bfc9d4;
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.actions {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+button {
+  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.status {
+  font-weight: 700;
+}
+
+.status.idle {
+  color: var(--muted);
+}
+
+.status.running {
+  color: #0369a1;
+}
+
+.status.done {
+  color: var(--primary);
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.metrics-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-card {
+  padding: 12px;
+}
+
+.metric-card h2 {
+  margin: 0 0 10px;
+}
+
+.metric-card p {
+  margin: 5px 0;
+}
+
+.panels {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.panel header {
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel h3 {
+  margin: 0;
+}
+
+pre {
+  margin: 0;
+  min-height: 340px;
+  max-height: 520px;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  line-height: 1.45;
+}
+
+@media (max-width: 900px) {
+  .control-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metrics-grid,
+  .panels {
+    grid-template-columns: 1fr;
+  }
+}

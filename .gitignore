@@ -70,3 +70,9 @@ TriAttention_vLLM/evaluation/*.log
 # Build artifacts
 *.egg-info/
 .deps/
+
+# Keep demo handoff assets tracked.
+!demo/
+!demo/prompt.txt
+!demo/vllm/
+!demo/vllm/**
