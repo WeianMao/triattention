@@ -24,6 +24,18 @@
 - `demo/vllm/static/index.html`
 - `demo/vllm/static/styles.css`
 
+新增（来自 `origin/linxi-dev` 的后续提交 `f80bae11`）：
+
+- `demo/DEMO_STARTUP.md`
+- `docs/remote_execution_notes.md`
+- `R-KV/docs/qwen3_32b_int4_speckv_stats_patch.md`
+- `R-KV/linxi_experiments/run_qwen3-32b-int4_speckv_stats_patched.sh`
+
+补齐 demo 启动依赖（来自 `origin/linxi-dev`）：
+
+- `TriAttention_vLLM/linxi_dev/run_vllm_serve.sh`
+- `TriAttention_vLLM/linxi_dev/run_vllm_triattention.sh`
+
 ## 为什么不是直接 merge 整个 linxi-dev
 
 `linxi-dev` 与当前 `master` 在 TriAttention 实现路径上分叉较大，直接 merge 会引入大量冲突，尤其集中在：
