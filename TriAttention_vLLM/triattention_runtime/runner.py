@@ -55,6 +55,7 @@ class TriAttentionModelRunner:
             "under_budget",
             "prefill_exceeds_budget",
             "req_state_not_found",
+            "batch_queue_dedup",
         }
 
     def __getattr__(self, name: str) -> Any:
@@ -109,6 +110,80 @@ class TriAttentionModelRunner:
             base_runner=self._base_runner,
             events=self._pending_compression_events,
         )
+
+    def _patch_scheduler_output_for_compressed_reqs(self, scheduler_output: Any) -> None:
+        """Trim stale new_block_ids for compressed requests (V1 batch-queue).
+
+        After compression, the worker's block table has been shrunk via
+        worker_reclaim_sync.  But the scheduler may still send excess
+        new_block_ids based on its stale view.  This trims those to fit
+        within the worker's actual block capacity.
+        """
+        cached_reqs = getattr(scheduler_output, "scheduled_cached_reqs", None)
+        if cached_reqs is None:
+            return
+        req_ids = getattr(cached_reqs, "req_ids", None)
+        new_block_ids_list = getattr(cached_reqs, "new_block_ids", None)
+        if not isinstance(req_ids, list) or not isinstance(new_block_ids_list, list):
+            return
+        if len(req_ids) != len(new_block_ids_list):
+            return
+
+        # Get block table info from worker.
+        input_batch = getattr(self._base_runner, "input_batch", None)
+        block_table_obj = getattr(input_batch, "block_table", None) if input_batch else None
+        if block_table_obj is None:
+            return
+        max_blocks = getattr(block_table_obj, "max_num_blocks_per_req", None)
+        if not isinstance(max_blocks, int) or max_blocks <= 0:
+            return
+
+        # Get num_blocks_per_row from the (possibly single) inner table.
+        inner_tables = getattr(block_table_obj, "block_tables", None)
+        first_table = inner_tables[0] if isinstance(inner_tables, list) and inner_tables else block_table_obj
+        num_blocks_per_row = getattr(first_table, "num_blocks_per_row", None)
+
+        req_id_to_index = getattr(input_batch, "req_id_to_index", None)
+        if not isinstance(req_id_to_index, dict):
+            return
+
+        for i, req_id in enumerate(req_ids):
+            rt_state = self.state_store.get(req_id)
+            if rt_state is None or rt_state.compression_count <= 0:
+                continue
+
+            new_block_ids = new_block_ids_list[i]
+            if new_block_ids is None:
+                continue
+
+            req_index = req_id_to_index.get(req_id)
+            if not isinstance(req_index, int):
+                continue
+
+            # Check if appending would overflow.
+            if num_blocks_per_row is not None:
+                current = int(num_blocks_per_row[req_index])
+            else:
+                continue
+
+            if isinstance(new_block_ids, (list, tuple)):
+                max_new = max(len(g) if isinstance(g, (list, tuple)) else 0 for g in new_block_ids)
+            else:
+                continue
+
+            if current + max_new > max_blocks:
+                # Trim to fit: only keep blocks that fit within max_blocks.
+                available = max(0, max_blocks - current)
+                trimmed = tuple(
+                    list(g)[:available] if isinstance(g, (list, tuple)) else g
+                    for g in new_block_ids
+                )
+                new_block_ids_list[i] = trimmed
+                self._logger.info(
+                    "TriAttention patched new_block_ids: req=%s "
+                    "current_blocks=%d max=%d new_trimmed=%d->%d",
+                    req_id, current, max_blocks, max_new, available,
+                )
 
     def _needs_effective_input_overrides(self, scheduler_output: Any) -> bool:
         # Tighten scope to "current scheduled batch includes a compressed
@@ -171,6 +246,7 @@ class TriAttentionModelRunner:
         self._perf.record_compression_events(self._pending_compression_events)
         t0 = time.perf_counter() if perf_enabled else 0.0
         self._apply_worker_block_reclaim_events()
+        self._patch_scheduler_output_for_compressed_reqs(scheduler_output)
         t_reclaim_ms = (time.perf_counter() - t0) * 1000.0 if perf_enabled else 0.0
         need_effective_overrides = self._needs_effective_input_overrides(scheduler_output)
         self._ensure_runtime_input_patch_if_needed(need_effective_overrides)
@@ -199,6 +275,7 @@ class TriAttentionModelRunner:
         output, self._pending_compression_events = attach_execute_model_compression_events(
             output=output,
             pending_events=self._pending_compression_events,
+            scheduler_output=scheduler_output,
         )
         return output
 
