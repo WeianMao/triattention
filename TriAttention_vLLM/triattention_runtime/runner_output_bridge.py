@@ -86,12 +86,26 @@ def attach_execute_model_compression_events(
     *,
     output: Any,
     pending_events: list[dict[str, Any]],
+    scheduler_output: Any = None,
 ) -> tuple[Any, list[dict[str, Any]]]:
     """Attach compression events to ModelRunnerOutput when possible.
 
-    Returns `(output, remaining_pending_events)`.
+    In vLLM V1's async path, ``execute_model`` returns ``None`` (the actual
+    ``ModelRunnerOutput`` is produced later).  When that happens, attach
+    events to ``scheduler_output`` instead — the same Python object is
+    passed through to ``scheduler.update_from_output()``, so the events
+    will arrive without serialization.
+
+    Returns ``(output, remaining_pending_events)``.
     """
     if output is None:
+        if scheduler_output is not None and pending_events:
+            setattr(
+                scheduler_output,
+                "triattention_compression_events",
+                pending_events,
+            )
+            return output, []
         return output, pending_events
     try:
         setattr(output, "triattention_compression_events", pending_events)

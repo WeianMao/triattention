@@ -85,11 +85,19 @@ def _patched_scheduler_update_from_output(self, scheduler_output, model_runner_o
     if cfg is None:
         return outputs
 
+    # Prefer events from model_runner_output (V0 / sync path), fall back to
+    # scheduler_output (V1 async path where execute_model returns None).
     compression_events = getattr(
         model_runner_output,
         "triattention_compression_events",
         None,
     )
+    if not compression_events:
+        compression_events = getattr(
+            scheduler_output,
+            "triattention_compression_events",
+            None,
+        )
     if compression_events:
         TriAttentionScheduler._apply_compression_events(self, compression_events)
 
