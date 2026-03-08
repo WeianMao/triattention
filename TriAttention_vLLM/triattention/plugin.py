@@ -10,6 +10,8 @@ Legacy V1 custom backend registration is retired.
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import sys
 
 
 def _truthy(raw: str | None, default: bool) -> bool:
@@ -80,9 +82,26 @@ def register_triattention_backend():
     )
 
     try:
-        from triattention_runtime.integration_monkeypatch import (
-            install_vllm_integration_monkeypatches,
-        )
+        try:
+            from triattention_runtime.integration_monkeypatch import (
+                install_vllm_integration_monkeypatches,
+            )
+        except ModuleNotFoundError as exc:
+            # Some editable installs expose only `triattention` package path
+            # (without project root) on sys.path. Add project root fallback so
+            # sibling package `triattention_runtime` remains importable.
+            if exc.name not in {
+                "triattention_runtime",
+                "triattention_runtime.integration_monkeypatch",
+            }:
+                raise
+            project_root = Path(__file__).resolve().parent.parent
+            root_str = str(project_root)
+            if root_str not in sys.path:
+                sys.path.insert(0, root_str)
+            from triattention_runtime.integration_monkeypatch import (
+                install_vllm_integration_monkeypatches,
+            )
 
         install_vllm_integration_monkeypatches(
             patch_scheduler=patch_scheduler,
