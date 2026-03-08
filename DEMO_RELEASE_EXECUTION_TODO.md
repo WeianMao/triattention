@@ -66,6 +66,7 @@ Status: Active
 2. `linxi-dev` 仍存在 `demo/vllm/vllm/` 双副本结构，需避免继续放大分叉。
 3. `budget=2048` 在部分问题上可能出现后段重复，不作为当前阻断项但需标注。
 4. `run_vllm_serve.sh` 走的是 `vllm serve + plugin` 路径；需与当前 master 的 TriAttention runtime 主线做一次行为确认，避免“可启动但未生效”。
+5. 当前 `master` 的 `triattention/plugin.py` 为 retired no-op，`--attention-backend CUSTOM` 可能无法注册 backend（已出现阻断证据）。
 
 ## 7) Progress Log
 
@@ -87,3 +88,20 @@ Status: Active
    - 已 push 到 `origin/master`：
      - `ea6f2fe7` (sync `linxi-dev` docs commit `f80bae11`)
      - `7a12f90c` (新增执行看板 + 同步 `linxi_dev` 启动包装脚本)
+4. 2026-03-07:
+   - 新增诊断脚本（不改主逻辑）：
+     - `weian_development/demo_debug/verify_custom_backend_registration.py`
+     - `weian_development/demo_debug/stream_stutter_probe.py`
+   - 新增最小校准产物用于诊断：
+     - `weian_development/demo_debug/artifacts/qwen25_05b_stats.pt`
+   - 诊断结论（已复现）：
+     - `vllm serve --attention-backend CUSTOM` 在当前 master 下失败；
+     - 日志同时出现：
+       - `Legacy V1 backend plugin registration is retired`
+       - `Backend CUSTOM must be registered before use`
+   - 证明文件：
+     - 报告：`weian_development/demo_debug/artifacts/custom_backend_probe_report.json`
+     - 日志：`weian_development/demo_debug/artifacts/custom_backend_probe.log`
+   - 影响：
+     - 当前阻断点在“serve 集成路径未注册 CUSTOM backend”，
+       在该阻断修复前无法继续做“压缩触发导致 streaming 卡顿”的有效对照实验。
