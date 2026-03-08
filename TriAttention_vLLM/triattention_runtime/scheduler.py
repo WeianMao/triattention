@@ -233,6 +233,16 @@ class TriAttentionScheduler(Scheduler):
         block_size = int(getattr(self, "block_size", 1))
         if block_size <= 0:
             block_size = 1
+        logger.info(
+            "TriAttention _apply_compression_events: kv_cache_manager=%s "
+            "coordinator=%s managers=%s block_size=%d reclaim_enabled=%s",
+            type(self.kv_cache_manager).__name__,
+            type(coordinator).__name__ if coordinator else None,
+            type(managers).__name__ if managers else None,
+            block_size,
+            getattr(self, "triattention_config", None)
+            and self.triattention_config.enable_experimental_block_reclaim,
+        )
 
         def _num_required_blocks(token_len: int) -> int:
             if token_len <= 0:
@@ -272,6 +282,13 @@ class TriAttentionScheduler(Scheduler):
                 block_reclaim.get("groups")
                 if isinstance(block_reclaim, dict)
                 else None
+            )
+            logger.info(
+                "TriAttention block reclaim: req=%s required_blocks=%d "
+                "expected_shrink_gids=%s block_reclaim=%s groups=%s",
+                req_id, required_blocks, expected_shrink_gids,
+                type(block_reclaim).__name__ if block_reclaim else None,
+                bool(groups),
             )
             if not isinstance(groups, list):
                 # In V1 batch-queue mode, consecutive compression steps can
