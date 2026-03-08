@@ -375,6 +375,11 @@ class TriAttentionScheduler(Scheduler):
                         manager.num_cached_block[req_id], len(kept_blocks)
                     )
                 if removed_blocks:
+                    logger.info(
+                        "TriAttention scheduler FREE_BLOCKS: req=%s gid=%d "
+                        "freed=%d kept=%d",
+                        req_id, gid, len(removed_blocks), len(kept_blocks),
+                    )
                     manager.block_pool.free_blocks(reversed(removed_blocks))
 
             # Synthesize reclaim for groups that were expected but not
