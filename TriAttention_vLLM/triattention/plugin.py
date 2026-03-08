@@ -97,11 +97,22 @@ def register_triattention_backend():
                 raise
             project_root = Path(__file__).resolve().parent.parent
             root_str = str(project_root)
+            added_path = False
             if root_str not in sys.path:
+                # Runtime-derived path (not hardcoded) for cross-machine portability.
                 sys.path.insert(0, root_str)
-            from triattention_runtime.integration_monkeypatch import (
-                install_vllm_integration_monkeypatches,
-            )
+                added_path = True
+            try:
+                from triattention_runtime.integration_monkeypatch import (
+                    install_vllm_integration_monkeypatches,
+                )
+            finally:
+                # Keep fallback side effects minimal.
+                if added_path:
+                    try:
+                        sys.path.remove(root_str)
+                    except ValueError:
+                        pass
 
         install_vllm_integration_monkeypatches(
             patch_scheduler=patch_scheduler,
