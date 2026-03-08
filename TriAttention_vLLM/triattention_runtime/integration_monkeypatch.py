@@ -92,13 +92,21 @@ def _patched_scheduler_update_from_output(self, scheduler_output, model_runner_o
         "triattention_compression_events",
         None,
     )
+    source = "model_runner_output" if compression_events else None
     if not compression_events:
         compression_events = getattr(
             scheduler_output,
             "triattention_compression_events",
             None,
         )
+        if compression_events:
+            source = "scheduler_output"
     if compression_events:
+        applied = [e for e in compression_events if e.get("status") == "applied"]
+        logger.info(
+            "TriAttention update_from_output: received %d events (%d applied) via %s",
+            len(compression_events), len(applied), source,
+        )
         TriAttentionScheduler._apply_compression_events(self, compression_events)
 
     for req_id in scheduler_output.finished_req_ids:
