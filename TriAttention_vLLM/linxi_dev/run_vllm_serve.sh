@@ -13,6 +13,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_ROOT}"
 
+USE_PIXI=0
+RUNNER_MODE="direct"
+if command -v pixi >/dev/null 2>&1; then
+  USE_PIXI=1
+  RUNNER_MODE="pixi"
+elif command -v vllm >/dev/null 2>&1; then
+  RUNNER_MODE="direct"
+elif command -v conda >/dev/null 2>&1; then
+  RUNNER_MODE="conda_trivllm"
+fi
+
+run_in_runtime() {
+  case "${RUNNER_MODE}" in
+    pixi)
+      pixi run "$@"
+      ;;
+    conda_trivllm)
+      conda run -n trivllm "$@"
+      ;;
+    *)
+      "$@"
+      ;;
+  esac
+}
+
 # ----------------------------
 # Editable env vars (defaults)
 # ----------------------------
@@ -128,6 +153,12 @@ if is_truthy "${TRUST_REMOTE_CODE}"; then
   SERVE_ARGS+=(--trust-remote-code)
 fi
 
+if [[ "${RUNNER_MODE}" == "direct" ]] && ! command -v vllm >/dev/null 2>&1; then
+  echo "vllm command not found in current shell." >&2
+  echo "Activate your runtime env (e.g. conda activate trivllm), install pixi, or ensure conda is available." >&2
+  exit 1
+fi
+
 USER_SET_ENFORCE_EAGER=0
 for arg in "${PASSTHROUGH_ARGS[@]}"; do
   if [[ "${arg}" == "--enforce-eager" || "${arg}" == "--no-enforce-eager" ]]; then
@@ -143,9 +174,15 @@ if is_truthy "${ENABLE_TRIATTENTION}"; then
     exit 1
   fi
 
-  if ! pixi run python -c "import importlib.metadata as m, sys; sys.exit(0 if any(ep.name=='triattention' for ep in m.entry_points(group='vllm.general_plugins')) else 1)"; then
-    echo "TriAttention plugin is not installed in current pixi environment." >&2
-    echo "Run: pixi run python -m pip install -e ${PROJECT_ROOT}" >&2
+  if ! run_in_runtime python -c "import importlib.metadata as m, sys; sys.exit(0 if any(ep.name=='triattention' for ep in m.entry_points(group='vllm.general_plugins')) else 1)"; then
+    echo "TriAttention plugin is not installed in current runtime environment." >&2
+    if (( USE_PIXI )); then
+      echo "Run: pixi run python -m pip install -e ${PROJECT_ROOT}" >&2
+    elif [[ "${RUNNER_MODE}" == "conda_trivllm" ]]; then
+      echo "Run: conda run -n trivllm python -m pip install -e ${PROJECT_ROOT}" >&2
+    else
+      echo "Run: python -m pip install -e ${PROJECT_ROOT}" >&2
+    fi
     exit 1
   fi
 
@@ -212,5 +249,13 @@ fi
 
 export VLLM_ENABLE_V1_MULTIPROCESSING
 
-echo "[run_vllm_serve] command: pixi run vllm ${SERVE_ARGS[*]} ${PASSTHROUGH_ARGS[*]}" >&2
-exec -a "${PROCESS_NAME}" pixi run vllm "${SERVE_ARGS[@]}" "${PASSTHROUGH_ARGS[@]}"
+if [[ "${RUNNER_MODE}" == "pixi" ]]; then
+  echo "[run_vllm_serve] command: pixi run vllm ${SERVE_ARGS[*]} ${PASSTHROUGH_ARGS[*]}" >&2
+  exec -a "${PROCESS_NAME}" pixi run vllm "${SERVE_ARGS[@]}" "${PASSTHROUGH_ARGS[@]}"
+elif [[ "${RUNNER_MODE}" == "conda_trivllm" ]]; then
+  echo "[run_vllm_serve] command: conda run -n trivllm vllm ${SERVE_ARGS[*]} ${PASSTHROUGH_ARGS[*]}" >&2
+  exec -a "${PROCESS_NAME}" conda run -n trivllm vllm "${SERVE_ARGS[@]}" "${PASSTHROUGH_ARGS[@]}"
+else
+  echo "[run_vllm_serve] command: vllm ${SERVE_ARGS[*]} ${PASSTHROUGH_ARGS[*]}" >&2
+  exec -a "${PROCESS_NAME}" vllm "${SERVE_ARGS[@]}" "${PASSTHROUGH_ARGS[@]}"
+fi
