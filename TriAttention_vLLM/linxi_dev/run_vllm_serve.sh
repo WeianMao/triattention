@@ -38,7 +38,11 @@ export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}"
 : "${TRIATTENTION_QUIET:=0}"
 : "${TRIATTENTION_LOG_TRIGGER:=1}"
 : "${TRIATTENTION_LOG_DECISIONS:=0}"
-: "${TRIATTENTION_BACKEND:=CUSTOM}"  # CUSTOM for upstream vLLM; TRIATTENTION for patched forks
+# Interface mode:
+# - runtime (default): V2 integration via plugin monkeypatch + TRIATTN_RUNTIME_* envs
+# - legacy_custom: retired V1 CUSTOM backend path (kept only for compatibility)
+: "${TRIATTENTION_INTERFACE:=runtime}"
+: "${TRIATTENTION_BACKEND:=CUSTOM}"  # legacy mode only
 
 # Optional process title override for long-running jobs.
 : "${PROCESS_NAME:=PD-L1_binder}"
@@ -145,6 +149,7 @@ if is_truthy "${ENABLE_TRIATTENTION}"; then
     exit 1
   fi
 
+  # Keep legacy env vars for backward compatibility.
   export TRIATTENTION_STATS_PATH="${STATS_PATH}"
   export TRIATTENTION_KV_BUDGET="${KV_BUDGET}"
   export TRIATTENTION_DIVIDE_LENGTH="${DIVIDE_LENGTH}"
@@ -153,6 +158,24 @@ if is_truthy "${ENABLE_TRIATTENTION}"; then
   export TRIATTENTION_QUIET="${TRIATTENTION_QUIET}"
   export TRIATTENTION_LOG_TRIGGER="${TRIATTENTION_LOG_TRIGGER}"
   export TRIATTENTION_LOG_DECISIONS="${TRIATTENTION_LOG_DECISIONS}"
+  export TRIATTENTION_INTERFACE="${TRIATTENTION_INTERFACE}"
+
+  # Runtime (V2) env vars.
+  export TRIATTN_RUNTIME_SPARSE_STATS_PATH="${STATS_PATH}"
+  export TRIATTN_RUNTIME_KV_BUDGET="${KV_BUDGET}"
+  export TRIATTN_RUNTIME_DIVIDE_LENGTH="${DIVIDE_LENGTH}"
+  export TRIATTN_RUNTIME_WINDOW_SIZE="${WINDOW_SIZE}"
+  case "${PRUNING_MODE}" in
+    per_layer_head) export TRIATTN_RUNTIME_PRUNING_MODE="per_layer_per_head" ;;
+    *) export TRIATTN_RUNTIME_PRUNING_MODE="${PRUNING_MODE}" ;;
+  esac
+  export TRIATTN_RUNTIME_LOG_DECISIONS="${TRIATTENTION_LOG_DECISIONS}"
+  export TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION="${TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION:-true}"
+  export TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_BLOCK_RECLAIM="${TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_BLOCK_RECLAIM:-true}"
+  export TRIATTN_RUNTIME_REQUIRE_TRITON_SCORING="${TRIATTN_RUNTIME_REQUIRE_TRITON_SCORING:-true}"
+  export TRIATTN_RUNTIME_REQUIRE_PHYSICAL_RECLAIM="${TRIATTN_RUNTIME_REQUIRE_PHYSICAL_RECLAIM:-true}"
+  export TRIATTN_RUNTIME_PATCH_WORKER="${TRIATTN_RUNTIME_PATCH_WORKER:-true}"
+  export TRIATTN_RUNTIME_PATCH_SCHEDULER="${TRIATTN_RUNTIME_PATCH_SCHEDULER:-true}"
 
   # Ensure plugin loading is not accidentally filtered out.
   if [[ -z "${VLLM_PLUGINS:-}" ]]; then
@@ -161,24 +184,23 @@ if is_truthy "${ENABLE_TRIATTENTION}"; then
     export VLLM_PLUGINS="${VLLM_PLUGINS},triattention"
   fi
 
-  FINAL_ATTENTION_BACKEND="${TRIATTENTION_BACKEND}"
-  if [[ -n "${USER_ATTENTION_BACKEND}" ]]; then
-    FINAL_ATTENTION_BACKEND="${USER_ATTENTION_BACKEND}"
-  fi
-
-  # Auto-fallback for upstream vLLM where TRIATTENTION enum does not exist.
-  if [[ "${FINAL_ATTENTION_BACKEND}" == "TRIATTENTION" ]]; then
-    if ! pixi run python -c "import sys; from vllm.v1.attention.backends.registry import AttentionBackendEnum as E; sys.exit(0 if hasattr(E, 'TRIATTENTION') else 1)"; then
-      echo "Attention backend TRIATTENTION is not supported by this vLLM build; fallback to CUSTOM." >&2
-      FINAL_ATTENTION_BACKEND="CUSTOM"
+  interface_mode="${TRIATTENTION_INTERFACE,,}"
+  if [[ "${interface_mode}" == "legacy_custom" || "${interface_mode}" == "legacy" || "${interface_mode}" == "v1" || "${interface_mode}" == "custom" ]]; then
+    FINAL_ATTENTION_BACKEND="${TRIATTENTION_BACKEND}"
+    if [[ -n "${USER_ATTENTION_BACKEND}" ]]; then
+      FINAL_ATTENTION_BACKEND="${USER_ATTENTION_BACKEND}"
     fi
+    SERVE_ARGS+=(--attention-backend "${FINAL_ATTENTION_BACKEND}")
+    echo "[run_vllm_serve] TRIATTENTION_INTERFACE=${TRIATTENTION_INTERFACE} (legacy) backend=${FINAL_ATTENTION_BACKEND}" >&2
+  else
+    if [[ -n "${USER_ATTENTION_BACKEND}" ]]; then
+      echo "Ignoring user --attention-backend (${USER_ATTENTION_BACKEND}) in runtime interface mode." >&2
+    fi
+    echo "[run_vllm_serve] TRIATTENTION_INTERFACE=${TRIATTENTION_INTERFACE} (runtime/v2) via plugin monkeypatch" >&2
   fi
-
-  SERVE_ARGS+=(--attention-backend "${FINAL_ATTENTION_BACKEND}")
   if is_truthy "${ENFORCE_EAGER}" && (( USER_SET_ENFORCE_EAGER == 0 )); then
     SERVE_ARGS+=(--enforce-eager)
   fi
-  echo "[run_vllm_serve] ENABLE_TRIATTENTION=true, backend=${FINAL_ATTENTION_BACKEND}" >&2
 else
   unset TRIATTENTION_STATS_PATH TRIATTENTION_KV_BUDGET TRIATTENTION_DIVIDE_LENGTH
   unset TRIATTENTION_WINDOW_SIZE TRIATTENTION_PRUNING_MODE TRIATTENTION_QUIET

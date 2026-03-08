@@ -43,9 +43,14 @@ nohup bash -lc "
     TRIATTENTION_DIVIDE_LENGTH=128 \
     TRIATTENTION_WINDOW_SIZE=128 \
     TRIATTENTION_PRUNING_MODE=per_head \
+    TRIATTENTION_INTERFACE=runtime \
     TRIATTENTION_QUIET=0 \
     TRIATTENTION_LOG_TRIGGER=1 \
     TRIATTENTION_LOG_DECISIONS=0 \
+    TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION=true \
+    TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_BLOCK_RECLAIM=true \
+    TRIATTN_RUNTIME_REQUIRE_TRITON_SCORING=true \
+    TRIATTN_RUNTIME_REQUIRE_PHYSICAL_RECLAIM=true \
     pixi run vllm serve \"$MODEL_PATH\" \
       --host \"$BACKEND_HOST\" \
       --port \"$BACKEND_PORT\" \
@@ -58,8 +63,7 @@ nohup bash -lc "
       --tool-call-parser hermes \
       --trust-remote-code \
       --enforce-eager \
-      --max-num-seqs 1 \
-      --attention-backend CUSTOM
+      --max-num-seqs 1
 " > "$REPO_ROOT/demo/vllm/logs/triattention_backend.log" 2>&1 &
 echo $! > "$REPO_ROOT/demo/vllm/run/triattention.pid"
 ```
@@ -103,9 +107,14 @@ nohup bash -lc "
     TRIATTENTION_DIVIDE_LENGTH=128 \
     TRIATTENTION_WINDOW_SIZE=128 \
     TRIATTENTION_PRUNING_MODE=per_head \
+    TRIATTENTION_INTERFACE=runtime \
     TRIATTENTION_QUIET=0 \
     TRIATTENTION_LOG_TRIGGER=1 \
     TRIATTENTION_LOG_DECISIONS=0 \
+    TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION=true \
+    TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_BLOCK_RECLAIM=true \
+    TRIATTN_RUNTIME_REQUIRE_TRITON_SCORING=true \
+    TRIATTN_RUNTIME_REQUIRE_PHYSICAL_RECLAIM=true \
     vllm serve \"$MODEL_PATH\" \
       --host \"$BACKEND_HOST\" \
       --port \"$BACKEND_PORT\" \
@@ -118,8 +127,7 @@ nohup bash -lc "
       --tool-call-parser hermes \
       --trust-remote-code \
       --enforce-eager \
-      --max-num-seqs 1 \
-      --attention-backend CUSTOM
+      --max-num-seqs 1
 " > "$REPO_ROOT/demo/vllm/logs/triattention_backend.log" 2>&1 &
 echo $! > "$REPO_ROOT/demo/vllm/run/triattention.pid"
 ```
@@ -156,10 +164,10 @@ http://127.0.0.1:8010
 Check backend log:
 
 ```bash
-grep -n "V1 Backend registered successfully as CUSTOM" "$REPO_ROOT/demo/vllm/logs/triattention_backend.log"
-grep -n "Using AttentionBackendEnum.CUSTOM backend" "$REPO_ROOT/demo/vllm/logs/triattention_backend.log"
-grep -n "V1 Impl initialized" "$REPO_ROOT/demo/vllm/logs/triattention_backend.log"
-grep -n "Loaded config from environment: stats_path=" "$REPO_ROOT/demo/vllm/logs/triattention_backend.log"
+grep -n "Runtime (V2) plugin activated" "$REPO_ROOT/demo/vllm/logs/triattention_backend.log"
+grep -n "Installed TriAttention runtime monkeypatch integration" "$REPO_ROOT/demo/vllm/logs/triattention_backend.log"
+grep -n "TRIATTENTION_INTERFACE=runtime" "$REPO_ROOT/demo/vllm/logs/triattention_backend.log"
+grep -n "TriAttention compression applied req=" "$REPO_ROOT/demo/vllm/logs/triattention_backend.log"
 ```
 
 Note: short prompts may not hit compression threshold, so `[TRIGGER]` lines may be absent even when backend integration is active.
