@@ -59,6 +59,10 @@ def _bridge_legacy_env_to_runtime() -> None:
 
 def register_triattention_backend():
     """Install TriAttention runtime integration when plugin is loaded by vLLM."""
+    # Allow baseline mode: skip all integration when explicitly disabled.
+    if not _truthy(os.environ.get("ENABLE_TRIATTENTION"), default=True):
+        return
+
     quiet = os.environ.get("TRIATTENTION_QUIET", "0") == "1"
     interface_mode = os.environ.get("TRIATTENTION_INTERFACE", "runtime").strip().lower()
 
