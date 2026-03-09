@@ -81,7 +81,7 @@ _start() {
     : "${MAX_MODEL_LEN:=32768}"
   else
     flag="--no-triattention"
-    : "${MAX_MODEL_LEN:=16384}"
+    : "${MAX_MODEL_LEN:=32768}"
   fi
 
   echo "Starting vLLM in ${mode} mode..."
@@ -93,6 +93,7 @@ _start() {
 
   export ENFORCE_EAGER="${ENFORCE_EAGER:-true}"
   export VLLM_ENABLE_V1_MULTIPROCESSING=0
+  export VLLM_RELAXED_KV_CHECK=1
 
   nohup "${SCRIPT_DIR}/run_vllm_serve.sh" ${flag} \
     --max-num-seqs 32 \
