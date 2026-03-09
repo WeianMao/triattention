@@ -303,6 +303,32 @@ async def live_stream() -> StreamingResponse:
     )
 
 
+@app.post("/v1/completions")
+async def completions_proxy(request: Request) -> Response:
+    """Transparent proxy for /v1/completions (used by openclaw openai-completions API)."""
+    payload = await request.json()
+    stream = bool(payload.get("stream", False))
+    url = f"{CONFIG.backend_base_url.rstrip('/')}/v1/completions"
+    headers = _passthrough_headers(request)
+
+    if not stream:
+        async with httpx.AsyncClient(timeout=_timeout()) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                media_type=resp.headers.get("content-type", "application/json"),
+            )
+
+    async def _relay() -> AsyncIterator[bytes | str]:
+        async with httpx.AsyncClient(timeout=_timeout()) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as upstream:
+                async for line in upstream.aiter_lines():
+                    yield f"{line}\n\n"
+
+    return StreamingResponse(_relay(), media_type="text/event-stream")
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> Response:
     payload = await request.json()
