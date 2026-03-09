@@ -423,6 +423,11 @@ class TriAttentionScheduler(Scheduler):
                     compression_events,
                 )
             self._apply_compression_events(compression_events)
+            usage = float(self.kv_cache_manager.usage)
+            for engine_output in outputs.values():
+                scheduler_stats = getattr(engine_output, "scheduler_stats", None)
+                if scheduler_stats is not None:
+                    scheduler_stats.kv_cache_usage = usage
 
         for req_id in scheduler_output.finished_req_ids:
             self._prefill_lens.pop(req_id, None)
