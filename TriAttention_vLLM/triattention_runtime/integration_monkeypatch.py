@@ -30,6 +30,22 @@ _ORIG_WORKER_INIT_DEVICE: Callable[..., Any] | None = None
 _ORIG_WORKER_EXECUTE_MODEL: Callable[..., Any] | None = None
 
 
+def _refresh_scheduler_stats_kv_usage(outputs: Any, kv_usage: float) -> None:
+    """Best-effort refresh for scheduler_stats.kv_cache_usage in returned outputs.
+
+    In V1, TriAttention reclaim is applied after the base scheduler emits stats.
+    Refreshing this field keeps the per-step exported usage aligned with the
+    post-reclaim block-pool state without changing core scheduling behavior.
+    """
+    if not isinstance(outputs, dict):
+        return
+    usage = float(kv_usage)
+    for engine_output in outputs.values():
+        scheduler_stats = getattr(engine_output, "scheduler_stats", None)
+        if scheduler_stats is not None:
+            scheduler_stats.kv_cache_usage = usage
+
+
 def _patched_scheduler_init(self, *args, **kwargs):
     assert _ORIG_SCHED_INIT is not None
     _ORIG_SCHED_INIT(self, *args, **kwargs)
@@ -92,6 +108,7 @@ def _patched_scheduler_update_from_output(self, scheduler_output, model_runner_o
     )
     if compression_events:
         TriAttentionScheduler._apply_compression_events(self, compression_events)
+        _refresh_scheduler_stats_kv_usage(outputs, self.kv_cache_manager.usage)
 
     for req_id in scheduler_output.finished_req_ids:
         self._prefill_lens.pop(req_id, None)
