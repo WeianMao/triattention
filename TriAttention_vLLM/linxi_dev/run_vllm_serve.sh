@@ -235,9 +235,6 @@ if is_truthy "${ENABLE_TRIATTENTION}"; then
     fi
     echo "[run_vllm_serve] TRIATTENTION_INTERFACE=${TRIATTENTION_INTERFACE} (runtime/v2) via plugin monkeypatch" >&2
   fi
-  if is_truthy "${ENFORCE_EAGER}" && (( USER_SET_ENFORCE_EAGER == 0 )); then
-    SERVE_ARGS+=(--enforce-eager)
-  fi
 else
   export ENABLE_TRIATTENTION=false
   unset TRIATTENTION_STATS_PATH TRIATTENTION_KV_BUDGET TRIATTENTION_DIVIDE_LENGTH
@@ -253,6 +250,11 @@ else
   if [[ -n "${USER_ATTENTION_BACKEND}" ]]; then
     SERVE_ARGS+=(--attention-backend "${USER_ATTENTION_BACKEND}")
   fi
+fi
+
+# enforce-eager applies to both triattention and baseline (saves GPU memory on 4090)
+if is_truthy "${ENFORCE_EAGER}" && (( USER_SET_ENFORCE_EAGER == 0 )); then
+  SERVE_ARGS+=(--enforce-eager)
 fi
 
 export VLLM_ENABLE_V1_MULTIPROCESSING
