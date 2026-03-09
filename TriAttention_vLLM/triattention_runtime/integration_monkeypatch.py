@@ -197,6 +197,36 @@ def install_vllm_integration_monkeypatches(
         Worker.execute_model = _patched_worker_execute_model
         Worker._ensure_triattention_runner_proxy = TriAttentionWorker._ensure_triattention_runner_proxy
 
+    # Relax the KV cache memory check: TriAttention compresses KV cache
+    # during generation, so the physical blocks needed are less than what
+    # max_model_len implies.  Turn the hard ValueError into a warning.
+    try:
+        import vllm.v1.core.kv_cache_utils as _kv_utils
+
+        _orig_check = _kv_utils._check_enough_kv_cache_memory
+
+        def _relaxed_check(available_memory, get_needed_memory, max_model_len,
+                           estimate_max_model_len):
+            if available_memory <= 0:
+                _orig_check(available_memory, get_needed_memory,
+                            max_model_len, estimate_max_model_len)
+                return
+            needed = get_needed_memory()
+            if needed > available_memory:
+                est = estimate_max_model_len(available_memory)
+                logger.warning(
+                    "[TriAttention] KV cache check relaxed: max_model_len=%d "
+                    "needs %.2f GiB but only %.2f GiB available (est max %d). "
+                    "Compression will keep actual usage within limits.",
+                    max_model_len, needed / (1 << 30),
+                    available_memory / (1 << 30), est,
+                )
+
+        _kv_utils._check_enough_kv_cache_memory = _relaxed_check
+        logger.info("Relaxed KV cache memory check for TriAttention compression")
+    except Exception:
+        logger.warning("Could not relax KV cache memory check", exc_info=True)
+
     _PATCHED_SCHEDULER_ACTIVE = bool(patch_scheduler)
     _PATCHED_WORKER_ACTIVE = bool(patch_worker)
     _PATCHED = True
