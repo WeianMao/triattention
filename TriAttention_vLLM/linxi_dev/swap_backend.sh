@@ -36,7 +36,7 @@ _current_mode() {
 _wait_healthy() {
   local url="http://127.0.0.1:${VLLM_PORT}/health"
   echo -n "Waiting for vLLM health"
-  for i in $(seq 1 60); do
+  for i in $(seq 1 180); do
     if curl -sf "${url}" >/dev/null 2>&1; then
       echo " ready (${i}s)"
       return 0
