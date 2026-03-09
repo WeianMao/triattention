@@ -76,14 +76,18 @@ _start() {
   if [[ "${mode}" == "triattention" ]]; then
     flag=""
     export STATS_PATH
+    # TriAttention compresses KV cache during generation, so we can admit
+    # longer sequences than what raw KV blocks would support.
+    : "${MAX_MODEL_LEN:=32768}"
   else
     flag="--no-triattention"
+    : "${MAX_MODEL_LEN:=16384}"
   fi
 
   echo "Starting vLLM in ${mode} mode..."
   export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}"
   export MODEL HOST="${HOST:-127.0.0.1}" PORT="${VLLM_PORT}"
-  export MAX_MODEL_LEN="${MAX_MODEL_LEN:-16384}"
+  export MAX_MODEL_LEN
   export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.96}"
   export TRIATTENTION_LOG_DECISIONS="${TRIATTENTION_LOG_DECISIONS:-1}"
 
