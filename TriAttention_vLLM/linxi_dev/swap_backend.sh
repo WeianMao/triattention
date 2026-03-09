@@ -87,6 +87,9 @@ _start() {
   export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.96}"
   export TRIATTENTION_LOG_DECISIONS="${TRIATTENTION_LOG_DECISIONS:-1}"
 
+  export ENFORCE_EAGER="${ENFORCE_EAGER:-true}"
+  export VLLM_ENABLE_V1_MULTIPROCESSING=0
+
   nohup "${SCRIPT_DIR}/run_vllm_serve.sh" ${flag} \
     --max-num-seqs 32 \
     > "/tmp/vllm_${mode}.log" 2>&1 &
