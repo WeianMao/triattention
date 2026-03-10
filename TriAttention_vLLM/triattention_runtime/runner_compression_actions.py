@@ -32,12 +32,11 @@ def execute_runner_compression_actions(
         if req_state is not None:
             last_step = getattr(req_state, "last_compression_step", -1)
             if last_step >= 0 and signal.step - last_step <= 1:
-                if log_decisions:
-                    logger.debug(
-                        "TriAttention compression skipped (batch-queue dedup) "
-                        "req=%s step=%d last_compression_step=%d",
-                        req_id, signal.step, last_step,
-                    )
+                logger.info(
+                    "TriAttention compression skipped (batch-queue dedup) "
+                    "req=%s step=%d last_compression_step=%d",
+                    req_id, signal.step, last_step,
+                )
                 events.append(
                     {
                         "req_id": req_id,
@@ -181,13 +180,15 @@ def execute_runner_compression_actions(
             reason=result.reason,
             step=signal.step,
         )
-        if log_decisions:
-            logger.debug(
-                "TriAttention compression skipped req=%s step=%d reason=%s",
-                req_id,
-                signal.step,
-                result.reason,
-            )
+        logger.info(
+            "TriAttention compression skipped req=%s step=%d reason=%s "
+            "cache_len_after=%s details=%s",
+            req_id,
+            signal.step,
+            result.reason,
+            result.cache_len_after,
+            result.details,
+        )
         events.append(
             {
                 "req_id": req_id,
