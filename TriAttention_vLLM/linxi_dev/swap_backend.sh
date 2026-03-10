@@ -90,6 +90,8 @@ _start() {
   export MAX_MODEL_LEN
   export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.95}"
   export TRIATTENTION_LOG_DECISIONS="${TRIATTENTION_LOG_DECISIONS:-1}"
+  # For demo with long prefill: allow compressing prefill tokens too
+  export TRIATTN_RUNTIME_PROTECT_PREFILL="${TRIATTN_RUNTIME_PROTECT_PREFILL:-false}"
 
   export ENFORCE_EAGER="${ENFORCE_EAGER:-true}"
   export VLLM_ENABLE_V1_MULTIPROCESSING=0
