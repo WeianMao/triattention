@@ -353,6 +353,22 @@ async def completions_proxy(request: Request) -> Response:
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> Response:
     payload = await request.json()
+    # Dump chat request for debugging
+    try:
+        import pathlib, time as _t, logging as _clog
+        _msgs = payload.get("messages", [])
+        _total_len = sum(len(m.get("content","")) for m in _msgs if isinstance(m, dict))
+        _clog.getLogger("demo.chat_proxy").info(
+            "chat request: msgs=%d total_content_len=%d max_tokens=%s stream=%s",
+            len(_msgs), _total_len, payload.get("max_tokens"), payload.get("stream"),
+        )
+        _dump_dir = pathlib.Path("/tmp/openclaw_prompts")
+        _dump_dir.mkdir(exist_ok=True)
+        _dump_file = _dump_dir / f"chat_{int(_t.time())}.json"
+        with open(_dump_file, "w") as _f:
+            json.dump(payload, _f, ensure_ascii=False)
+    except Exception:
+        pass
     stream = bool(payload.get("stream", False))
     request_id = request.headers.get("x-request-id") or f"gw-{uuid.uuid4().hex[:12]}"
 
