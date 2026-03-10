@@ -14,7 +14,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VLLM_PORT="${VLLM_PORT:-8002}"
 MODEL="${MODEL:-/home/wayne/linxi/Qwen3-32B-INT4}"
 STATS_PATH="${STATS_PATH:-/home/wayne/linxi/speckv/R-KV/outputs/qwen3-8b_aime24_sample8_chat/stats/qwen3_32b_int4_speckv_stats.pt}"
-export KV_BUDGET="${KV_BUDGET:-14336}"
+export KV_BUDGET="${KV_BUDGET:-2048}"
 
 _find_vllm_pid() {
   pgrep -f "vllm serve.*--port ${VLLM_PORT}" 2>/dev/null | head -1 || true
