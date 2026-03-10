@@ -15,6 +15,11 @@ from vllm.v1.structured_output import StructuredOutputManager
 
 from .config import TriAttentionRuntimeConfig
 from .effective_len_tracker import EffectiveCacheLenTracker
+from .kv_allocation_sync import (
+    clear_request_allocation_sync_state,
+    prepare_request_effective_num_computed,
+    update_request_effective_kv_offset,
+)
 from .planner import CompressionPlanner
 from .request_key_compat import iter_scheduled_token_items
 from .signals import CompressionSignal
@@ -82,21 +87,32 @@ class TriAttentionScheduler(Scheduler):
                 new_req.req_id,
                 new_req.num_computed_tokens,
             )
-            if new_req.prefill_token_ids is not None:
-                prefill_len = len(new_req.prefill_token_ids)
-            elif new_req.prompt_token_ids is not None:
-                prefill_len = len(new_req.prompt_token_ids)
+            prefill_token_ids = getattr(new_req, "prefill_token_ids", None)
+            prompt_token_ids = getattr(new_req, "prompt_token_ids", None)
+            if prefill_token_ids is not None:
+                prefill_len = len(prefill_token_ids)
+            elif prompt_token_ids is not None:
+                prefill_len = len(prompt_token_ids)
             else:
-                prefill_len = 0
+                prefill_len = int(getattr(new_req, "num_prompt_tokens", 0) or 0)
             self._prefill_lens[new_req.req_id] = prefill_len
             self._length_threshold_cache[new_req.req_id] = self._compute_length_threshold(prefill_len)
 
         for req_id in scheduler_output.finished_req_ids:
+            req = self.requests.get(req_id)
+            if req is not None:
+                clear_request_allocation_sync_state(req)
             self._prefill_lens.pop(req_id, None)
             self._length_threshold_cache.pop(req_id, None)
             self._effective_len_tracker.remove_request(req_id)
 
-        resumed_req_ids = scheduler_output.scheduled_cached_reqs.resumed_req_ids
+        cached_reqs = getattr(scheduler_output, "scheduled_cached_reqs", None)
+        if cached_reqs is None:
+            resumed_req_ids: list[str] = []
+        else:
+            resumed_req_ids = getattr(cached_reqs, "resumed_req_ids", None)
+            if resumed_req_ids is None:
+                resumed_req_ids = getattr(cached_reqs, "req_ids", []) or []
         for req_id in resumed_req_ids:
             if req_id not in self._prefill_lens:
                 prefill_len = self._resolve_prefill_len(req_id)
@@ -194,7 +210,15 @@ class TriAttentionScheduler(Scheduler):
                 signals[req_id] = signal
         return signals
 
+    def _sync_effective_kv_offsets_before_schedule(self) -> None:
+        running = getattr(self, "running", None)
+        if not isinstance(running, list):
+            return
+        for request in running:
+            prepare_request_effective_num_computed(request)
+
     def schedule(self) -> SchedulerOutput:
+        self._sync_effective_kv_offsets_before_schedule()
         scheduler_output = super().schedule()
         self._triattention_step += 1
         self._sync_prefill_lens(scheduler_output)
@@ -255,6 +279,7 @@ class TriAttentionScheduler(Scheduler):
             req_id = event.get("req_id")
             if not isinstance(req_id, str):
                 continue
+            event_step = int(event.get("step", -1))
             cache_len_after = event.get("cache_len_after")
             if not isinstance(cache_len_after, int):
                 continue
@@ -271,11 +296,15 @@ class TriAttentionScheduler(Scheduler):
                 continue
             required_blocks = _num_required_blocks(cache_len_after)
             expected_shrink_gids: set[int] = set()
+            reclaim_applied_any = False
+            req_groups_seen = 0
             if isinstance(managers, (list, tuple)):
                 for gid, manager in enumerate(managers):
                     req_blocks = manager.req_to_blocks.get(req_id)
                     if req_blocks and required_blocks < len(req_blocks):
                         expected_shrink_gids.add(gid)
+                    if req_blocks:
+                        req_groups_seen += 1
 
             block_reclaim = event.get("block_reclaim")
             groups = (
@@ -311,7 +340,13 @@ class TriAttentionScheduler(Scheduler):
                                 len(kept_blocks),
                             )
                         if removed_blocks:
+                            reclaim_applied_any = True
                             manager.block_pool.free_blocks(reversed(removed_blocks))
+                if reclaim_applied_any:
+                    update_request_effective_kv_offset(
+                        request=req,
+                        cache_len_after=cache_len_after,
+                    )
                 continue
             if not isinstance(managers, (list, tuple)):
                 continue
@@ -380,6 +415,7 @@ class TriAttentionScheduler(Scheduler):
                         "freed=%d kept=%d",
                         req_id, gid, len(removed_blocks), len(kept_blocks),
                     )
+                    reclaim_applied_any = True
                     manager.block_pool.free_blocks(reversed(removed_blocks))
 
             # Synthesize reclaim for groups that were expected but not
@@ -401,7 +437,14 @@ class TriAttentionScheduler(Scheduler):
                             len(kept_blocks),
                         )
                     if removed_blocks:
+                        reclaim_applied_any = True
                         manager.block_pool.free_blocks(reversed(removed_blocks))
+
+            if reclaim_applied_any:
+                update_request_effective_kv_offset(
+                    request=req,
+                    cache_len_after=cache_len_after,
+                )
 
     def update_from_output(
         self,
