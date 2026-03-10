@@ -307,6 +307,27 @@ async def live_stream() -> StreamingResponse:
 async def completions_proxy(request: Request) -> Response:
     """Transparent proxy for /v1/completions (used by openclaw openai-completions API)."""
     payload = await request.json()
+    # Dump first request prompt for debugging
+    import logging as _clog
+    _prompt_text = payload.get("prompt", "")
+    _clog.getLogger("demo.completions_proxy").info(
+        "completions request: prompt_len=%d max_tokens=%s stream=%s prompt_head=%.500s",
+        len(_prompt_text) if isinstance(_prompt_text, str) else 0,
+        payload.get("max_tokens"),
+        payload.get("stream"),
+        _prompt_text[:500] if isinstance(_prompt_text, str) else str(_prompt_text)[:500],
+    )
+    # Save full prompt to file for manual replay
+    try:
+        import pathlib, time as _t
+        _dump_dir = pathlib.Path("/tmp/openclaw_prompts")
+        _dump_dir.mkdir(exist_ok=True)
+        _dump_file = _dump_dir / f"prompt_{int(_t.time())}.json"
+        with open(_dump_file, "w") as _f:
+            json.dump(payload, _f, ensure_ascii=False)
+        _clog.getLogger("demo.completions_proxy").info("Saved prompt to %s", _dump_file)
+    except Exception:
+        pass
     stream = bool(payload.get("stream", False))
     url = f"{CONFIG.backend_base_url.rstrip('/')}/v1/completions"
     headers = _passthrough_headers(request)
