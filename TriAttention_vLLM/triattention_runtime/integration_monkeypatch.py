@@ -161,60 +161,28 @@ def _patched_kv_cache_allocate_slots(
     self,
     request,
     num_new_tokens,
-    num_new_computed_tokens=0,
-    new_computed_blocks=None,
-    num_lookahead_tokens=0,
-    delay_cache_blocks=False,
-    num_encoder_tokens=0,
+    **kwargs,
 ):
     """Keep vLLM allocation math aligned with TriAttention effective KV length."""
     assert _ORIG_KVCACHE_ALLOCATE_SLOTS is not None
     effective_num_computed = resolve_request_effective_num_computed(request)
     if effective_num_computed is None:
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self,
-            request,
-            num_new_tokens,
-            num_new_computed_tokens=num_new_computed_tokens,
-            new_computed_blocks=new_computed_blocks,
-            num_lookahead_tokens=num_lookahead_tokens,
-            delay_cache_blocks=delay_cache_blocks,
-            num_encoder_tokens=num_encoder_tokens,
+            self, request, num_new_tokens, **kwargs,
         )
     logical_num_computed = getattr(request, "num_computed_tokens", None)
     if not isinstance(logical_num_computed, int):
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self,
-            request,
-            num_new_tokens,
-            num_new_computed_tokens=num_new_computed_tokens,
-            new_computed_blocks=new_computed_blocks,
-            num_lookahead_tokens=num_lookahead_tokens,
-            delay_cache_blocks=delay_cache_blocks,
-            num_encoder_tokens=num_encoder_tokens,
+            self, request, num_new_tokens, **kwargs,
         )
     if effective_num_computed >= logical_num_computed:
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self,
-            request,
-            num_new_tokens,
-            num_new_computed_tokens=num_new_computed_tokens,
-            new_computed_blocks=new_computed_blocks,
-            num_lookahead_tokens=num_lookahead_tokens,
-            delay_cache_blocks=delay_cache_blocks,
-            num_encoder_tokens=num_encoder_tokens,
+            self, request, num_new_tokens, **kwargs,
         )
     setattr(request, "num_computed_tokens", int(effective_num_computed))
     try:
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self,
-            request,
-            num_new_tokens,
-            num_new_computed_tokens=num_new_computed_tokens,
-            new_computed_blocks=new_computed_blocks,
-            num_lookahead_tokens=num_lookahead_tokens,
-            delay_cache_blocks=delay_cache_blocks,
-            num_encoder_tokens=num_encoder_tokens,
+            self, request, num_new_tokens, **kwargs,
         )
     finally:
         setattr(request, "num_computed_tokens", logical_num_computed)
