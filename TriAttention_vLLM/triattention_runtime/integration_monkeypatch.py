@@ -11,7 +11,9 @@ from typing import Any, Callable
 from vllm.logger import init_logger
 
 from .config import TriAttentionRuntimeConfig
+from .debug_trace import record_request_finished
 from .effective_len_tracker import EffectiveCacheLenTracker
+from .kv_allocation_sync import resolve_request_effective_num_computed
 from .planner import CompressionPlanner
 from .request_key_compat import iter_scheduled_token_items
 from .scheduler import TriAttentionScheduler
@@ -28,6 +30,7 @@ _ORIG_SCHED_SCHEDULE: Callable[..., Any] | None = None
 _ORIG_SCHED_UPDATE_FROM_OUTPUT: Callable[..., Any] | None = None
 _ORIG_WORKER_INIT_DEVICE: Callable[..., Any] | None = None
 _ORIG_WORKER_EXECUTE_MODEL: Callable[..., Any] | None = None
+_ORIG_KVCACHE_ALLOCATE_SLOTS: Callable[..., Any] | None = None
 
 
 def _refresh_scheduler_stats_kv_usage(outputs: Any, kv_usage: float) -> None:
@@ -70,6 +73,7 @@ def _patched_scheduler_init(self, *args, **kwargs):
 
 def _patched_scheduler_schedule(self):
     assert _ORIG_SCHED_SCHEDULE is not None
+    TriAttentionScheduler._sync_effective_kv_offsets_before_schedule(self)
     scheduler_output = _ORIG_SCHED_SCHEDULE(self)
 
     cfg = getattr(self, "triattention_config", None)
@@ -114,6 +118,7 @@ def _patched_scheduler_update_from_output(self, scheduler_output, model_runner_o
         self._prefill_lens.pop(req_id, None)
         self._length_threshold_cache.pop(req_id, None)
         self._effective_len_tracker.remove_request(req_id)
+        record_request_finished(req_id)
     return outputs
 
 
@@ -138,6 +143,69 @@ def _patched_worker_execute_model(self, scheduler_output):
     return _ORIG_WORKER_EXECUTE_MODEL(self, scheduler_output)
 
 
+def _patched_kv_cache_allocate_slots(
+    self,
+    request,
+    num_new_tokens,
+    num_new_computed_tokens=0,
+    new_computed_blocks=None,
+    num_lookahead_tokens=0,
+    delay_cache_blocks=False,
+    num_encoder_tokens=0,
+):
+    """Keep vLLM allocation math aligned with TriAttention effective KV length."""
+    assert _ORIG_KVCACHE_ALLOCATE_SLOTS is not None
+    effective_num_computed = resolve_request_effective_num_computed(request)
+    if effective_num_computed is None:
+        return _ORIG_KVCACHE_ALLOCATE_SLOTS(
+            self,
+            request,
+            num_new_tokens,
+            num_new_computed_tokens=num_new_computed_tokens,
+            new_computed_blocks=new_computed_blocks,
+            num_lookahead_tokens=num_lookahead_tokens,
+            delay_cache_blocks=delay_cache_blocks,
+            num_encoder_tokens=num_encoder_tokens,
+        )
+    logical_num_computed = getattr(request, "num_computed_tokens", None)
+    if not isinstance(logical_num_computed, int):
+        return _ORIG_KVCACHE_ALLOCATE_SLOTS(
+            self,
+            request,
+            num_new_tokens,
+            num_new_computed_tokens=num_new_computed_tokens,
+            new_computed_blocks=new_computed_blocks,
+            num_lookahead_tokens=num_lookahead_tokens,
+            delay_cache_blocks=delay_cache_blocks,
+            num_encoder_tokens=num_encoder_tokens,
+        )
+    if effective_num_computed >= logical_num_computed:
+        return _ORIG_KVCACHE_ALLOCATE_SLOTS(
+            self,
+            request,
+            num_new_tokens,
+            num_new_computed_tokens=num_new_computed_tokens,
+            new_computed_blocks=new_computed_blocks,
+            num_lookahead_tokens=num_lookahead_tokens,
+            delay_cache_blocks=delay_cache_blocks,
+            num_encoder_tokens=num_encoder_tokens,
+        )
+    setattr(request, "num_computed_tokens", int(effective_num_computed))
+    try:
+        return _ORIG_KVCACHE_ALLOCATE_SLOTS(
+            self,
+            request,
+            num_new_tokens,
+            num_new_computed_tokens=num_new_computed_tokens,
+            new_computed_blocks=new_computed_blocks,
+            num_lookahead_tokens=num_lookahead_tokens,
+            delay_cache_blocks=delay_cache_blocks,
+            num_encoder_tokens=num_encoder_tokens,
+        )
+    finally:
+        setattr(request, "num_computed_tokens", logical_num_computed)
+
+
 def install_vllm_integration_monkeypatches(
     *,
     patch_scheduler: bool = True,
@@ -145,6 +213,7 @@ def install_vllm_integration_monkeypatches(
 ) -> None:
     global _PATCHED, _ORIG_SCHED_INIT, _ORIG_SCHED_SCHEDULE, _ORIG_SCHED_UPDATE_FROM_OUTPUT
     global _ORIG_WORKER_INIT_DEVICE, _ORIG_WORKER_EXECUTE_MODEL
+    global _ORIG_KVCACHE_ALLOCATE_SLOTS
     global _PATCHED_SCHEDULER_ACTIVE, _PATCHED_WORKER_ACTIVE
     if _PATCHED:
         _PATCHED_SCHEDULER_ACTIVE = _PATCHED_SCHEDULER_ACTIVE or bool(patch_scheduler)
@@ -152,9 +221,11 @@ def install_vllm_integration_monkeypatches(
         return
 
     import vllm.v1.core.sched.scheduler as sched_mod
+    import vllm.v1.core.kv_cache_manager as kv_cache_manager_mod
     import vllm.v1.worker.gpu_worker as worker_mod
 
     Scheduler = sched_mod.Scheduler
+    KVCacheManager = kv_cache_manager_mod.KVCacheManager
     Worker = worker_mod.Worker
 
     if patch_scheduler:
@@ -172,7 +243,12 @@ def install_vllm_integration_monkeypatches(
             TriAttentionScheduler._has_active_effective_len_overrides
         )
         Scheduler._build_signals = TriAttentionScheduler._build_signals
+        Scheduler._sync_effective_kv_offsets_before_schedule = (
+            TriAttentionScheduler._sync_effective_kv_offsets_before_schedule
+        )
         Scheduler._apply_compression_events = TriAttentionScheduler._apply_compression_events
+        _ORIG_KVCACHE_ALLOCATE_SLOTS = KVCacheManager.allocate_slots
+        KVCacheManager.allocate_slots = _patched_kv_cache_allocate_slots
 
     if patch_worker:
         _ORIG_WORKER_INIT_DEVICE = Worker.init_device

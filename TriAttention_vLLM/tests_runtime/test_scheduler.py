@@ -1,6 +1,10 @@
 from types import SimpleNamespace
 
 from triattention_runtime.scheduler import TriAttentionScheduler
+from triattention_runtime.kv_allocation_sync import (
+    EFFECTIVE_KV_OFFSET_ATTR,
+    EFFECTIVE_NUM_COMPUTED_ATTR,
+)
 
 
 class _Tracker:
@@ -11,6 +15,12 @@ class _Tracker:
         self.calls.append(
             (req_id, int(cache_len_after), int(num_computed_tokens))
         )
+
+    def reset_request(self, req_id, num_computed_tokens):
+        self.calls.append(("reset", req_id, int(num_computed_tokens)))
+
+    def remove_request(self, req_id):
+        self.calls.append(("remove", req_id))
 
 
 class _FakeBlock:
@@ -50,6 +60,7 @@ def _make_scheduler(enable_reclaim: bool):
             block_pool=pool,
         )
     )
+    scheduler.running = []
     return scheduler, manager, pool
 
 
@@ -76,6 +87,7 @@ def test_scheduler_applies_block_reclaim_event():
     assert scheduler._effective_len_tracker.calls == [("r1", 32, 77)]
     assert [blk.block_id for blk in manager.req_to_blocks["r1"]] == [0, 1]
     assert manager.num_cached_block["r1"] == 2
+    assert getattr(scheduler.requests["r1"], EFFECTIVE_KV_OFFSET_ATTR) == 45
     # Removed tail blocks are freed in tail-first order.
     assert pool.freed_block_ids == [[3, 2]]
 
@@ -149,3 +161,85 @@ def test_scheduler_missing_block_reclaim_raises_when_shrink_expected():
         assert "missing while shrink expected" in str(exc)
     else:
         raise AssertionError("expected RuntimeError for missing reclaim payload")
+
+
+def _make_prefill_scheduler():
+    scheduler = TriAttentionScheduler.__new__(TriAttentionScheduler)
+    scheduler.triattention_config = SimpleNamespace(
+        kv_budget=256,
+        divide_length=128,
+        protect_prefill=True,
+        include_prefill_in_budget=True,
+    )
+    scheduler._effective_len_tracker = _Tracker()
+    scheduler._prefill_lens = {}
+    scheduler._length_threshold_cache = {}
+    scheduler.requests = {}
+    return scheduler
+
+
+def test_sync_prefill_lens_compatible_without_prefill_token_ids():
+    scheduler = _make_prefill_scheduler()
+    scheduler_output = SimpleNamespace(
+        scheduled_new_reqs=[
+            SimpleNamespace(
+                req_id="r1",
+                num_computed_tokens=0,
+                prompt_token_ids=[1, 2, 3],
+            )
+        ],
+        finished_req_ids=[],
+        scheduled_cached_reqs=SimpleNamespace(resumed_req_ids=[]),
+    )
+
+    scheduler._sync_prefill_lens(scheduler_output)
+
+    assert scheduler._prefill_lens["r1"] == 3
+    assert scheduler._length_threshold_cache["r1"] == 384
+
+
+def test_sync_prefill_lens_falls_back_to_num_prompt_tokens():
+    scheduler = _make_prefill_scheduler()
+    scheduler_output = SimpleNamespace(
+        scheduled_new_reqs=[
+            SimpleNamespace(
+                req_id="r2",
+                num_computed_tokens=0,
+                num_prompt_tokens=11,
+            )
+        ],
+        finished_req_ids=[],
+        scheduled_cached_reqs=SimpleNamespace(resumed_req_ids=[]),
+    )
+
+    scheduler._sync_prefill_lens(scheduler_output)
+
+    assert scheduler._prefill_lens["r2"] == 11
+    assert scheduler._length_threshold_cache["r2"] == 384
+
+
+def test_sync_prefill_lens_compatible_cached_req_ids():
+    scheduler = _make_prefill_scheduler()
+    scheduler.requests = {"r3": SimpleNamespace(num_prompt_tokens=9)}
+    scheduler_output = SimpleNamespace(
+        scheduled_new_reqs=[],
+        finished_req_ids=[],
+        scheduled_cached_reqs=SimpleNamespace(req_ids=["r3"]),
+    )
+
+    scheduler._sync_prefill_lens(scheduler_output)
+
+    assert scheduler._prefill_lens["r3"] == 9
+    assert scheduler._length_threshold_cache["r3"] == 384
+
+
+def test_sync_effective_kv_offsets_before_schedule_sets_effective_marker():
+    scheduler, _manager, _pool = _make_scheduler(enable_reclaim=True)
+    req = scheduler.requests["r1"]
+    setattr(req, EFFECTIVE_KV_OFFSET_ATTR, 10)
+    req.num_computed_tokens = 50
+    scheduler.running = [req]
+
+    scheduler._sync_effective_kv_offsets_before_schedule()
+
+    assert getattr(req, EFFECTIVE_NUM_COMPUTED_ATTR) == 40
