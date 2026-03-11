@@ -13,6 +13,11 @@ class DemoConfig:
     backend_base_url: str = os.getenv(
         "VLLM_BACKEND_URL", os.getenv("BASELINE_VLLM_URL", "http://127.0.0.1:8001")
     )
+    triattention_backend_base_url: str = os.getenv(
+        "TRIATTENTION_VLLM_URL", "http://127.0.0.1:8002"
+    )
+
+    forward_backend: str = os.getenv("DEMO_FORWARD_BACKEND", "triattention")
 
     request_timeout_s: float = float(os.getenv("DEMO_REQUEST_TIMEOUT_S", "600"))
     connect_timeout_s: float = float(os.getenv("DEMO_CONNECT_TIMEOUT_S", "15"))

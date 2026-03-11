@@ -31,6 +31,7 @@ stop_by_pid_file() {
 }
 
 stop_by_pid_file "demo" "${PID_DIR}/demo.pid"
+stop_by_pid_file "triattention" "${PID_DIR}/triattention.pid"
 stop_by_pid_file "baseline" "${PID_DIR}/baseline.pid"
 
 echo "[stop] done"

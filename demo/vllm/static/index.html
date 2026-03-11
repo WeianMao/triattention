@@ -3,19 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OpenAI-Compatible vLLM Gateway</title>
-    <link rel="stylesheet" href="/static/styles.css?v=kv2" />
+    <title>OpenAI-Compatible vLLM Gateway - A/B Comparison</title>
+    <link rel="stylesheet" href="/static/styles.css?v=ab1" />
   </head>
   <body>
     <main class="container">
       <section class="hero">
         <h1>OpenAI-Compatible vLLM Gateway</h1>
-        <p>OpenClaw -> gateway (streaming relay) -> vLLM backend. Any `/v1` stream also appears here live.</p>
+        <p>A/B Comparison: Baseline (port 8001) vs TriAttention (port 8002). Same request, side-by-side streaming.</p>
       </section>
 
       <section class="controls">
         <label for="prompt">Prompt</label>
-        <textarea id="prompt" rows="6" placeholder="输入一个能触发较长输出的 prompt"></textarea>
+        <textarea id="prompt" rows="6" placeholder="Enter a prompt to compare both backends side-by-side"></textarea>
 
         <div class="control-grid">
           <label>
@@ -37,45 +37,93 @@
         </div>
 
         <div class="actions">
-          <button id="runBtn">Run Streaming Chat</button>
+          <button id="runBtn">Run A/B Comparison</button>
           <span id="status" class="status idle">Idle</span>
           <span id="liveStatus" class="status idle">Live feed: connecting...</span>
+          <span class="forward-toggle">
+            Forward:
+            <button id="forwardToggleBtn" class="forward-btn">triattention</button>
+          </span>
         </div>
       </section>
 
-      <section class="metrics-grid">
-        <article class="metric-card" id="gatewayMetrics">
-          <h2>Gateway Stream Metrics</h2>
-          <p>Request: <strong data-field="request">-</strong></p>
-          <p>TTFT: <strong data-field="ttft">-</strong> ms</p>
-          <p>Tokens/s: <strong data-field="tps">-</strong></p>
-          <p>Total: <strong data-field="total">-</strong> ms</p>
-          <p>Token Count: <strong data-field="tokens">-</strong></p>
-          <p>Finish Reason: <strong data-field="finish">-</strong></p>
-        </article>
+      <div class="comparison-grid">
+        <!-- Baseline Panel -->
+        <div class="backend-panel baseline-panel">
+          <h2 class="backend-header baseline-header">Baseline</h2>
 
-        <article class="metric-card" id="kvMetrics">
-          <h2>vLLM KV Cache</h2>
-          <p>Status: <strong data-field="status">-</strong></p>
-          <p>Usage: <strong data-field="usage">-</strong></p>
-          <p>Used Tokens (est): <strong data-field="used">-</strong></p>
-          <p>Capacity Tokens (est): <strong data-field="capacity">-</strong></p>
-          <p>GPU Blocks: <strong data-field="blocks">-</strong></p>
-          <p>Block Size: <strong data-field="blockSize">-</strong></p>
-          <p>Updated At: <strong data-field="updated">-</strong></p>
-        </article>
-      </section>
+          <section class="metrics-grid">
+            <article class="metric-card" id="baselineGatewayMetrics">
+              <h2>Gateway Stream Metrics</h2>
+              <p>Request: <strong data-field="request">-</strong></p>
+              <p>TTFT: <strong data-field="ttft">-</strong> ms</p>
+              <p>Tokens/s: <strong data-field="tps">-</strong></p>
+              <p>Total: <strong data-field="total">-</strong> ms</p>
+              <p>Token Count: <strong data-field="tokens">-</strong></p>
+              <p>Finish Reason: <strong data-field="finish">-</strong></p>
+            </article>
 
-      <section class="panels">
-        <article class="panel">
-          <header>
-            <h3>Realtime Streaming Output</h3>
-          </header>
-          <pre id="output"></pre>
-        </article>
-      </section>
+            <article class="metric-card" id="baselineKvMetrics">
+              <h2>vLLM KV Cache</h2>
+              <p>Status: <strong data-field="status">-</strong></p>
+              <p>Usage: <strong data-field="usage">-</strong></p>
+              <p>Used Tokens (est): <strong data-field="used">-</strong></p>
+              <p>Capacity Tokens (est): <strong data-field="capacity">-</strong></p>
+              <p>GPU Blocks: <strong data-field="blocks">-</strong></p>
+              <p>Block Size: <strong data-field="blockSize">-</strong></p>
+              <p>Updated At: <strong data-field="updated">-</strong></p>
+            </article>
+          </section>
+
+          <section class="panels">
+            <article class="panel">
+              <header>
+                <h3>Baseline Streaming Output</h3>
+              </header>
+              <pre id="baselineOutput"></pre>
+            </article>
+          </section>
+        </div>
+
+        <!-- TriAttention Panel -->
+        <div class="backend-panel triattention-panel">
+          <h2 class="backend-header triattention-header">TriAttention</h2>
+
+          <section class="metrics-grid">
+            <article class="metric-card" id="triattentionGatewayMetrics">
+              <h2>Gateway Stream Metrics</h2>
+              <p>Request: <strong data-field="request">-</strong></p>
+              <p>TTFT: <strong data-field="ttft">-</strong> ms</p>
+              <p>Tokens/s: <strong data-field="tps">-</strong></p>
+              <p>Total: <strong data-field="total">-</strong> ms</p>
+              <p>Token Count: <strong data-field="tokens">-</strong></p>
+              <p>Finish Reason: <strong data-field="finish">-</strong></p>
+            </article>
+
+            <article class="metric-card" id="triattentionKvMetrics">
+              <h2>vLLM KV Cache</h2>
+              <p>Status: <strong data-field="status">-</strong></p>
+              <p>Usage: <strong data-field="usage">-</strong></p>
+              <p>Used Tokens (est): <strong data-field="used">-</strong></p>
+              <p>Capacity Tokens (est): <strong data-field="capacity">-</strong></p>
+              <p>GPU Blocks: <strong data-field="blocks">-</strong></p>
+              <p>Block Size: <strong data-field="blockSize">-</strong></p>
+              <p>Updated At: <strong data-field="updated">-</strong></p>
+            </article>
+          </section>
+
+          <section class="panels">
+            <article class="panel">
+              <header>
+                <h3>TriAttention Streaming Output</h3>
+              </header>
+              <pre id="triattentionOutput"></pre>
+            </article>
+          </section>
+        </div>
+      </div>
     </main>
 
-    <script src="/static/app.js?v=kv2"></script>
+    <script src="/static/app.js?v=ab1"></script>
   </body>
 </html>
