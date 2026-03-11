@@ -31,7 +31,9 @@ mkdir -p "${PID_DIR}" "${LOG_DIR}"
 : "${TENSOR_PARALLEL_SIZE:=1}"
 : "${TRUST_REMOTE_CODE:=true}"
 : "${ENFORCE_EAGER:=true}"
-: "${KV_BUDGET:=2048}"
+: "${KV_BUDGET:=14336}"
+: "${VLLM_RELAXED_KV_CHECK:=1}"
+: "${TRIATTN_RUNTIME_PROTECT_PREFILL:=false}"
 
 if [[ ! -x "${RUN_VLLM_SERVE_SH}" ]]; then
   echo "Missing executable: ${RUN_VLLM_SERVE_SH}" >&2
@@ -52,6 +54,7 @@ echo "[start] baseline vLLM on :${BASELINE_PORT} (GPU ${BASELINE_CUDA})"
   cd "${TRI_ROOT}"
   exec -a PD-L1_binder env \
     CUDA_VISIBLE_DEVICES="${BASELINE_CUDA}" \
+    VLLM_RELAXED_KV_CHECK="${VLLM_RELAXED_KV_CHECK}" \
     MODEL="${MODEL}" \
     PORT="${BASELINE_PORT}" \
     HOST="127.0.0.1" \
@@ -72,6 +75,7 @@ echo "[start] triattention vLLM on :${TRIATTENTION_PORT} (GPU ${TRIATTENTION_CUD
   cd "${TRI_ROOT}"
   exec -a PD-L1_binder env \
     CUDA_VISIBLE_DEVICES="${TRIATTENTION_CUDA}" \
+    VLLM_RELAXED_KV_CHECK="${VLLM_RELAXED_KV_CHECK}" \
     MODEL="${MODEL}" \
     PORT="${TRIATTENTION_PORT}" \
     HOST="127.0.0.1" \
@@ -81,6 +85,7 @@ echo "[start] triattention vLLM on :${TRIATTENTION_PORT} (GPU ${TRIATTENTION_CUD
     TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE}" \
     TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE}" \
     ENFORCE_EAGER="${ENFORCE_EAGER}" \
+    TRIATTN_RUNTIME_PROTECT_PREFILL="${TRIATTN_RUNTIME_PROTECT_PREFILL}" \
     STATS_PATH="${STATS_PATH}" \
     KV_BUDGET="${KV_BUDGET}" \
     "${RUN_VLLM_SERVE_SH}" --max-num-seqs "${MAX_NUM_SEQS}"

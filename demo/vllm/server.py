@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 import uuid
@@ -65,6 +66,7 @@ class LiveStreamHub:
 
 HUB = LiveStreamHub()
 _MODEL_ID_CACHE: dict[str, str] = {}
+LOGGER = logging.getLogger("demo.gateway")
 
 
 def _sse(event: str, payload: dict[str, Any]) -> str:
@@ -356,6 +358,7 @@ async def completions_proxy(request: Request) -> Response:
         _clog.getLogger("demo.completions_proxy").info("Saved prompt to %s", _dump_file)
     except Exception:
         pass
+    _normalize_max_tokens(payload)
     stream = bool(payload.get("stream", False))
     url = f"{CONFIG.backend_base_url.rstrip('/')}/v1/completions"
     headers = _passthrough_headers(request)
@@ -450,7 +453,28 @@ async def _stream_backend(
                     return
 
                 data_lines: list[str] = []
-                async for raw_line in upstream.aiter_lines():
+                line_iter = upstream.aiter_lines().__aiter__()
+                while True:
+                    try:
+                        raw_line = await asyncio.wait_for(
+                            line_iter.__anext__(),
+                            timeout=CONFIG.secondary_stream_idle_timeout_s,
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError:
+                        await HUB.publish(
+                            "request_error",
+                            {
+                                "request_id": bid,
+                                "backend": backend_name,
+                                "message": (
+                                    "KV cache insufficient (likely preempted); "
+                                    "request terminated by gateway."
+                                ),
+                            },
+                        )
+                        return
                     line = raw_line
 
                     if line.startswith("data:"):
@@ -552,6 +576,7 @@ async def chat_completions(request: Request) -> Response:
     payload.setdefault("temperature", CONFIG.default_temperature)
     payload.setdefault("top_p", CONFIG.default_top_p)
     payload.setdefault("max_tokens", CONFIG.default_max_tokens)
+    _normalize_max_tokens(payload)
     if CONFIG.default_seed is not None:
         payload.setdefault("seed", CONFIG.default_seed)
 
@@ -751,3 +776,29 @@ async def chat_completions(request: Request) -> Response:
             "X-Accel-Buffering": "no",
         },
     )
+def _normalize_max_tokens(payload: dict[str, Any], *, field: str = "max_tokens") -> None:
+    """Clamp max_tokens/max_completion_tokens so they fit the 16K context."""
+    limit = CONFIG.max_tokens_cap
+    default_value = CONFIG.default_max_tokens
+
+    raw_value = payload.get(field)
+    if not isinstance(raw_value, int):
+        raw_value = default_value
+    raw_value = max(1, raw_value)
+    clamped = min(raw_value, limit)
+    if clamped != raw_value:
+        LOGGER.info("Clamping %s from %s to %s (limit %s)", field, raw_value, clamped, limit)
+    payload[field] = clamped
+
+    # Propagate to complementary field (OpenAI API supports both names)
+    other_field = "max_completion_tokens" if field == "max_tokens" else "max_tokens"
+    other_value = payload.get(other_field)
+    if isinstance(other_value, int):
+        other_value = max(1, min(other_value, limit))
+    else:
+        other_value = clamped
+    payload[other_field] = other_value
+
+    # Some OpenClaw builds also set "max_completion_tokens" only
+    if field != "max_tokens" and "max_tokens" not in payload:
+        payload["max_tokens"] = other_value

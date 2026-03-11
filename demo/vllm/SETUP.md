@@ -42,7 +42,7 @@ All settings are controlled via environment variables with sensible defaults.
 Override by prefixing the start command:
 
 ```bash
-BASELINE_CUDA=0 TRIATTENTION_CUDA=1 GPU_MEMORY_UTILIZATION=0.95 \
+BASELINE_CUDA=0 TRIATTENTION_CUDA=1 GPU_MEMORY_UTILIZATION=0.95 MAX_MODEL_LEN=32768 \
   bash demo/vllm/start_remote_demo.sh
 ```
 
@@ -59,11 +59,14 @@ BASELINE_CUDA=0 TRIATTENTION_CUDA=1 GPU_MEMORY_UTILIZATION=0.95 \
 | `DEMO_HOST` | `127.0.0.1` | Host for the FastAPI gateway |
 | `DEMO_PORT` | `8010` | Port for the FastAPI gateway |
 | `GPU_MEMORY_UTILIZATION` | `0.75` | vLLM GPU memory fraction (increase to 0.95 if OOM on KV cache) |
-| `MAX_MODEL_LEN` | `16384` | Maximum sequence length |
+| `MAX_MODEL_LEN` | `32768` | Maximum sequence length (intentionally inflated so OpenClaw's context check passes) |
 | `MAX_NUM_SEQS` | `32` | Maximum concurrent sequences |
 | `KV_BUDGET` | `2048` | KV cache token budget for TriAttention compression |
 | `DTYPE` | `bfloat16` | Model dtype |
 | `ENFORCE_EAGER` | `true` | Disable CUDA graphs (saves memory on 4090) |
+| `VLLM_RELAXED_KV_CHECK` | `1` | Skip vLLM startup rejection when declared max length exceeds available KV cache |
+
+> Even though we advertise `MAX_MODEL_LEN=32768`, the 32B INT4 model comfortably handles ~16K context on a 24GB card. `VLLM_RELAXED_KV_CHECK=1` only bypasses the startup check; it does not create real KV capacity. Keep client-side requests around ~12K prompt + 4K generation to avoid runtime failures.
 
 ## Architecture
 

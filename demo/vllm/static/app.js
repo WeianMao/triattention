@@ -232,13 +232,17 @@ function handleRequestError(payload) {
   if (!session) return;
 
   const msg = payload.message || 'Unknown error';
-  session.text += `\n\n[ERROR] ${msg}\n`;
+  const kvInsufficient = msg.toLowerCase().includes('kv cache insufficient');
+  const displayMsg = kvInsufficient ? 'KV cache不足，baseline请求已被网关终止。' : msg;
+  session.text += `\n\n[ERROR] ${displayMsg}\n`;
   session.done = true;
+  session.finishReason = kvInsufficient ? 'kv-cache-insufficient' : 'error';
   if (b.activeRequestId !== requestId) {
     activateRequest(backendName, requestId);
   } else {
     b.outputEl.textContent = session.text;
   }
+  setMetric(backendName, 'finish', session.finishReason);
   setStatus(`Error (${backendName}): ${requestId}`, 'error');
 }
 
