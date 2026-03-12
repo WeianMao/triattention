@@ -247,6 +247,18 @@ else
   unset TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_BLOCK_RECLAIM
   unset TRIATTN_RUNTIME_REQUIRE_TRITON_SCORING TRIATTN_RUNTIME_REQUIRE_PHYSICAL_RECLAIM
   unset TRIATTN_RUNTIME_PATCH_WORKER TRIATTN_RUNTIME_PATCH_SCHEDULER
+  if [[ -n "${VLLM_PLUGINS:-}" ]]; then
+    plugin_csv=",${VLLM_PLUGINS// /},"
+    plugin_csv="${plugin_csv//,triattention,/,}"
+    plugin_csv="${plugin_csv#,}"
+    plugin_csv="${plugin_csv%,}"
+    plugin_csv="${plugin_csv//,,/,}"
+    if [[ -n "${plugin_csv}" ]]; then
+      export VLLM_PLUGINS="${plugin_csv}"
+    else
+      unset VLLM_PLUGINS
+    fi
+  fi
   if [[ -n "${USER_ATTENTION_BACKEND}" ]]; then
     SERVE_ARGS+=(--attention-backend "${USER_ATTENTION_BACKEND}")
   fi
