@@ -33,6 +33,46 @@ def test_attach_execute_model_compression_events_keeps_pending_on_attach_failure
     assert remaining == pending
 
 
+def test_attach_execute_model_none_output_attaches_to_scheduler_output():
+    """V1 async path: output is None, events go to scheduler_output."""
+    from types import SimpleNamespace as NS
+    sched_out = NS()
+    pending = [{"req_id": "r1", "status": "applied"}]
+    out, remaining = attach_execute_model_compression_events(
+        output=None,
+        pending_events=pending,
+        scheduler_output=sched_out,
+    )
+    assert out is None
+    assert remaining == []
+    assert getattr(sched_out, "triattention_compression_events") == pending
+
+
+def test_attach_execute_model_none_output_no_scheduler_output_keeps_pending():
+    """V1 async path without scheduler_output: events stay pending."""
+    pending = [{"req_id": "r1", "status": "applied"}]
+    out, remaining = attach_execute_model_compression_events(
+        output=None,
+        pending_events=pending,
+    )
+    assert out is None
+    assert remaining == pending
+
+
+def test_attach_execute_model_none_output_empty_events_skips_attach():
+    """V1 async path: no events means nothing attached to scheduler_output."""
+    from types import SimpleNamespace as NS
+    sched_out = NS()
+    out, remaining = attach_execute_model_compression_events(
+        output=None,
+        pending_events=[],
+        scheduler_output=sched_out,
+    )
+    assert out is None
+    assert remaining == []
+    assert not hasattr(sched_out, "triattention_compression_events")
+
+
 def test_attach_sample_tokens_compression_events_none_output_clears_pending():
     out, remaining = attach_sample_tokens_compression_events(
         output=None,

@@ -88,7 +88,10 @@ class RequestStateStore:
             return
         state.pending_triggers += 1
         state.last_trigger_reason = reason
-        state.last_compression_step = max(state.last_compression_step, step)
+        # NOTE: Do NOT set last_compression_step here — mark_trigger is called
+        # in consume_runner_signals BEFORE execute_runner_compression_actions.
+        # Setting it here would cause the batch_queue_dedup guard to block the
+        # very first compression attempt (step - last_step == 0).
 
     def mark_compressed(self, req_id: str, step: int, cache_len: int) -> None:
         state = self._states.get(req_id)

@@ -24,6 +24,32 @@ def execute_runner_compression_actions(
     for req_id, signal in signals.items():
         if not signal.should_compress:
             continue
+        # Guard against V1 batch-queue race: scheduler may emit consecutive
+        # compression signals for the same request before update_from_output
+        # runs.  The worker-side block table was already shrunk by the first
+        # step, so executing again would desync scheduler/worker block counts.
+        req_state = state_store.get(req_id) if hasattr(state_store, "get") else None
+        if req_state is not None:
+            last_step = getattr(req_state, "last_compression_step", -1)
+            if last_step >= 0 and signal.step - last_step <= 1:
+                logger.info(
+                    "TriAttention compression skipped (batch-queue dedup) "
+                    "req=%s step=%d last_compression_step=%d",
+                    req_id, signal.step, last_step,
+                )
+                events.append(
+                    {
+                        "req_id": req_id,
+                        "step": signal.step,
+                        "status": "skipped",
+                        "reason": "batch_queue_dedup",
+                        "cache_len_after": getattr(req_state, "current_cache_len", None),
+                        "scheduled_tokens": int(getattr(signal, "scheduled_tokens", 1)),
+                        "estimated_cache_len": int(getattr(signal, "estimated_cache_len", 0)),
+                        "prefill_len": int(getattr(signal, "prefill_len", 0)),
+                    }
+                )
+                continue
         try:
             result = executor.execute(
                 req_id=req_id,
@@ -95,6 +121,12 @@ def execute_runner_compression_actions(
             budget_total = details.get("budget_total")
             reclaimed_block_count = details.get("reclaimed_block_count")
             recent_unabsorbed_tokens = details.get("recent_unabsorbed_tokens")
+            logger.info(
+                "TriAttention compression applied req=%s step=%d reason=%s "
+                "before=%s after=%d reclaimed_blocks=%s",
+                req_id, signal.step, result.reason,
+                before_len, cache_len_after, reclaimed_block_count,
+            )
             state_store.mark_compressed(
                 req_id=req_id,
                 step=signal.step,
@@ -148,13 +180,15 @@ def execute_runner_compression_actions(
             reason=result.reason,
             step=signal.step,
         )
-        if log_decisions:
-            logger.debug(
-                "TriAttention compression skipped req=%s step=%d reason=%s",
-                req_id,
-                signal.step,
-                result.reason,
-            )
+        logger.info(
+            "TriAttention compression skipped req=%s step=%d reason=%s "
+            "cache_len_after=%s details=%s",
+            req_id,
+            signal.step,
+            result.reason,
+            result.cache_len_after,
+            result.details,
+        )
         events.append(
             {
                 "req_id": req_id,

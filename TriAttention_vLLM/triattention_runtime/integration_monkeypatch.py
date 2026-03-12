@@ -11,7 +11,6 @@ from typing import Any, Callable
 from vllm.logger import init_logger
 
 from .config import TriAttentionRuntimeConfig
-from .debug_trace import record_request_finished
 from .effective_len_tracker import EffectiveCacheLenTracker
 from .kv_allocation_sync import resolve_request_effective_num_computed
 from .planner import CompressionPlanner
@@ -105,12 +104,28 @@ def _patched_scheduler_update_from_output(self, scheduler_output, model_runner_o
     if cfg is None:
         return outputs
 
+    # Prefer events from model_runner_output (V0 / sync path), fall back to
+    # scheduler_output (V1 async path where execute_model returns None).
     compression_events = getattr(
         model_runner_output,
         "triattention_compression_events",
         None,
     )
+    source = "model_runner_output" if compression_events else None
+    if not compression_events:
+        compression_events = getattr(
+            scheduler_output,
+            "triattention_compression_events",
+            None,
+        )
+        if compression_events:
+            source = "scheduler_output"
     if compression_events:
+        applied = [e for e in compression_events if e.get("status") == "applied"]
+        logger.info(
+            "TriAttention update_from_output: received %d events (%d applied) via %s",
+            len(compression_events), len(applied), source,
+        )
         TriAttentionScheduler._apply_compression_events(self, compression_events)
         _refresh_scheduler_stats_kv_usage(outputs, self.kv_cache_manager.usage)
 
@@ -118,7 +133,6 @@ def _patched_scheduler_update_from_output(self, scheduler_output, model_runner_o
         self._prefill_lens.pop(req_id, None)
         self._length_threshold_cache.pop(req_id, None)
         self._effective_len_tracker.remove_request(req_id)
-        record_request_finished(req_id)
     return outputs
 
 
@@ -147,60 +161,28 @@ def _patched_kv_cache_allocate_slots(
     self,
     request,
     num_new_tokens,
-    num_new_computed_tokens=0,
-    new_computed_blocks=None,
-    num_lookahead_tokens=0,
-    delay_cache_blocks=False,
-    num_encoder_tokens=0,
+    **kwargs,
 ):
     """Keep vLLM allocation math aligned with TriAttention effective KV length."""
     assert _ORIG_KVCACHE_ALLOCATE_SLOTS is not None
     effective_num_computed = resolve_request_effective_num_computed(request)
     if effective_num_computed is None:
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self,
-            request,
-            num_new_tokens,
-            num_new_computed_tokens=num_new_computed_tokens,
-            new_computed_blocks=new_computed_blocks,
-            num_lookahead_tokens=num_lookahead_tokens,
-            delay_cache_blocks=delay_cache_blocks,
-            num_encoder_tokens=num_encoder_tokens,
+            self, request, num_new_tokens, **kwargs,
         )
     logical_num_computed = getattr(request, "num_computed_tokens", None)
     if not isinstance(logical_num_computed, int):
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self,
-            request,
-            num_new_tokens,
-            num_new_computed_tokens=num_new_computed_tokens,
-            new_computed_blocks=new_computed_blocks,
-            num_lookahead_tokens=num_lookahead_tokens,
-            delay_cache_blocks=delay_cache_blocks,
-            num_encoder_tokens=num_encoder_tokens,
+            self, request, num_new_tokens, **kwargs,
         )
     if effective_num_computed >= logical_num_computed:
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self,
-            request,
-            num_new_tokens,
-            num_new_computed_tokens=num_new_computed_tokens,
-            new_computed_blocks=new_computed_blocks,
-            num_lookahead_tokens=num_lookahead_tokens,
-            delay_cache_blocks=delay_cache_blocks,
-            num_encoder_tokens=num_encoder_tokens,
+            self, request, num_new_tokens, **kwargs,
         )
     setattr(request, "num_computed_tokens", int(effective_num_computed))
     try:
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self,
-            request,
-            num_new_tokens,
-            num_new_computed_tokens=num_new_computed_tokens,
-            new_computed_blocks=new_computed_blocks,
-            num_lookahead_tokens=num_lookahead_tokens,
-            delay_cache_blocks=delay_cache_blocks,
-            num_encoder_tokens=num_encoder_tokens,
+            self, request, num_new_tokens, **kwargs,
         )
     finally:
         setattr(request, "num_computed_tokens", logical_num_computed)
@@ -256,6 +238,36 @@ def install_vllm_integration_monkeypatches(
         Worker.init_device = _patched_worker_init_device
         Worker.execute_model = _patched_worker_execute_model
         Worker._ensure_triattention_runner_proxy = TriAttentionWorker._ensure_triattention_runner_proxy
+
+    # Relax the KV cache memory check: TriAttention compresses KV cache
+    # during generation, so the physical blocks needed are less than what
+    # max_model_len implies.  Turn the hard ValueError into a warning.
+    try:
+        import vllm.v1.core.kv_cache_utils as _kv_utils
+
+        _orig_check = _kv_utils._check_enough_kv_cache_memory
+
+        def _relaxed_check(available_memory, get_needed_memory, max_model_len,
+                           estimate_max_model_len):
+            if available_memory <= 0:
+                _orig_check(available_memory, get_needed_memory,
+                            max_model_len, estimate_max_model_len)
+                return
+            needed = get_needed_memory()
+            if needed > available_memory:
+                est = estimate_max_model_len(available_memory)
+                logger.warning(
+                    "[TriAttention] KV cache check relaxed: max_model_len=%d "
+                    "needs %.2f GiB but only %.2f GiB available (est max %d). "
+                    "Compression will keep actual usage within limits.",
+                    max_model_len, needed / (1 << 30),
+                    available_memory / (1 << 30), est,
+                )
+
+        _kv_utils._check_enough_kv_cache_memory = _relaxed_check
+        logger.info("Relaxed KV cache memory check for TriAttention compression")
+    except Exception:
+        logger.warning("Could not relax KV cache memory check", exc_info=True)
 
     _PATCHED_SCHEDULER_ACTIVE = bool(patch_scheduler)
     _PATCHED_WORKER_ACTIVE = bool(patch_worker)

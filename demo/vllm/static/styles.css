@@ -7,6 +7,10 @@
   --primary: #0f766e;
   --primary-soft: #d8f3f0;
   --danger: #b91c1c;
+  --baseline-accent: #2563eb;
+  --baseline-soft: #dbeafe;
+  --triattention-accent: #0f766e;
+  --triattention-soft: #d8f3f0;
 }
 
 * {
@@ -24,7 +28,7 @@ body {
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 24px;
 }
@@ -84,6 +88,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 button {
@@ -99,6 +104,24 @@ button {
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.forward-toggle {
+  font-weight: 600;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.forward-btn {
+  background: linear-gradient(135deg, #475569, #64748b);
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: 8px;
+  min-width: 110px;
+  text-align: center;
 }
 
 .status {
@@ -121,10 +144,42 @@ button:disabled {
   color: var(--danger);
 }
 
-.metrics-grid {
+/* Two-column comparison layout */
+.comparison-grid {
   margin-top: 16px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.backend-panel {
+  min-width: 0;
+}
+
+.backend-header {
+  margin: 0 0 10px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 18px;
+  text-align: center;
+}
+
+.baseline-header {
+  background: var(--baseline-soft);
+  color: var(--baseline-accent);
+  border: 1px solid var(--baseline-accent);
+}
+
+.triattention-header {
+  background: var(--triattention-soft);
+  color: var(--triattention-accent);
+  border: 1px solid var(--triattention-accent);
+}
+
+.backend-panel .metrics-grid {
+  margin-top: 0;
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 
@@ -134,13 +189,15 @@ button:disabled {
 
 .metric-card h2 {
   margin: 0 0 10px;
+  font-size: 14px;
 }
 
 .metric-card p {
   margin: 5px 0;
+  font-size: 13px;
 }
 
-.panels {
+.backend-panel .panels {
   margin-top: 12px;
   display: grid;
   grid-template-columns: 1fr;
@@ -154,6 +211,7 @@ button:disabled {
 
 .panel h3 {
   margin: 0;
+  font-size: 14px;
 }
 
 pre {
@@ -166,15 +224,21 @@ pre {
   word-break: break-word;
   font-family: "IBM Plex Mono", "Consolas", monospace;
   line-height: 1.45;
+  font-size: 13px;
+}
+
+@media (max-width: 1200px) {
+  .comparison-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .container {
+    max-width: 100%;
+  }
 }
 
 @media (max-width: 900px) {
   .control-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .metrics-grid,
-  .panels {
-    grid-template-columns: 1fr;
   }
 }

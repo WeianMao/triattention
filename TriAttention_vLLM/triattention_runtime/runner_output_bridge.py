@@ -86,15 +86,46 @@ def attach_execute_model_compression_events(
     *,
     output: Any,
     pending_events: list[dict[str, Any]],
+    scheduler_output: Any = None,
 ) -> tuple[Any, list[dict[str, Any]]]:
     """Attach compression events to ModelRunnerOutput when possible.
 
-    Returns `(output, remaining_pending_events)`.
+    In vLLM V1's async path, ``execute_model`` returns ``None`` (the actual
+    ``ModelRunnerOutput`` is produced later).  When that happens, attach
+    events to ``scheduler_output`` instead — the same Python object is
+    passed through to ``scheduler.update_from_output()``, so the events
+    will arrive without serialization.
+
+    Returns ``(output, remaining_pending_events)``.
     """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    applied_count = sum(1 for e in pending_events if e.get("status") == "applied")
     if output is None:
+        if scheduler_output is not None and pending_events:
+            setattr(
+                scheduler_output,
+                "triattention_compression_events",
+                pending_events,
+            )
+            _log.info(
+                "attach_events: output=None, attached %d events (%d applied) to scheduler_output (id=%d)",
+                len(pending_events), applied_count, id(scheduler_output),
+            )
+            return output, []
+        if pending_events:
+            _log.warning(
+                "attach_events: output=None scheduler_output=None, DROPPING %d events (%d applied)",
+                len(pending_events), applied_count,
+            )
         return output, pending_events
     try:
         setattr(output, "triattention_compression_events", pending_events)
+        if applied_count > 0:
+            _log.info(
+                "attach_events: attached %d events (%d applied) to output type=%s",
+                len(pending_events), applied_count, type(output).__name__,
+            )
     except Exception:
         # Keep pending events for sample_tokens fallback path.
         return output, pending_events

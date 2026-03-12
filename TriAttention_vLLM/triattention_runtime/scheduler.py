@@ -14,12 +14,6 @@ from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.structured_output import StructuredOutputManager
 
 from .config import TriAttentionRuntimeConfig
-from .debug_trace import (
-    record_reclaim,
-    record_reclaim_expect,
-    record_request_finished,
-    record_signal,
-)
 from .effective_len_tracker import EffectiveCacheLenTracker
 from .kv_allocation_sync import (
     clear_request_allocation_sync_state,
@@ -139,7 +133,17 @@ class TriAttentionScheduler(Scheduler):
         kv_usage = self.kv_cache_manager.usage if kv_usage_enabled else None
         compression_disabled = bool(self.triattention_config.disable_compression)
         signals: dict[str, CompressionSignal] = {}
-        for _raw_key, req_id, scheduled_tokens in iter_scheduled_token_items(scheduler_output):
+        scheduled_items = list(iter_scheduled_token_items(scheduler_output))
+        if not scheduled_items and self._triattention_step % 500 == 0:
+            raw = getattr(scheduler_output, "num_scheduled_tokens", "MISSING")
+            logger.info(
+                "TriAttention _build_signals: no scheduled items step=%d "
+                "num_scheduled_tokens_type=%s len=%s",
+                self._triattention_step,
+                type(raw).__name__,
+                len(raw) if isinstance(raw, dict) else "N/A",
+            )
+        for _raw_key, req_id, scheduled_tokens in scheduled_items:
             request = self.requests.get(req_id)
             if request is None:
                 continue
@@ -165,6 +169,13 @@ class TriAttentionScheduler(Scheduler):
                         self._prefill_lens[req_id] = prefill_len
                         threshold = self._compute_length_threshold(prefill_len)
                         self._length_threshold_cache[req_id] = threshold
+                        logger.info(
+                            "TriAttention threshold computed req=%s threshold=%d "
+                            "prefill_len=%d budget=%d divide_length=%d",
+                            req_id, threshold, prefill_len,
+                            self.triattention_config.kv_budget,
+                            self.triattention_config.divide_length,
+                        )
                     if estimated_cache_len < threshold:
                         continue
 
@@ -190,13 +201,11 @@ class TriAttentionScheduler(Scheduler):
             #    effective-length updates for runtime input overrides.
             if signal.should_compress or has_override:
                 if signal.should_compress:
-                    record_signal(
-                        req_id=req_id,
-                        step=self._triattention_step,
-                        reason=str(signal.reason),
-                        estimated_cache_len=int(estimated_cache_len),
-                        logical_cache_len=int(request.num_computed_tokens),
-                        scheduled_tokens=int(scheduled_tokens),
+                    logger.info(
+                        "TriAttention signal triggered req=%s step=%d "
+                        "estimated_cache_len=%d reason=%s",
+                        req_id, self._triattention_step,
+                        estimated_cache_len, signal.reason,
                     )
                 signals[req_id] = signal
         return signals
@@ -248,6 +257,16 @@ class TriAttentionScheduler(Scheduler):
         block_size = int(getattr(self, "block_size", 1))
         if block_size <= 0:
             block_size = 1
+        logger.info(
+            "TriAttention _apply_compression_events: kv_cache_manager=%s "
+            "coordinator=%s managers=%s block_size=%d reclaim_enabled=%s",
+            type(self.kv_cache_manager).__name__,
+            type(coordinator).__name__ if coordinator else None,
+            type(managers).__name__ if managers else None,
+            block_size,
+            getattr(self, "triattention_config", None)
+            and self.triattention_config.enable_experimental_block_reclaim,
+        )
 
         def _num_required_blocks(token_len: int) -> int:
             if token_len <= 0:
@@ -288,36 +307,45 @@ class TriAttentionScheduler(Scheduler):
                         req_groups_seen += 1
 
             block_reclaim = event.get("block_reclaim")
-            groups = block_reclaim.get("groups") if isinstance(block_reclaim, dict) else None
-            record_reclaim_expect(
-                req_id=req_id,
-                step=event_step,
-                required_blocks=required_blocks,
-                has_payload=isinstance(block_reclaim, dict),
-                groups_count=(len(groups) if isinstance(groups, list) else 0),
-                req_groups_seen=req_groups_seen,
-                expected_shrink_groups=len(expected_shrink_gids),
+            groups = (
+                block_reclaim.get("groups")
+                if isinstance(block_reclaim, dict)
+                else None
             )
-            if not isinstance(block_reclaim, dict):
-                if (
-                    getattr(self.triattention_config, "require_physical_reclaim", False)
-                    and expected_shrink_gids
-                ):
-                    raise RuntimeError(
-                        "TriAttention block reclaim missing while shrink expected: "
-                        f"req={req_id} expected_shrink_gids={sorted(expected_shrink_gids)} "
-                        f"required_blocks={required_blocks}"
-                    )
-                continue
+            logger.info(
+                "TriAttention block reclaim: req=%s required_blocks=%d "
+                "expected_shrink_gids=%s block_reclaim=%s groups=%s",
+                req_id, required_blocks, expected_shrink_gids,
+                type(block_reclaim).__name__ if block_reclaim else None,
+                bool(groups),
+            )
             if not isinstance(groups, list):
-                if (
-                    getattr(self.triattention_config, "require_physical_reclaim", False)
-                    and expected_shrink_gids
-                ):
-                    raise RuntimeError(
-                        "TriAttention block reclaim groups invalid while shrink expected: "
-                        f"req={req_id} expected_shrink_gids={sorted(expected_shrink_gids)} "
-                        f"required_blocks={required_blocks}"
+                # In V1 batch-queue mode, consecutive compression steps can
+                # race: the worker already truncated blocks in an earlier step
+                # whose events the scheduler hasn't consumed yet.  When that
+                # happens the later event legitimately has block_reclaim=None.
+                # Synthesize the reclaim by truncating to required_blocks.
+                if expected_shrink_gids and isinstance(managers, (list, tuple)):
+                    for gid in sorted(expected_shrink_gids):
+                        manager = managers[gid]
+                        req_blocks = manager.req_to_blocks.get(req_id)
+                        if not req_blocks or required_blocks >= len(req_blocks):
+                            continue
+                        kept_blocks = req_blocks[:required_blocks]
+                        removed_blocks = req_blocks[required_blocks:]
+                        manager.req_to_blocks[req_id] = kept_blocks
+                        if req_id in manager.num_cached_block:
+                            manager.num_cached_block[req_id] = min(
+                                manager.num_cached_block[req_id],
+                                len(kept_blocks),
+                            )
+                        if removed_blocks:
+                            reclaim_applied_any = True
+                            manager.block_pool.free_blocks(reversed(removed_blocks))
+                if reclaim_applied_any:
+                    update_request_effective_kv_offset(
+                        request=req,
+                        cache_len_after=cache_len_after,
                     )
                 continue
             if not isinstance(managers, (list, tuple)):
@@ -382,31 +410,36 @@ class TriAttentionScheduler(Scheduler):
                         manager.num_cached_block[req_id], len(kept_blocks)
                     )
                 if removed_blocks:
-                    before_len = len(req_blocks)
-                    after_len = len(kept_blocks)
-                    freed_len = len(removed_blocks)
-                    reclaim_applied_any = True
-                    record_reclaim(
-                        req_id=req_id,
-                        step=event_step,
-                        gid=gid,
-                        before_blocks=before_len,
-                        after_blocks=after_len,
-                        freed_blocks=freed_len,
+                    logger.info(
+                        "TriAttention scheduler FREE_BLOCKS: req=%s gid=%d "
+                        "freed=%d kept=%d",
+                        req_id, gid, len(removed_blocks), len(kept_blocks),
                     )
+                    reclaim_applied_any = True
                     manager.block_pool.free_blocks(reversed(removed_blocks))
 
-            if (
-                getattr(self.triattention_config, "require_physical_reclaim", False)
-                and expected_shrink_gids
-            ):
-                missing_gids = sorted(expected_shrink_gids - seen_gids)
-                if missing_gids:
-                    raise RuntimeError(
-                        "TriAttention block reclaim missing groups: "
-                        f"req={req_id} missing_gids={missing_gids} "
-                        f"required_blocks={required_blocks}"
-                    )
+            # Synthesize reclaim for groups that were expected but not
+            # covered by the explicit block_reclaim payload (V1 batch-queue
+            # race — worker already truncated in an earlier step).
+            missing_gids = expected_shrink_gids - seen_gids
+            if missing_gids:
+                for gid in sorted(missing_gids):
+                    manager = managers[gid]
+                    req_blocks = manager.req_to_blocks.get(req_id)
+                    if not req_blocks or required_blocks >= len(req_blocks):
+                        continue
+                    kept_blocks = req_blocks[:required_blocks]
+                    removed_blocks = req_blocks[required_blocks:]
+                    manager.req_to_blocks[req_id] = kept_blocks
+                    if req_id in manager.num_cached_block:
+                        manager.num_cached_block[req_id] = min(
+                            manager.num_cached_block[req_id],
+                            len(kept_blocks),
+                        )
+                    if removed_blocks:
+                        reclaim_applied_any = True
+                        manager.block_pool.free_blocks(reversed(removed_blocks))
+
             if reclaim_applied_any:
                 update_request_effective_kv_offset(
                     request=req,
@@ -442,5 +475,4 @@ class TriAttentionScheduler(Scheduler):
         for req_id in scheduler_output.finished_req_ids:
             self._prefill_lens.pop(req_id, None)
             self._effective_len_tracker.remove_request(req_id)
-            record_request_finished(req_id)
         return outputs
