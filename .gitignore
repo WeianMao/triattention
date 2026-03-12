@@ -76,3 +76,13 @@ TriAttention_vLLM/evaluation/*.log
 !demo/prompt.txt
 !demo/vllm/
 !demo/vllm/**
+
+# Local debug / temporary investigation artifacts
+debug/
+output_multi/
+comparison_report.txt
+weian_development/demo_debug/artifacts/
+weian_development/demo_debug/runtime_debug_check/
+weian_development/triattention_v2_aime24_hf_*_probe.yaml
+weian_development/triattention_v2_launch_full_strict.py
+weian_development/triattention_v2_unattended_guard.py
