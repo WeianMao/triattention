@@ -71,6 +71,32 @@ TriAttention_vLLM/evaluation/*.log
 *.egg-info/
 .deps/
 
+# R-KV/vLLM local build/runtime artifacts (do not commit)
+R-KV/vLLM/.pytest_cache/
+R-KV/vLLM/.deps/
+R-KV/vLLM/vllm.egg-info/
+R-KV/vLLM/build/
+R-KV/vLLM/dist/
+R-KV/vLLM/logs/
+R-KV/vLLM/outputs/
+
+# R-KV/vLLM equivalence test artifacts
+R-KV/vLLM/weian_script/tests/equivalence/comparison_output/*.log
+R-KV/vLLM/weian_script/tests/equivalence/comparison_output/*.jsonl
+R-KV/vLLM/weian_script/tests/equivalence/comparison_output/hf_shards/
+R-KV/vLLM/weian_script/tests/equivalence/comparison_output/logs/
+R-KV/vLLM/weian_script/tests/equivalence/comparison_output/outputs/
+
+# R-KV/vLLM local experiment leftovers (legacy; do not commit)
+R-KV/vLLM/COMPRESSION_FIX_REPORT.md
+R-KV/vLLM/SPECKV_COMPARISON.md
+R-KV/vLLM/SPECKV_PER_LAYER_FIX.md
+R-KV/vLLM/SPECKV_STATELESS_REWRITE.md
+R-KV/vLLM/SPECKV_USAGE.md
+R-KV/vLLM/data/
+R-KV/vLLM/docs/weian_development/
+R-KV/vLLM/weian_script/
+
 # Keep demo handoff assets tracked.
 !demo/
 !demo/prompt.txt
