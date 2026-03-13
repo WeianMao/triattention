@@ -100,7 +100,7 @@ def build_speckv_selector(
         if isinstance(active_recent, int):
             return max(0, min(int(total_tokens), active_recent))
         req_id = getattr(base_runner, "_triattention_active_req_id", None)
-        if not isinstance(req_id, str) or not req_id:
+        if req_id is None:
             return None
         state_store = getattr(base_runner, "_triattention_state_store", None)
         if state_store is None or not hasattr(state_store, "get"):
@@ -948,6 +948,12 @@ def build_speckv_selector(
             return None
 
         if iter_mode == "paged":
+            group_agg_mode = os.environ.get(
+                "TRIATTN_RUNTIME_DEBUG_GROUP_PERHEAD_AGG_MODE",
+                "max",
+            ).strip().lower()
+            if group_agg_mode not in {"mean", "max"}:
+                group_agg_mode = "mean"
             layer_entries = list(iter_inputs)
             if not layer_entries:
                 return None
@@ -1056,7 +1062,7 @@ def build_speckv_selector(
                     protect_prefill=protect_prefill,
                     device=prepared_layers[0]["kv_cache"].device,
                 )
-                chunk_sum: torch.Tensor | None = None
+                chunk_agg: torch.Tensor | None = None
                 layer_count = 0
                 for layer_pos, entry in enumerate(prepared_layers):
                     layer_raw_cache = raw_scores_cache_by_layer[layer_pos]
@@ -1100,18 +1106,25 @@ def build_speckv_selector(
                             f"unexpected_score_rank_for_per_head:{chunk_scores.ndim}"
                         )
                     layer_scores = chunk_scores[0]
-                    if chunk_sum is None:
-                        chunk_sum = layer_scores.clone()
+                    if chunk_agg is None:
+                        chunk_agg = layer_scores.clone()
                     else:
-                        chunk_sum.add_(layer_scores)
+                        if group_agg_mode == "max":
+                            chunk_agg = torch.maximum(chunk_agg, layer_scores)
+                        else:
+                            chunk_agg.add_(layer_scores)
                     layer_count += 1
 
-                if chunk_sum is None or layer_count <= 0:
+                if chunk_agg is None or layer_count <= 0:
                     return None
-                chunk_avg = chunk_sum.div(float(layer_count))
-                cand_k = min(k, int(chunk_avg.shape[-1]))
+                chunk_final = (
+                    chunk_agg
+                    if group_agg_mode == "max"
+                    else chunk_agg.div(float(layer_count))
+                )
+                cand_k = min(k, int(chunk_final.shape[-1]))
                 cand = torch.topk(
-                    chunk_avg,
+                    chunk_final,
                     k=cand_k,
                     dim=-1,
                     largest=True,

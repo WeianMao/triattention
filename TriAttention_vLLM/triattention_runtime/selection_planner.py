@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
@@ -9,15 +10,79 @@ import torch
 
 from .config import TriAttentionRuntimeConfig
 from .constants import TRITON_SCORING_REQUIRED_MARKER
+from .debug_trace import trace_event
 from .kv_compaction import build_keep_token_indices, gather_request_k_dense
 from .layout_engine import PreparedLayerCompaction
 from .plan_models import KeepPlan
+
+_SELECTOR_METRICS_DEBUG = (
+    os.environ.get("TRIATTN_RUNTIME_SELECTOR_METRICS_DEBUG", "0").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
+_DEBUG_DISABLE_GROUP_SELECTOR = (
+    os.environ.get("TRIATTN_RUNTIME_DEBUG_DISABLE_GROUP_SELECTOR", "0").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 
 
 @dataclass(frozen=True)
 class PreparedGroupSelection:
     tasks: list[PreparedLayerCompaction]
     selection_mode: str
+
+
+def _per_head_debug_metrics(indices: Any) -> dict[str, Any]:
+    if isinstance(indices, torch.Tensor):
+        keep = indices.detach().to(dtype=torch.long)
+    else:
+        keep = torch.as_tensor(indices, dtype=torch.long)
+    if keep.ndim != 2:
+        return {"valid": False, "reason": f"ndim_{int(keep.ndim)}"}
+    num_heads = int(keep.shape[0])
+    keep_count = int(keep.shape[1])
+    if num_heads <= 0 or keep_count <= 0:
+        return {
+            "valid": True,
+            "num_heads": num_heads,
+            "keep_count": keep_count,
+            "same_slot_all_heads_ratio": 0.0,
+            "pair_jaccard_min": 0.0,
+            "pair_jaccard_mean": 0.0,
+            "pair_jaccard_max": 0.0,
+        }
+
+    same_slot_all_heads = (keep == keep[:1]).all(dim=0)
+    same_slot_all_heads_ratio = float(same_slot_all_heads.float().mean().item())
+
+    if num_heads == 1:
+        return {
+            "valid": True,
+            "num_heads": num_heads,
+            "keep_count": keep_count,
+            "same_slot_all_heads_ratio": same_slot_all_heads_ratio,
+            "pair_jaccard_min": 1.0,
+            "pair_jaccard_mean": 1.0,
+            "pair_jaccard_max": 1.0,
+        }
+
+    pair_vals: list[float] = []
+    head_sets = [set(int(x) for x in keep[h].tolist()) for h in range(num_heads)]
+    for i in range(num_heads):
+        for j in range(i + 1, num_heads):
+            inter = len(head_sets[i] & head_sets[j])
+            union = max(1, len(head_sets[i] | head_sets[j]))
+            pair_vals.append(float(inter) / float(union))
+    if not pair_vals:
+        pair_vals = [0.0]
+    return {
+        "valid": True,
+        "num_heads": num_heads,
+        "keep_count": keep_count,
+        "same_slot_all_heads_ratio": same_slot_all_heads_ratio,
+        "pair_jaccard_min": float(min(pair_vals)),
+        "pair_jaccard_mean": float(sum(pair_vals) / len(pair_vals)),
+        "pair_jaccard_max": float(max(pair_vals)),
+    }
 
 
 def prepare_group_layer_compactions(
@@ -48,6 +113,7 @@ def prepare_group_layer_compactions(
         select_keep_indices_for_group is not None
         and config.pruning_mode == "per_head"
         and config.per_head_selection_semantics == "hf_aligned_global_per_head"
+        and not _DEBUG_DISABLE_GROUP_SELECTOR
     ):
         try:
             if strict_triton_required:
@@ -180,6 +246,16 @@ def prepare_group_layer_compactions(
             selected_from_fallback = True
 
         keep_plan = KeepPlan.from_selector_result(selected)
+        if _SELECTOR_METRICS_DEBUG and keep_plan.mode == "per_head":
+            metrics = _per_head_debug_metrics(keep_plan.indices)
+            trace_event(
+                "selector_per_head_metrics",
+                req_id=repr(req_id),
+                gid=int(gid),
+                layer_idx=int(layer_idx),
+                selection_mode=keep_plan.selection_mode_label,
+                **metrics,
+            )
         selection_mode = "fallback" if selected_from_fallback else keep_plan.selection_mode_label
         prepared_layer_compactions.append(
             PreparedLayerCompaction(
