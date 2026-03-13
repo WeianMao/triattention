@@ -335,6 +335,30 @@ async def _publish_live_event(event: str, payload: dict[str, Any]) -> None:
     await HUB.publish(event, payload)
 
 
+async def _publish_raw_chat_delta(
+    *,
+    session_id: str,
+    backend_name: str,
+    request_id: str,
+    route_kind: str,
+    choice: dict[str, Any],
+) -> None:
+    delta_obj = choice.get("delta") or {}
+    if not isinstance(delta_obj, dict):
+        return
+    await _publish_live_event(
+        "raw_chat_delta",
+        {
+            "session_id": session_id,
+            "request_id": request_id,
+            "backend": backend_name,
+            "route_kind": route_kind,
+            "delta": delta_obj,
+            "finish_reason": choice.get("finish_reason"),
+        },
+    )
+
+
 async def _resolve_backend_model(
     client: httpx.AsyncClient,
     headers: dict[str, str],
@@ -783,6 +807,29 @@ async def _publish_completion_stream_events(
         await _publish_live_event(event_name, payload)
 
 
+async def _publish_raw_completion_delta(
+    *,
+    session_id: str,
+    backend_name: str,
+    request_id: str,
+    text_delta: str,
+    finish_reason: str | None,
+) -> None:
+    if not text_delta and not finish_reason:
+        return
+    await _publish_live_event(
+        "raw_completion_delta",
+        {
+            "session_id": session_id,
+            "request_id": request_id,
+            "backend": backend_name,
+            "route_kind": "completions",
+            "text": text_delta,
+            "finish_reason": finish_reason,
+        },
+    )
+
+
 async def _finalize_completion_stream(
     *,
     session_id: str,
@@ -907,6 +954,14 @@ async def _stream_completion_backend(
                     if not isinstance(choice, dict):
                         continue
                     text_delta = choice.get("text")
+                    finish_reason = choice.get("finish_reason")
+                    await _publish_raw_completion_delta(
+                        session_id=session_id,
+                        backend_name=backend_name,
+                        request_id=bid,
+                        text_delta=text_delta if isinstance(text_delta, str) else "",
+                        finish_reason=finish_reason if isinstance(finish_reason, str) else None,
+                    )
                     if isinstance(text_delta, str) and text_delta:
                         await _publish_completion_stream_events(
                             session_id=session_id,
@@ -915,7 +970,6 @@ async def _stream_completion_backend(
                             analyzer=analyzer,
                             delta=text_delta,
                         )
-                    finish_reason = choice.get("finish_reason")
                     if isinstance(finish_reason, str) and finish_reason:
                         await _publish_live_event(
                             "request_finish",
@@ -1262,6 +1316,14 @@ async def completions_proxy(request: Request) -> Response:
                     if not isinstance(choice, dict):
                         continue
                     text_delta = choice.get("text")
+                    finish_reason = choice.get("finish_reason")
+                    await _publish_raw_completion_delta(
+                        session_id=session_id,
+                        backend_name=primary_name,
+                        request_id=bid,
+                        text_delta=text_delta if isinstance(text_delta, str) else "",
+                        finish_reason=finish_reason if isinstance(finish_reason, str) else None,
+                    )
                     if isinstance(text_delta, str) and text_delta:
                         await _publish_completion_stream_events(
                             session_id=session_id,
@@ -1270,7 +1332,6 @@ async def completions_proxy(request: Request) -> Response:
                             analyzer=analyzer,
                             delta=text_delta,
                         )
-                    finish_reason = choice.get("finish_reason")
                     if isinstance(finish_reason, str) and finish_reason:
                         await _publish_live_event(
                             "request_finish",
@@ -1458,6 +1519,13 @@ async def _stream_backend(
                     choice = ((obj.get("choices") or [{}])[0]) if isinstance(obj, dict) else {}
                     if not isinstance(choice, dict):
                         continue
+                    await _publish_raw_chat_delta(
+                        session_id=session_id,
+                        backend_name=backend_name,
+                        request_id=bid,
+                        route_kind=route_kind,
+                        choice=choice,
+                    )
                     delta_obj = choice.get("delta") or {}
                     delta = delta_obj.get("content", "")
                     if isinstance(delta, str) and delta:
@@ -1777,6 +1845,13 @@ async def chat_completions(request: Request) -> Response:
                     choice = ((obj.get("choices") or [{}])[0]) if isinstance(obj, dict) else {}
                     if not isinstance(choice, dict):
                         continue
+                    await _publish_raw_chat_delta(
+                        session_id=session_id,
+                        backend_name=primary_name,
+                        request_id=bid,
+                        route_kind="chat",
+                        choice=choice,
+                    )
                     delta_obj = choice.get("delta") or {}
                     delta = delta_obj.get("content", "")
                     if isinstance(delta, str) and delta:
