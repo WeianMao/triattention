@@ -69,7 +69,7 @@ def apply_worker_block_reclaim_events(
         if not isinstance(event, dict) or event.get("status") != "applied":
             continue
         req_id = event.get("req_id")
-        if not isinstance(req_id, str):
+        if req_id is None:
             continue
         req_index = req_id_to_index.get(req_id)
         if not isinstance(req_index, int):

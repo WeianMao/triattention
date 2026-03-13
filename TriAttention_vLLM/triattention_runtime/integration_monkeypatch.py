@@ -161,6 +161,7 @@ def _patched_kv_cache_allocate_slots(
     self,
     request,
     num_new_tokens,
+    *args,
     **kwargs,
 ):
     """Keep vLLM allocation math aligned with TriAttention effective KV length."""
@@ -168,21 +169,21 @@ def _patched_kv_cache_allocate_slots(
     effective_num_computed = resolve_request_effective_num_computed(request)
     if effective_num_computed is None:
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self, request, num_new_tokens, **kwargs,
+            self, request, num_new_tokens, *args, **kwargs,
         )
     logical_num_computed = getattr(request, "num_computed_tokens", None)
     if not isinstance(logical_num_computed, int):
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self, request, num_new_tokens, **kwargs,
+            self, request, num_new_tokens, *args, **kwargs,
         )
     if effective_num_computed >= logical_num_computed:
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self, request, num_new_tokens, **kwargs,
+            self, request, num_new_tokens, *args, **kwargs,
         )
     setattr(request, "num_computed_tokens", int(effective_num_computed))
     try:
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
-            self, request, num_new_tokens, **kwargs,
+            self, request, num_new_tokens, *args, **kwargs,
         )
     finally:
         setattr(request, "num_computed_tokens", logical_num_computed)

@@ -13,29 +13,29 @@ from __future__ import annotations
 from typing import Any, Iterator
 
 
-def req_id_from_scheduled_key(key: Any) -> str | None:
+def req_id_from_scheduled_key(key: Any) -> Any:
     """Normalize a scheduler `num_scheduled_tokens` key to `req_id` string."""
-    if isinstance(key, str):
+    if isinstance(key, (str, int)):
         return key
     req_id = getattr(key, "request_id", None)
-    if isinstance(req_id, str):
+    if isinstance(req_id, (str, int)):
         return req_id
     req_id = getattr(key, "req_id", None)
-    if isinstance(req_id, str):
+    if isinstance(req_id, (str, int)):
         return req_id
     return None
 
 
 def iter_scheduled_token_items(
     scheduler_output: Any,
-) -> Iterator[tuple[Any, str, int]]:
+) -> Iterator[tuple[Any, Any, int]]:
     """Yield `(raw_key, req_id, scheduled_tokens)` preserving mapping order."""
     scheduled = getattr(scheduler_output, "num_scheduled_tokens", None)
     if not isinstance(scheduled, dict):
         return
     for raw_key, raw_value in scheduled.items():
         req_id = req_id_from_scheduled_key(raw_key)
-        if not isinstance(req_id, str):
+        if req_id is None:
             continue
         try:
             scheduled_tokens = int(raw_value)
@@ -46,7 +46,7 @@ def iter_scheduled_token_items(
 
 def get_scheduled_token_items(
     scheduler_output: Any,
-) -> list[tuple[Any, str, int]]:
+) -> list[tuple[Any, Any, int]]:
     """Return normalized scheduled items with per-output best-effort caching.
 
     This avoids re-normalizing `num_scheduled_tokens` keys multiple times in the

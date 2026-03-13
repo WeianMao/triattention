@@ -23,15 +23,15 @@ def _has_active_compressed_requests(state_store: Any) -> bool | None:
 
 def _applied_req_ids_from_events(
     compression_events: list[dict[str, Any]] | None,
-) -> set[str]:
-    out: set[str] = set()
+) -> set[Any]:
+    out: set[Any] = set()
     if not isinstance(compression_events, list):
         return out
     for event in compression_events:
         if (
             isinstance(event, dict)
             and event.get("status") == "applied"
-            and isinstance(event.get("req_id"), str)
+            and event.get("req_id") is not None
         ):
             out.add(event["req_id"])
     return out

@@ -277,7 +277,7 @@ class TriAttentionScheduler(Scheduler):
             if event.get("status") != "applied":
                 continue
             req_id = event.get("req_id")
-            if not isinstance(req_id, str):
+            if req_id is None:
                 continue
             event_step = int(event.get("step", -1))
             cache_len_after = event.get("cache_len_after")
