@@ -4,21 +4,26 @@ const liveStatusEl = document.getElementById('liveStatus');
 const promptEl = document.getElementById('prompt');
 const forwardToggleBtn = document.getElementById('forwardToggleBtn');
 
-// Per-backend DOM elements
 const backends = {
   baseline: {
     outputEl: document.getElementById('baselineOutput'),
+    toolsEl: document.getElementById('baselineTools'),
     metricsCard: document.getElementById('baselineGatewayMetrics'),
     kvMetricsCard: document.getElementById('baselineKvMetrics'),
+    sessionLabelEl: document.getElementById('baselineSessionLabel'),
+    phaseBadgeEl: document.getElementById('baselinePhaseBadge'),
     sessions: new Map(),
-    activeRequestId: null,
+    activeSessionId: null,
   },
   triattention: {
     outputEl: document.getElementById('triattentionOutput'),
+    toolsEl: document.getElementById('triattentionTools'),
     metricsCard: document.getElementById('triattentionGatewayMetrics'),
     kvMetricsCard: document.getElementById('triattentionKvMetrics'),
+    sessionLabelEl: document.getElementById('triattentionSessionLabel'),
+    phaseBadgeEl: document.getElementById('triattentionPhaseBadge'),
     sessions: new Map(),
-    activeRequestId: null,
+    activeSessionId: null,
   },
 };
 
@@ -54,25 +59,44 @@ function resetKvMetrics(backendName) {
   }
 }
 
+function resetMetrics(backendName) {
+  for (const field of ['session', 'request', 'ttft', 'tps', 'total', 'tokens', 'finish']) {
+    setMetric(backendName, field, '-');
+  }
+}
+
 function formatInt(value) {
   return Number.isFinite(value) ? Math.round(value).toLocaleString() : '-';
 }
 
-function resetMetrics(backendName) {
-  for (const field of ['request', 'ttft', 'tps', 'total', 'tokens', 'finish']) {
-    setMetric(backendName, field, '-');
-  }
+function clip(value, limit = 18) {
+  if (!value) return '-';
+  return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 function resolveBackend(payload) {
   return payload.backend || null;
 }
 
-function ensureSession(backendName, requestId) {
-  const b = backends[backendName];
-  if (!b) return null;
-  if (!b.sessions.has(requestId)) {
-    b.sessions.set(requestId, {
+function resolveSessionId(payload) {
+  return payload.session_id || payload.request_id || null;
+}
+
+function ensureSession(backendName, sessionId) {
+  const backend = backends[backendName];
+  if (!backend || !sessionId) return null;
+  if (!backend.sessions.has(sessionId)) {
+    backend.sessions.set(sessionId, {
+      id: sessionId,
       text: '',
       startedAt: performance.now(),
       firstTokenAt: null,
@@ -80,21 +104,93 @@ function ensureSession(backendName, requestId) {
       finishReason: '-',
       elapsedMs: null,
       done: false,
+      phase: 'idle',
+      latestRequestId: '-',
+      tools: new Map(),
+      toolOrder: [],
+      routeKind: null,
     });
   }
-  return b.sessions.get(requestId);
+  return backend.sessions.get(sessionId);
 }
 
-function activateRequest(backendName, requestId) {
-  const b = backends[backendName];
-  if (!b) return;
-  b.activeRequestId = requestId;
-  const session = ensureSession(backendName, requestId);
+function setPhase(backendName, session, phase) {
+  session.phase = phase;
+  const badge = backends[backendName]?.phaseBadgeEl;
+  if (!badge) return;
+  badge.textContent = phase;
+  badge.className = `phase-badge ${phase.replaceAll(/\s+/g, '-').toLowerCase()}`;
+}
+
+function ensureTool(session, toolCallId, toolName = 'tool') {
+  if (!session.tools.has(toolCallId)) {
+    session.tools.set(toolCallId, {
+      id: toolCallId,
+      name: toolName,
+      status: 'running',
+      argumentsFull: '',
+      resultSummary: '',
+      resultText: '',
+      origin: '',
+      updatedAt: Date.now(),
+    });
+    session.toolOrder.push(toolCallId);
+  }
+  const tool = session.tools.get(toolCallId);
+  if (toolName && (!tool.name || tool.name === 'tool')) {
+    tool.name = toolName;
+  }
+  return tool;
+}
+
+function renderToolTimeline(backendName, session) {
+  const backend = backends[backendName];
+  if (!backend) return;
+  if (!session || session.toolOrder.length === 0) {
+    backend.toolsEl.className = 'tool-timeline empty-state';
+    backend.toolsEl.textContent = 'No tool activity yet.';
+    return;
+  }
+
+  backend.toolsEl.className = 'tool-timeline';
+  backend.toolsEl.innerHTML = session.toolOrder
+    .map((toolId) => {
+      const tool = session.tools.get(toolId);
+      if (!tool) return '';
+      const args = tool.argumentsFull ? escapeHtml(tool.argumentsFull) : '<span class="muted">No arguments</span>';
+      const result = tool.resultSummary
+        ? `<div class="tool-result"><span class="tool-subtitle">Result</span><p>${escapeHtml(tool.resultSummary)}</p></div>`
+        : '';
+      return `
+        <article class="tool-card ${escapeHtml(tool.status)}">
+          <div class="tool-card-header">
+            <strong>${escapeHtml(tool.name || 'tool')}</strong>
+            <span class="tool-status ${escapeHtml(tool.status)}">${escapeHtml(tool.status)}</span>
+          </div>
+          <div class="tool-meta">ID: ${escapeHtml(tool.id)}${tool.origin ? ` · ${escapeHtml(tool.origin)}` : ''}</div>
+          <div class="tool-args">
+            <span class="tool-subtitle">Arguments</span>
+            <pre>${args}</pre>
+          </div>
+          ${result}
+        </article>
+      `;
+    })
+    .join('');
+}
+
+function activateSession(backendName, sessionId) {
+  const backend = backends[backendName];
+  if (!backend) return;
+  const session = ensureSession(backendName, sessionId);
   if (!session) return;
 
-  b.outputEl.textContent = session.text;
-  b.outputEl.scrollTop = b.outputEl.scrollHeight;
-  setMetric(backendName, 'request', requestId);
+  backend.activeSessionId = sessionId;
+  backend.outputEl.textContent = session.text;
+  backend.outputEl.scrollTop = backend.outputEl.scrollHeight;
+  backend.sessionLabelEl.textContent = clip(sessionId, 22);
+  setMetric(backendName, 'session', clip(sessionId, 22));
+  setMetric(backendName, 'request', clip(session.latestRequestId, 22));
   setMetric(backendName, 'tokens', session.tokenCount);
   setMetric(backendName, 'finish', session.finishReason);
 
@@ -113,87 +209,174 @@ function activateRequest(backendName, requestId) {
   if (session.firstTokenAt !== null && session.tokenCount > 1) {
     const endAt = session.elapsedMs !== null ? session.startedAt + session.elapsedMs : performance.now();
     const decodeSec = (endAt - session.firstTokenAt) / 1000;
-    if (decodeSec > 0) {
-      setMetric(backendName, 'tps', (session.tokenCount / decodeSec).toFixed(2));
-    }
+    setMetric(backendName, 'tps', decodeSec > 0 ? (session.tokenCount / decodeSec).toFixed(2) : '-');
   } else {
     setMetric(backendName, 'tps', '-');
+  }
+
+  setPhase(backendName, session, session.phase || 'idle');
+  renderToolTimeline(backendName, session);
+}
+
+function clearSessionsForNewManualRun() {
+  for (const backendName of Object.keys(backends)) {
+    backends[backendName].sessions.clear();
+    backends[backendName].activeSessionId = null;
+    backends[backendName].outputEl.textContent = '';
+    backends[backendName].toolsEl.className = 'tool-timeline empty-state';
+    backends[backendName].toolsEl.textContent = 'No tool activity yet.';
+    backends[backendName].sessionLabelEl.textContent = '-';
+    setPhase(backendName, { phase: 'idle' }, 'idle');
+    resetMetrics(backendName);
   }
 }
 
 function handleRequestStarted(payload) {
   const backendName = resolveBackend(payload);
-  const requestId = payload.request_id;
-  if (!backendName || !requestId) return;
+  const sessionId = resolveSessionId(payload);
+  if (!backendName || !sessionId) return;
 
-  const session = ensureSession(backendName, requestId);
+  const session = ensureSession(backendName, sessionId);
   if (!session) return;
   session.startedAt = performance.now();
-  session.firstTokenAt = null;
-  session.tokenCount = 0;
-  session.finishReason = '-';
-  session.elapsedMs = null;
   session.done = false;
-  session.text = '';
-
-  activateRequest(backendName, requestId);
-  setStatus(`Streaming...`, 'running');
+  session.elapsedMs = null;
+  session.finishReason = '-';
+  session.latestRequestId = payload.request_id || session.latestRequestId;
+  session.routeKind = payload.route_kind || session.routeKind;
+  if (!session.text && payload.route_kind === 'chat') {
+    session.firstTokenAt = null;
+    session.tokenCount = 0;
+  }
+  setPhase(backendName, session, payload.phase || (payload.route_kind === 'completions' ? 'tooling' : 'streaming'));
+  activateSession(backendName, sessionId);
+  setStatus('Streaming...', 'running');
 }
 
-function handleToken(payload) {
+function handleTextDelta(payload) {
   const backendName = resolveBackend(payload);
-  const requestId = payload.request_id;
+  const sessionId = resolveSessionId(payload);
   const text = payload.text || '';
-  if (!backendName || !requestId || !text) return;
+  if (!backendName || !sessionId || !text) return;
 
-  const b = backends[backendName];
-  if (!b) return;
-  const session = ensureSession(backendName, requestId);
-  if (!session) return;
+  const backend = backends[backendName];
+  const session = ensureSession(backendName, sessionId);
+  if (!backend || !session) return;
 
   if (session.firstTokenAt === null) {
     session.firstTokenAt = performance.now();
   }
-  session.tokenCount += 1;
+  session.tokenCount = typeof payload.token_count === 'number' ? payload.token_count : session.tokenCount + 1;
   session.text += text;
+  session.latestRequestId = payload.request_id || session.latestRequestId;
+  setPhase(backendName, session, 'writing');
 
-  if (b.activeRequestId !== requestId) {
-    activateRequest(backendName, requestId);
-  } else {
-    b.outputEl.textContent += text;
-    b.outputEl.scrollTop = b.outputEl.scrollHeight;
-    setMetric(backendName, 'tokens', session.tokenCount);
-    setMetric(backendName, 'ttft', (session.firstTokenAt - session.startedAt).toFixed(2));
+  if (backend.activeSessionId !== sessionId) {
+    activateSession(backendName, sessionId);
+    return;
   }
+
+  backend.outputEl.textContent = session.text;
+  backend.outputEl.scrollTop = backend.outputEl.scrollHeight;
+  setMetric(backendName, 'tokens', session.tokenCount);
+  setMetric(backendName, 'request', clip(session.latestRequestId, 22));
+  setMetric(backendName, 'ttft', (session.firstTokenAt - session.startedAt).toFixed(2));
+}
+
+function handleToolCallStarted(payload) {
+  const backendName = resolveBackend(payload);
+  const sessionId = resolveSessionId(payload);
+  if (!backendName || !sessionId || !payload.tool_call_id) return;
+
+  const session = ensureSession(backendName, sessionId);
+  if (!session) return;
+  const tool = ensureTool(session, payload.tool_call_id, payload.tool_name);
+  tool.status = 'running';
+  tool.argumentsFull = payload.arguments_full || tool.argumentsFull;
+  tool.origin = payload.origin || tool.origin;
+  tool.updatedAt = Date.now();
+  session.latestRequestId = payload.request_id || session.latestRequestId;
+  setPhase(backendName, session, 'calling-tool');
+  activateSession(backendName, sessionId);
+}
+
+function handleToolCallDelta(payload) {
+  const backendName = resolveBackend(payload);
+  const sessionId = resolveSessionId(payload);
+  if (!backendName || !sessionId || !payload.tool_call_id) return;
+
+  const session = ensureSession(backendName, sessionId);
+  if (!session) return;
+  const tool = ensureTool(session, payload.tool_call_id, payload.tool_name);
+  tool.status = 'running';
+  if (typeof payload.arguments_full === 'string' && payload.arguments_full) {
+    tool.argumentsFull = payload.arguments_full;
+  } else if (typeof payload.arguments_delta === 'string') {
+    tool.argumentsFull += payload.arguments_delta;
+  }
+  tool.origin = payload.origin || tool.origin;
+  tool.updatedAt = Date.now();
+  setPhase(backendName, session, 'calling-tool');
+  activateSession(backendName, sessionId);
+}
+
+function handleToolCallFinished(payload) {
+  const backendName = resolveBackend(payload);
+  const sessionId = resolveSessionId(payload);
+  if (!backendName || !sessionId || !payload.tool_call_id) return;
+
+  const session = ensureSession(backendName, sessionId);
+  if (!session) return;
+  const tool = ensureTool(session, payload.tool_call_id, payload.tool_name);
+  tool.status = 'completed';
+  tool.argumentsFull = payload.arguments_full || tool.argumentsFull;
+  tool.origin = payload.origin || tool.origin;
+  tool.updatedAt = Date.now();
+  setPhase(backendName, session, 'tool-finished');
+  activateSession(backendName, sessionId);
+}
+
+function handleToolResult(payload) {
+  const backendName = resolveBackend(payload);
+  const sessionId = resolveSessionId(payload);
+  if (!backendName || !sessionId || !payload.tool_call_id) return;
+
+  const session = ensureSession(backendName, sessionId);
+  if (!session) return;
+  const tool = ensureTool(session, payload.tool_call_id, payload.tool_name);
+  tool.status = 'result';
+  tool.resultSummary = payload.result_summary || tool.resultSummary;
+  tool.resultText = payload.result_text || tool.resultText;
+  tool.origin = payload.origin || tool.origin;
+  tool.updatedAt = Date.now();
+  setPhase(backendName, session, 'tool-returned');
+  activateSession(backendName, sessionId);
 }
 
 function handleRequestFinish(payload) {
   const backendName = resolveBackend(payload);
-  const requestId = payload.request_id;
-  if (!backendName || !requestId) return;
+  const sessionId = resolveSessionId(payload);
+  if (!backendName || !sessionId) return;
 
-  const session = ensureSession(backendName, requestId);
+  const session = ensureSession(backendName, sessionId);
   if (!session) return;
   if (typeof payload.finish_reason === 'string' && payload.finish_reason) {
     session.finishReason = payload.finish_reason;
   }
-  const b = backends[backendName];
-  if (b && b.activeRequestId === requestId) {
-    setMetric(backendName, 'finish', session.finishReason);
-  }
+  session.latestRequestId = payload.request_id || session.latestRequestId;
+  activateSession(backendName, sessionId);
 }
 
 function handleRequestDone(payload) {
   const backendName = resolveBackend(payload);
-  const requestId = payload.request_id;
-  if (!backendName || !requestId) return;
+  const sessionId = resolveSessionId(payload);
+  if (!backendName || !sessionId) return;
 
-  const b = backends[backendName];
-  if (!b) return;
-  const session = ensureSession(backendName, requestId);
+  const session = ensureSession(backendName, sessionId);
   if (!session) return;
 
   session.done = true;
+  session.latestRequestId = payload.request_id || session.latestRequestId;
   if (typeof payload.elapsed_ms === 'number') {
     session.elapsedMs = payload.elapsed_ms;
   } else {
@@ -209,13 +392,18 @@ function handleRequestDone(payload) {
     session.text = payload.text;
   }
 
-  activateRequest(backendName, requestId);
+  if (session.text) {
+    setPhase(backendName, session, 'done');
+  } else if (session.toolOrder.length > 0) {
+    setPhase(backendName, session, 'tool-finished');
+  } else {
+    setPhase(backendName, session, 'done');
+  }
+  activateSession(backendName, sessionId);
 
-  // Check if both backends are done
   const otherName = backendName === 'baseline' ? 'triattention' : 'baseline';
-  const otherB = backends[otherName];
-  const otherActive = otherB?.activeRequestId;
-  const otherSession = otherActive ? otherB.sessions.get(otherActive) : null;
+  const otherBackend = backends[otherName];
+  const otherSession = otherBackend?.activeSessionId ? otherBackend.sessions.get(otherBackend.activeSessionId) : null;
   if (!otherSession || otherSession.done) {
     setStatus('Done', 'done');
   }
@@ -223,27 +411,27 @@ function handleRequestDone(payload) {
 
 function handleRequestError(payload) {
   const backendName = resolveBackend(payload);
-  const requestId = payload.request_id || 'unknown';
-  if (!backendName) return;
+  const sessionId = resolveSessionId(payload);
+  if (!backendName || !sessionId) return;
 
-  const b = backends[backendName];
-  if (!b) return;
-  const session = ensureSession(backendName, requestId);
-  if (!session) return;
+  const backend = backends[backendName];
+  const session = ensureSession(backendName, sessionId);
+  if (!backend || !session) return;
 
   const msg = payload.message || 'Unknown error';
   const kvInsufficient = msg.toLowerCase().includes('kv cache insufficient');
-  const displayMsg = kvInsufficient ? 'KV cache不足，baseline请求已被网关终止。' : msg;
-  session.text += `\n\n[ERROR] ${displayMsg}\n`;
+  const displayMsg = kvInsufficient ? 'KV cache不足，网关已终止该 backend 请求。' : msg;
+  if (session.text) {
+    session.text += `\n\n[ERROR] ${displayMsg}\n`;
+  } else {
+    session.text = `[ERROR] ${displayMsg}\n`;
+  }
   session.done = true;
   session.finishReason = kvInsufficient ? 'kv-cache-insufficient' : 'error';
-  if (b.activeRequestId !== requestId) {
-    activateRequest(backendName, requestId);
-  } else {
-    b.outputEl.textContent = session.text;
-  }
-  setMetric(backendName, 'finish', session.finishReason);
-  setStatus(`Error (${backendName}): ${requestId}`, 'error');
+  session.latestRequestId = payload.request_id || session.latestRequestId;
+  setPhase(backendName, session, 'error');
+  activateSession(backendName, sessionId);
+  setStatus(`Error (${backendName}): ${clip(session.latestRequestId, 22)}`, 'error');
 }
 
 function startLiveFeed() {
@@ -263,8 +451,20 @@ function startLiveFeed() {
   source.addEventListener('request_started', (event) => {
     handleRequestStarted(JSON.parse(event.data));
   });
-  source.addEventListener('token', (event) => {
-    handleToken(JSON.parse(event.data));
+  source.addEventListener('text_delta', (event) => {
+    handleTextDelta(JSON.parse(event.data));
+  });
+  source.addEventListener('tool_call_started', (event) => {
+    handleToolCallStarted(JSON.parse(event.data));
+  });
+  source.addEventListener('tool_call_delta', (event) => {
+    handleToolCallDelta(JSON.parse(event.data));
+  });
+  source.addEventListener('tool_call_finished', (event) => {
+    handleToolCallFinished(JSON.parse(event.data));
+  });
+  source.addEventListener('tool_result', (event) => {
+    handleToolResult(JSON.parse(event.data));
   });
   source.addEventListener('request_finish', (event) => {
     handleRequestFinish(JSON.parse(event.data));
@@ -349,8 +549,7 @@ async function runStreamingChat() {
   }
 
   runBtn.disabled = true;
-  resetMetrics('baseline');
-  resetMetrics('triattention');
+  clearSessionsForNewManualRun();
   setStatus('Submitting request...', 'running');
 
   const body = {
@@ -373,7 +572,6 @@ async function runStreamingChat() {
       throw new Error(`HTTP ${response.status}`);
     }
 
-    // Drain stream; rendering comes from the live feed subscription.
     const reader = response.body.getReader();
     while (true) {
       const { done } = await reader.read();
@@ -386,11 +584,12 @@ async function runStreamingChat() {
   }
 }
 
-// Initialize
-resetMetrics('baseline');
-resetMetrics('triattention');
-resetKvMetrics('baseline');
-resetKvMetrics('triattention');
+for (const backendName of Object.keys(backends)) {
+  resetMetrics(backendName);
+  resetKvMetrics(backendName);
+  backends[backendName].toolsEl.className = 'tool-timeline empty-state';
+}
+
 startLiveFeed();
 startKvPolling();
 updateForwardToggle();

@@ -7,6 +7,7 @@
   --primary: #0f766e;
   --primary-soft: #d8f3f0;
   --danger: #b91c1c;
+  --warning: #b45309;
   --baseline-accent: #2563eb;
   --baseline-soft: #dbeafe;
   --triattention-accent: #0f766e;
@@ -28,7 +29,7 @@ body {
 }
 
 .container {
-  max-width: 1600px;
+  max-width: 1680px;
   margin: 0 auto;
   padding: 24px;
 }
@@ -45,7 +46,8 @@ body {
 
 .controls,
 .panel,
-.metric-card {
+.metric-card,
+.session-summary {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -144,7 +146,6 @@ button:disabled {
   color: var(--danger);
 }
 
-/* Two-column comparison layout */
 .comparison-grid {
   margin-top: 16px;
   display: grid;
@@ -177,13 +178,13 @@ button:disabled {
 }
 
 .backend-panel .metrics-grid {
-  margin-top: 0;
   display: grid;
   grid-template-columns: 1fr;
   gap: 10px;
 }
 
-.metric-card {
+.metric-card,
+.session-summary {
   padding: 12px;
 }
 
@@ -197,11 +198,81 @@ button:disabled {
   font-size: 13px;
 }
 
+.session-summary {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-label {
+  color: var(--muted);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.phase-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #e2e8f0;
+  color: #334155;
+  text-transform: lowercase;
+}
+
+.phase-badge.idle {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.phase-badge.streaming,
+.phase-badge.writing {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.phase-badge.tooling,
+.phase-badge.calling-tool,
+.phase-badge.tool-finished,
+.phase-badge.tool-returned {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.phase-badge.done {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.phase-badge.error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
 .backend-panel .panels {
   margin-top: 12px;
+}
+
+.dual-track-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1.2fr 0.8fr;
   gap: 10px;
+}
+
+.panel {
+  min-height: 100%;
 }
 
 .panel header {
@@ -216,8 +287,8 @@ button:disabled {
 
 pre {
   margin: 0;
-  min-height: 340px;
-  max-height: 520px;
+  min-height: 420px;
+  max-height: 620px;
   overflow: auto;
   padding: 12px;
   white-space: pre-wrap;
@@ -225,6 +296,112 @@ pre {
   font-family: "IBM Plex Mono", "Consolas", monospace;
   line-height: 1.45;
   font-size: 13px;
+}
+
+.tool-timeline {
+  min-height: 420px;
+  max-height: 620px;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.empty-state {
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.tool-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fbfcfe;
+}
+
+.tool-card.running {
+  border-color: #fdba74;
+  box-shadow: inset 0 0 0 1px rgba(251, 146, 60, 0.15);
+}
+
+.tool-card.completed,
+.tool-card.result {
+  border-color: #86efac;
+  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.12);
+}
+
+.tool-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tool-status {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.tool-status.running {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.tool-status.completed,
+.tool-status.result {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.tool-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.tool-subtitle {
+  display: inline-block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.tool-args pre {
+  min-height: auto;
+  max-height: 180px;
+  padding: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.tool-result {
+  margin-top: 8px;
+}
+
+.tool-result p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+@media (max-width: 1320px) {
+  .dual-track-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 1200px) {

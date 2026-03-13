@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OpenAI-Compatible vLLM Gateway - A/B Comparison</title>
-    <link rel="stylesheet" href="/static/styles.css?v=ab2" />
+    <title>OpenAI-Compatible vLLM Gateway - Tool + Text Streaming Demo</title>
+    <link rel="stylesheet" href="/static/styles.css?v=toolstream1" />
   </head>
   <body>
     <main class="container">
       <section class="hero">
         <h1>OpenAI-Compatible vLLM Gateway</h1>
-        <p>A/B Comparison: Baseline (port 8001) vs TriAttention (port 8002). Same request, side-by-side streaming.</p>
+        <p>Baseline vs TriAttention with a dual-track session view: assistant text streaming plus tool calling timeline.</p>
       </section>
 
       <section class="controls">
@@ -48,13 +48,13 @@
       </section>
 
       <div class="comparison-grid">
-        <!-- Baseline Panel -->
         <div class="backend-panel baseline-panel">
           <h2 class="backend-header baseline-header">Baseline</h2>
 
           <section class="metrics-grid">
             <article class="metric-card" id="baselineGatewayMetrics">
               <h2>Gateway Stream Metrics</h2>
+              <p>Session: <strong data-field="session">-</strong></p>
               <p>Request: <strong data-field="request">-</strong></p>
               <p>TTFT: <strong data-field="ttft">-</strong> ms</p>
               <p>Tokens/s: <strong data-field="tps">-</strong></p>
@@ -75,23 +75,41 @@
             </article>
           </section>
 
-          <section class="panels">
+          <section class="session-summary">
+            <div class="session-row">
+              <span class="session-label">Active Session</span>
+              <strong id="baselineSessionLabel">-</strong>
+            </div>
+            <div class="session-row">
+              <span class="session-label">Phase</span>
+              <strong id="baselinePhaseBadge" class="phase-badge idle">idle</strong>
+            </div>
+          </section>
+
+          <section class="panels dual-track-grid">
             <article class="panel">
               <header>
-                <h3>Baseline Streaming Output</h3>
+                <h3>Assistant Stream</h3>
               </header>
               <pre id="baselineOutput"></pre>
+            </article>
+
+            <article class="panel">
+              <header>
+                <h3>Tool Timeline</h3>
+              </header>
+              <div id="baselineTools" class="tool-timeline empty-state">No tool activity yet.</div>
             </article>
           </section>
         </div>
 
-        <!-- TriAttention Panel -->
         <div class="backend-panel triattention-panel">
           <h2 class="backend-header triattention-header">TriAttention</h2>
 
           <section class="metrics-grid">
             <article class="metric-card" id="triattentionGatewayMetrics">
               <h2>Gateway Stream Metrics</h2>
+              <p>Session: <strong data-field="session">-</strong></p>
               <p>Request: <strong data-field="request">-</strong></p>
               <p>TTFT: <strong data-field="ttft">-</strong> ms</p>
               <p>Tokens/s: <strong data-field="tps">-</strong></p>
@@ -112,18 +130,36 @@
             </article>
           </section>
 
-          <section class="panels">
+          <section class="session-summary">
+            <div class="session-row">
+              <span class="session-label">Active Session</span>
+              <strong id="triattentionSessionLabel">-</strong>
+            </div>
+            <div class="session-row">
+              <span class="session-label">Phase</span>
+              <strong id="triattentionPhaseBadge" class="phase-badge idle">idle</strong>
+            </div>
+          </section>
+
+          <section class="panels dual-track-grid">
             <article class="panel">
               <header>
-                <h3>TriAttention Streaming Output</h3>
+                <h3>Assistant Stream</h3>
               </header>
               <pre id="triattentionOutput"></pre>
+            </article>
+
+            <article class="panel">
+              <header>
+                <h3>Tool Timeline</h3>
+              </header>
+              <div id="triattentionTools" class="tool-timeline empty-state">No tool activity yet.</div>
             </article>
           </section>
         </div>
       </div>
     </main>
 
-    <script src="/static/app.js?v=ab2"></script>
+    <script src="/static/app.js?v=toolstream1"></script>
   </body>
 </html>
