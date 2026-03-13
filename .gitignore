@@ -103,6 +103,10 @@ R-KV/vLLM/weian_script/
 !demo/vllm/
 !demo/vllm/**
 
+# demo runtime local artifacts
+demo/vllm/logs/
+demo/vllm/__pycache__/
+
 # Local debug / temporary investigation artifacts
 debug/
 output_multi/

@@ -5,7 +5,8 @@ set -euo pipefail
 # This does NOT start vLLM/gateway; it only sends one long prompt.
 
 DEMO_BASE_URL="${DEMO_BASE_URL:-http://127.0.0.1:8125}"
-DATASET_PATH="${DATASET_PATH:-/tmp/tri_diag/openclaw_like_dataset.jsonl}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DATASET_PATH="${DATASET_PATH:-${ROOT_DIR}/demo/openclaw-demo/fixtures/openclaw_like_dataset.jsonl}"
 MAX_TOKENS="${MAX_TOKENS:-4000}"
 OUTPUT_JSON="${OUTPUT_JSON:-/tmp/demo32b_openclaw_gateway_completion_check.json}"
 

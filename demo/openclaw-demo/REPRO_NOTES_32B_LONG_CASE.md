@@ -2,6 +2,10 @@
 
 This note documents the exact scripts used to reproduce the recent 32B long-context checks.
 
+The long-case dataset is now versioned in-repo:
+
+- `demo/openclaw-demo/fixtures/openclaw_like_dataset.jsonl`
+
 ## 1) Known-good benchmark script (32B speaks normal language)
 
 Script:
@@ -12,7 +16,7 @@ Default setup:
 
 - Model: `JunHowie/Qwen3-32B-GPTQ-Int4` local snapshot
 - Stats: `demo/openclaw-demo/stats/qwen3_32b_int4_speckv_stats.pt`
-- Dataset: `/tmp/tri_diag/openclaw_like_dataset.jsonl`
+- Dataset: `demo/openclaw-demo/fixtures/openclaw_like_dataset.jsonl`
 - `kv_budget=12000`
 - `max_length=12600`
 
@@ -51,7 +55,22 @@ Expected output summary includes:
 
 The script also prints output head/tail for quick manual inspection.
 
-## 3) If teammate says "budget=14k still repeats"
+## 3) Current status snapshot (2026-03-13)
+
+Observed on this machine:
+
+1. **Benchmark path** (`run_32b_openclaw_like_benchmark.sh`, budget=12k):
+   - readable output ("speaks normal language")
+   - no obvious long-tail gibberish repetition
+2. **Demo path** (`/v1/completions` through gateway):
+   - quality depends on pressure settings (`kv_budget`, generated length)
+   - under more aggressive settings, long-tail repetition can still appear
+
+Important: benchmark and demo are not identical pipelines.
+The benchmark is a controlled one-shot runner path; demo is the online proxy/OpenClaw path.
+So "benchmark good" does not automatically imply "every demo setting good".
+
+## 4) If teammate says "budget=14k still repeats"
 
 Please verify these first:
 

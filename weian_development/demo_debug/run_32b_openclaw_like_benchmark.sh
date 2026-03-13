@@ -15,7 +15,7 @@ RUNNER="${ROOT_DIR}/TriAttention_vLLM/evaluation/runner/vllm_triattention_runtim
 CUDA_DEVICE="${CUDA_DEVICE:-0}"
 MODEL_PATH="${MODEL_PATH:-/data/rbg/users/weian/env/huggingface/hub/models--JunHowie--Qwen3-32B-GPTQ-Int4/snapshots/275d13ed8617787bde259624a8ab2f5527266465}"
 STATS_PATH="${STATS_PATH:-${ROOT_DIR}/demo/openclaw-demo/stats/qwen3_32b_int4_speckv_stats.pt}"
-DATASET_PATH="${DATASET_PATH:-/tmp/tri_diag/openclaw_like_dataset.jsonl}"
+DATASET_PATH="${DATASET_PATH:-${ROOT_DIR}/demo/openclaw-demo/fixtures/openclaw_like_dataset.jsonl}"
 OUTPUT_DIR="${OUTPUT_DIR:-/tmp/tri_diag/$(date +%Y%m%d_%H%M%S)_32b_openclaw_like_tri12k_out}"
 
 KV_BUDGET="${KV_BUDGET:-12000}"
