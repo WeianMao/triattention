@@ -1,8 +1,31 @@
 # Next Stage Execution TODO
 
-Updated: 2026-03-02
+Updated: 2026-03-15
 Status: Active
 Owner: Codex + Weian
+
+## 0) Current Phase Snapshot (2026-03-15)
+
+1. Qwen3 / Qwen3-Coder support and long-prefill trigger path are already in place.
+2. A new milestone has been reached:
+   - HF-side isolated prefill-compression probe supports the conclusion that the
+     algorithm itself is not the main suspect.
+   - Current evidence points more strongly to `TriAttention_vLLM` runtime
+     integration / compatibility issues.
+3. Current repair direction:
+   - Stop treating "old path patching" as the main solution strategy.
+   - Prioritize making the formal vLLM runtime path compatible enough to test the
+     real compressed-output quality.
+4. Latest status docs:
+   - `TriAttention_vLLM/docs/backend/reference/MILESTONE_HF_PREFILL_COMPRESSION_PROBE_2026-03-13.md`
+   - `TriAttention_vLLM/docs/backend/reference/VLLM_PREFILL_COMPRESSION_FINDINGS_2026-03-14.md`
+   - `TriAttention_vLLM/docs/backend/reference/VLLM_FORMAL_PATH_COMPAT_STATUS_2026-03-15.md`
+5. New runtime milestone:
+   - `formal path + sync scheduling` now produces normal readable output on the
+     long-prefill compression probe.
+   - `formal path + async scheduling` still degrades.
+   - Remaining main repair target has narrowed to the async scheduling / async
+     state-handoff path.
 
 ## 1) Goal (What must be achieved)
 
@@ -47,6 +70,9 @@ Owner: Codex + Weian
 
 ## 6) Active TODO Checklist
 
+0. [ ] S1 - Long-output stability sanity check (not for branch-divergence judgment):
+   explicitly set `top_k=50` on vLLM path first (and HF path when needed) to align
+   sampling behavior with HF `generate` defaults, then re-check repetition onset position.
 1. [x] A1 - Audit current runtime/model assumptions that may be Qwen2.5-specific.
 2. [x] A2 - Implement Qwen3/Qwen3-Coder compatibility changes in runtime path.
 3. [x] A3 - Add/adjust tests for compatibility and no-regression (Qwen2.5).

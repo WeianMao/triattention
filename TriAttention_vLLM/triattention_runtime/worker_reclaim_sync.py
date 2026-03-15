@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import logging
 from typing import Any
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+_DEBUG_DISABLE_LOGGED = False
 
 
 def apply_worker_block_reclaim_events(
@@ -23,6 +25,18 @@ def apply_worker_block_reclaim_events(
     counters so that subsequent ``append_row()`` calls start from the correct
     offset and don't overflow the max-blocks-per-request limit.
     """
+    global _DEBUG_DISABLE_LOGGED
+    if os.environ.get("TRIATTN_DEBUG_DISABLE_WORKER_RECLAIM_SYNC", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        if not _DEBUG_DISABLE_LOGGED:
+            logger.info("TriAttention worker reclaim sync disabled by debug env")
+            _DEBUG_DISABLE_LOGGED = True
+        return
+
     if not isinstance(events, list) or not events:
         return
 
@@ -30,6 +44,12 @@ def apply_worker_block_reclaim_events(
     input_batch = getattr(base_runner, "input_batch", None)
     block_table_obj = getattr(input_batch, "block_table", None) if input_batch else None
     if block_table_obj is None:
+        if getattr(base_runner, "block_tables", None) is not None:
+            # Formal V2 runner manages block tables directly on base_runner
+            # rather than on input_batch. In that path, hook-side compaction
+            # already updates the canonical tables, so there is nothing for the
+            # old V1 reclaim-sync helper to do here.
+            return
         logger.warning(
             "TriAttention worker reclaim: block table not found. "
             "input_batch=%s block_table=%s",

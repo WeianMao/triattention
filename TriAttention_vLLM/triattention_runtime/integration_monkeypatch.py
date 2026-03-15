@@ -6,6 +6,7 @@ injecting the minimum TriAttention hooks needed for current runtime behavior.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Callable
 
 from vllm.logger import init_logger
@@ -30,6 +31,38 @@ _ORIG_SCHED_UPDATE_FROM_OUTPUT: Callable[..., Any] | None = None
 _ORIG_WORKER_INIT_DEVICE: Callable[..., Any] | None = None
 _ORIG_WORKER_EXECUTE_MODEL: Callable[..., Any] | None = None
 _ORIG_KVCACHE_ALLOCATE_SLOTS: Callable[..., Any] | None = None
+
+
+def _maybe_rewrite_v2_output_req_map(scheduler_output: Any, model_runner_output: Any) -> None:
+    if os.environ.get("TRIATTN_DEBUG_V2_REWRITE_OUTPUT_REQ_MAP", "0") != "1":
+        return
+    req_map = getattr(model_runner_output, "req_id_to_index", None)
+    if not isinstance(req_map, dict):
+        return
+    scheduled = getattr(scheduler_output, "num_scheduled_tokens", None)
+    if not isinstance(scheduled, dict) or not scheduled:
+        return
+    scheduled_req_ids = sorted(scheduled.keys(), key=lambda k: scheduled[k])
+    if len(scheduled_req_ids) > len(req_map):
+        return
+    output_req_ids = list(req_map.keys())
+    if not output_req_ids:
+        return
+    if any(req_id in req_map for req_id in scheduled_req_ids):
+        return
+    rewritten = {
+        req_id: idx for idx, req_id in enumerate(scheduled_req_ids)
+    }
+    setattr(model_runner_output, "req_id_to_index", rewritten)
+    try:
+        setattr(model_runner_output, "req_ids", scheduled_req_ids)
+    except Exception:
+        pass
+    logger.info(
+        "TriAttention debug rewrote V2 output req map: scheduled_req_ids=%s original_output_req_ids_head=%s",
+        scheduled_req_ids,
+        output_req_ids[: min(4, len(output_req_ids))],
+    )
 
 
 def _refresh_scheduler_stats_kv_usage(outputs: Any, kv_usage: float) -> None:
@@ -98,7 +131,31 @@ def _patched_scheduler_schedule(self):
 
 def _patched_scheduler_update_from_output(self, scheduler_output, model_runner_output):
     assert _ORIG_SCHED_UPDATE_FROM_OUTPUT is not None
-    outputs = _ORIG_SCHED_UPDATE_FROM_OUTPUT(self, scheduler_output, model_runner_output)
+    _maybe_rewrite_v2_output_req_map(scheduler_output, model_runner_output)
+    try:
+        outputs = _ORIG_SCHED_UPDATE_FROM_OUTPUT(self, scheduler_output, model_runner_output)
+    except KeyError:
+        if os.environ.get("TRIATTN_DEBUG_LOG_UPDATE_FROM_OUTPUT_KEYS", "0") == "1":
+            try:
+                scheduled_req_ids = list(getattr(scheduler_output, "num_scheduled_tokens", {}).keys())
+            except Exception:
+                scheduled_req_ids = []
+            try:
+                output_req_map = getattr(model_runner_output, "req_id_to_index", None)
+                output_req_ids = list(output_req_map.keys()) if isinstance(output_req_map, dict) else []
+            except Exception:
+                output_req_ids = []
+            try:
+                raw_req_ids = list(getattr(model_runner_output, "req_ids", []) or [])
+            except Exception:
+                raw_req_ids = []
+            logger.error(
+                "TriAttention debug update_from_output key mismatch: scheduled_req_ids=%s output_req_ids=%s raw_req_ids=%s",
+                scheduled_req_ids,
+                output_req_ids,
+                raw_req_ids,
+            )
+        raise
 
     cfg = getattr(self, "triattention_config", None)
     if cfg is None:

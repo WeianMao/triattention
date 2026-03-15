@@ -12,8 +12,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterator
 
+from .debug_trace import trace_event
 from .effective_overrides import build_effective_sparse_overrides
 from .request_key_compat import get_scheduled_token_items
+from .runner_struct_compat import resolve_req_id_to_index
 from .input_patch_backend import (
     activate_effective_sparse_overrides,
     clear_effective_overrides,
@@ -62,16 +64,31 @@ def prepare_effective_input_overrides(
     state_store: Any,
     scheduler_output: Any,
 ) -> EffectiveInputOverrides:
+    req_states = getattr(base_runner, "req_states", None)
+    requests = getattr(base_runner, "requests", None)
+    req_id_to_index, req_index_source = resolve_req_id_to_index(base_runner)
+    trace_event(
+        "prepare_effective_input_overrides_context",
+        req_states_present=bool(req_states is not None),
+        requests_is_dict=bool(isinstance(requests, dict)),
+        req_id_to_index_present=bool(isinstance(req_id_to_index, dict)),
+        req_index_source=req_index_source,
+    )
     seq_base_map, pos_delta_map, single_seq_base, single_pos_delta = build_effective_sparse_overrides(
         base_runner=base_runner,
         state_store=state_store,
         scheduler_output=scheduler_output,
         compression_events=None,
     )
+    trace_event(
+        "prepare_effective_input_overrides",
+        seq_base_count=len(seq_base_map or {}),
+        pos_delta_count=len(pos_delta_map or {}),
+        single_seq_base=(int(single_seq_base) if isinstance(single_seq_base, int) else None),
+        single_pos_delta=int(single_pos_delta),
+    )
     expected_req_row_indices: tuple[int, ...] | None = None
     expected_query_lens: tuple[int, ...] | None = None
-    req_states = getattr(base_runner, "req_states", None)
-    req_id_to_index = getattr(req_states, "req_id_to_index", None) if req_states is not None else None
     scheduled_items = get_scheduled_token_items(scheduler_output)
     if isinstance(req_id_to_index, dict):
         row_indices: list[int] = []

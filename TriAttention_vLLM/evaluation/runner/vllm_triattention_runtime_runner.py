@@ -536,6 +536,8 @@ def setup_vllm_engine(args: argparse.Namespace):
         max_model_len=max_model_len,
         enforce_eager=bool(args.enforce_eager),
     )
+    if os.environ.get("TRIATTN_DEBUG_FORCE_SYNC_SCHED", "0") == "1":
+        llm_kwargs["async_scheduling"] = False
     if bool(getattr(args, "prefill_auto_chunk", False)):
         chunk_threshold = int(getattr(args, "prefill_chunk_threshold", 0))
         chunk_size = int(getattr(args, "prefill_chunk_size", 0))

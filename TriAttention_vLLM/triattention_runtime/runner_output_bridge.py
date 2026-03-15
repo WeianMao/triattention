@@ -12,6 +12,7 @@ from typing import Any
 
 from .input_adapter import active_effective_input_overrides, prepare_effective_input_overrides
 from .input_patch_backend import assert_effective_overrides_consumed
+from .runner_struct_compat import debug_v1_override_path_enabled
 
 
 def execute_base_model_with_effective_overrides(
@@ -74,7 +75,7 @@ def execute_base_model_with_effective_overrides(
         )
         if perf_enabled:
             t3 = time.perf_counter()
-        if getattr(base_runner, "req_states", None) is not None:
+        if getattr(base_runner, "req_states", None) is not None or debug_v1_override_path_enabled():
             assert_effective_overrides_consumed()
         if perf_enabled:
             perf_out["override_prep_ms"] = (t1 - t0) * 1000.0

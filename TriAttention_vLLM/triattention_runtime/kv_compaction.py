@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Iterable
 
 import torch
@@ -18,6 +19,10 @@ _KV_LAYOUT_AXIS_HINTS: dict[
     ],
     int,  # kv axis (0 or 1)
 ] = {}
+
+
+def _debug_validate_compaction_content() -> bool:
+    return os.environ.get("TRIATTN_DEBUG_VALIDATE_COMPACTION_CONTENT", "0") == "1"
 
 
 def _kv_layout_hint_key(kv_cache: torch.Tensor) -> tuple[int, int, tuple[int, ...], tuple[int, ...], str]:
@@ -433,6 +438,23 @@ def compact_request_kv_in_place(
     key_cache[dst_blocks, dst_off] = gathered_keys
     value_cache[dst_blocks, dst_off] = gathered_values
 
+    if _debug_validate_compaction_content() and keep_count > 0:
+        prefix_blocks, prefix_off = _resolve_token_slots_contiguous_range(
+            block_ids=block_ids,
+            block_size=block_size,
+            start_token=0,
+            num_tokens=keep_count,
+            device=device,
+        )
+        actual_keys = key_cache[prefix_blocks, prefix_off]
+        actual_values = value_cache[prefix_blocks, prefix_off]
+        expected_keys = gathered_keys[:keep_count]
+        expected_values = gathered_values[:keep_count]
+        if not torch.equal(actual_keys, expected_keys):
+            raise RuntimeError("TRIATTN_DEBUG_COMPACTION_KEY_MISMATCH:shared_prefix_content_mismatch")
+        if not torch.equal(actual_values, expected_values):
+            raise RuntimeError("TRIATTN_DEBUG_COMPACTION_VALUE_MISMATCH:shared_prefix_content_mismatch")
+
     return keep_count
 
 
@@ -522,6 +544,23 @@ def compact_request_kv_in_place_per_head(
         )
         key_cache[dst_blocks, dst_off] = gathered_keys.permute(1, 0, 2).contiguous()
         value_cache[dst_blocks, dst_off] = gathered_values.permute(1, 0, 2).contiguous()
+
+        if _debug_validate_compaction_content() and keep_count > 0:
+            prefix_tokens = torch.arange(keep_count, device=device, dtype=torch.long)
+            prefix_blocks, prefix_off = _resolve_token_slots(
+                block_ids=block_ids,
+                block_size=block_size,
+                token_indices=prefix_tokens,
+                device=device,
+            )
+            actual_keys = key_cache[prefix_blocks, prefix_off]
+            actual_values = value_cache[prefix_blocks, prefix_off]
+            expected_keys = gathered_keys[:, :keep_count, :].permute(1, 0, 2).contiguous()
+            expected_values = gathered_values[:, :keep_count, :].permute(1, 0, 2).contiguous()
+            if not torch.equal(actual_keys, expected_keys):
+                raise RuntimeError("TRIATTN_DEBUG_COMPACTION_KEY_MISMATCH:per_head_prefix_content_mismatch")
+            if not torch.equal(actual_values, expected_values):
+                raise RuntimeError("TRIATTN_DEBUG_COMPACTION_VALUE_MISMATCH:per_head_prefix_content_mismatch")
     else:
         src_tokens, dst_tokens_flat, head_idx = _build_fill_hole_placement_per_head(
             keep_tensor=keep_tensor,
@@ -548,6 +587,14 @@ def compact_request_kv_in_place_per_head(
         gathered_values = value_cache[src_blocks, src_off, head_idx].clone()
         key_cache[dst_blocks, dst_off, head_idx] = gathered_keys
         value_cache[dst_blocks, dst_off, head_idx] = gathered_values
+
+        if _debug_validate_compaction_content() and keep_count > 0:
+            actual_keys = key_cache[dst_blocks, dst_off, head_idx]
+            actual_values = value_cache[dst_blocks, dst_off, head_idx]
+            if not torch.equal(actual_keys, gathered_keys):
+                raise RuntimeError("TRIATTN_DEBUG_COMPACTION_KEY_MISMATCH:per_head_fill_hole_content_mismatch")
+            if not torch.equal(actual_values, gathered_values):
+                raise RuntimeError("TRIATTN_DEBUG_COMPACTION_VALUE_MISMATCH:per_head_fill_hole_content_mismatch")
 
     return keep_count
 

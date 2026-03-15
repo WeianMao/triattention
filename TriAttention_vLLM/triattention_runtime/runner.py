@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any
 
 from .config import TriAttentionRuntimeConfig
+from .debug_trace import trace_event
 from .executor import CompressionExecutor, RunnerHookCompressionExecutor
 from .input_patch_backend import install_runtime_input_patch
 from .request_key_compat import get_scheduled_token_items
@@ -214,7 +216,10 @@ class TriAttentionModelRunner:
             return
         # Unit tests may instantiate TriAttentionModelRunner with a lightweight fake
         # base runner that does not expose vLLM GPU input-prep internals.
-        if getattr(self._base_runner, "req_states", None) is None:
+        if (
+            getattr(self._base_runner, "req_states", None) is None
+            and os.environ.get("TRIATTN_DEBUG_ENABLE_V1_OVERRIDE_PATH", "0") != "1"
+        ):
             return
         if self._runtime_input_patch_installed:
             return
@@ -249,6 +254,12 @@ class TriAttentionModelRunner:
         self._patch_scheduler_output_for_compressed_reqs(scheduler_output)
         t_reclaim_ms = (time.perf_counter() - t0) * 1000.0 if perf_enabled else 0.0
         need_effective_overrides = self._needs_effective_input_overrides(scheduler_output)
+        trace_event(
+            "runner_need_effective_overrides",
+            need_effective_overrides=bool(need_effective_overrides),
+            pending_events=len(self._pending_compression_events),
+            active_compressed=bool(getattr(self.state_store, "has_active_compressed_requests", lambda: False)()),
+        )
         self._ensure_runtime_input_patch_if_needed(need_effective_overrides)
         bridge_perf: dict[str, float] | None = {} if perf_enabled else None
         output = execute_base_model_with_effective_overrides(

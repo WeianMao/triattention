@@ -308,6 +308,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.6)
     parser.add_argument("--top_p", type=float, default=0.95)
     parser.add_argument(
+        "--top_k",
+        "--top-k",
+        dest="top_k",
+        type=int,
+        default=None,
+        help="Sampling top-k. None keeps HF/default behavior (typically 50). "
+             "Set <=0 to disable top-k (aligns with vLLM top_k=-1).",
+    )
+    parser.add_argument(
         "--sparse_stats_path",
         type=str,
         default=None,
@@ -812,6 +821,11 @@ def main(args: argparse.Namespace) -> None:
                     do_sample=True,
                     temperature=args.temperature,
                     top_p=args.top_p,
+                    **(
+                        {"top_k": args.top_k if args.top_k > 0 else 0}
+                        if args.top_k is not None
+                        else {}
+                    ),
                     num_beams=1,
                     num_return_sequences=1,
                 )

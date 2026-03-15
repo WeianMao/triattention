@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .hook_group_pipeline import normalize_mutable_block_ids_by_group
+from .runner_struct_compat import resolve_request_state_view
 
 
 @dataclass(frozen=True)
@@ -20,10 +21,7 @@ class HookCompactionInputs:
 
 
 def resolve_hook_request_context(*, base_runner: Any, req_id: str) -> HookRequestContext | dict[str, Any]:
-    requests = getattr(base_runner, "requests", None)
-    if not isinstance(requests, dict):
-        return {"applied": False, "reason": "missing_requests"}
-    req_state = requests.get(req_id)
+    req_state, _source = resolve_request_state_view(base_runner, req_id)
     if req_state is None:
         return {"applied": False, "reason": "req_state_not_found"}
     state_store = getattr(base_runner, "_triattention_state_store", None)
