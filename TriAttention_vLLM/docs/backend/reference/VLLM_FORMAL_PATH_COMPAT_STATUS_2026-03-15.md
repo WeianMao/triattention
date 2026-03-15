@@ -258,5 +258,28 @@ One additional async-only hypothesis was tested and rejected:
 This matters because it narrows the remaining async issue further:
 
 1. the problem is not just "event is attached too early"
+
+### 11.6 Async repair closed on isolated branch
+
+Later on the isolated repair branch, the remaining async issue was repaired.
+
+High-level reading:
+
+1. the real issue was not "async sample output arrives too late"
+2. the real issue was that async batch-queue lookahead could schedule newer work
+   before the compression batch had been absorbed by the scheduler
+3. the repair was to introduce a queue barrier only for compression-boundary
+   batches
+4. ordinary async decode remains unchanged
+
+Validated result:
+
+1. formal path + async scheduling + compression now completes cleanly
+2. output quality matches the sync control on the same probe case
+3. repaired async remains faster than full sync in the same rough workload
+
+Detailed record:
+
+1. `TriAttention_vLLM/docs/backend/reference/VLLM_ASYNC_BOUNDARY_FIX_2026-03-15.md`
 2. the scheduler still needs timely visibility of compression state
 3. the remaining bug is more subtle than a simple event-retiming change

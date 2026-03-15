@@ -2,8 +2,10 @@ from types import SimpleNamespace
 
 import triattention_runtime.integration_monkeypatch as monkeypatch_mod
 from triattention_runtime.integration_monkeypatch import (
+    _batch_queue_has_pending_compression_boundary,
     _patched_kv_cache_allocate_slots,
     _refresh_scheduler_stats_kv_usage,
+    _scheduler_output_has_compression_boundary,
 )
 
 
@@ -127,3 +129,36 @@ def test_patched_kv_cache_allocate_slots_accepts_positional_extra_args(monkeypat
     assert observed["num_new_computed_tokens"] == 7
     assert observed["num_lookahead_tokens"] == 2
     assert req.num_computed_tokens == 120
+
+
+def test_scheduler_output_has_compression_boundary_detects_should_compress_signal():
+    signal = SimpleNamespace(should_compress=True)
+    scheduler_output = SimpleNamespace(triattention_signals={"r1": signal})
+
+    assert _scheduler_output_has_compression_boundary(scheduler_output) is True
+
+
+def test_scheduler_output_has_compression_boundary_ignores_empty_or_falsey_signals():
+    scheduler_output = SimpleNamespace(
+        triattention_signals={"r1": SimpleNamespace(should_compress=False)}
+    )
+    assert _scheduler_output_has_compression_boundary(scheduler_output) is False
+    assert _scheduler_output_has_compression_boundary(SimpleNamespace()) is False
+
+
+def test_batch_queue_has_pending_compression_boundary_detects_marked_scheduler_output():
+    batch_queue = [
+        (object(), SimpleNamespace(_triattention_force_boundary_sync=True), object()),
+        (object(), SimpleNamespace(), object()),
+    ]
+
+    assert _batch_queue_has_pending_compression_boundary(batch_queue) is True
+
+
+def test_batch_queue_has_pending_compression_boundary_ignores_unmarked_entries():
+    batch_queue = [
+        (object(), SimpleNamespace(), object()),
+        (object(), SimpleNamespace(_triattention_force_boundary_sync=False), object()),
+    ]
+
+    assert _batch_queue_has_pending_compression_boundary(batch_queue) is False

@@ -99,7 +99,7 @@ def test_runner_marks_compressed_when_hook_applies():
     assert state.last_trigger_reason == "applied"
 
 
-def test_runner_attaches_events_on_sample_tokens():
+def test_runner_attaches_events_to_scheduler_output_when_execute_returns_none():
     class BaseRunner:
         def triattention_apply_compression(self, req_id, signal, scheduler_output):
             return {"applied": False, "reason": "plan_only", "cache_len_after": 16}
@@ -123,13 +123,15 @@ def test_runner_attaches_events_on_sample_tokens():
         prefill_len=8,
     )
 
-    runner.execute_model(_scheduler_output(signal))
+    scheduler_output = _scheduler_output(signal)
+    runner.execute_model(scheduler_output)
     out = runner.sample_tokens(grammar_output=None)
-    events = getattr(out, "triattention_compression_events")
+    events = getattr(scheduler_output, "triattention_compression_events")
     assert len(events) == 1
     assert events[0]["req_id"] == "r3"
     assert events[0]["status"] == "skipped"
     assert events[0]["reason"] == "plan_only"
+    assert getattr(out, "triattention_compression_events") == []
 
 
 def test_runner_batch_signals_keep_request_isolation():

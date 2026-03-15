@@ -258,6 +258,35 @@ They support all of the following:
 2. the formal path itself is not generically broken
 3. compression on the formal path can work correctly
 4. the remaining failure is strongly tied to async scheduling / async state
+
+## 9. Final repair result
+
+The async corruption issue has now been repaired on an isolated fix branch.
+
+Final mechanism statement:
+
+1. async batch-queue lookahead was allowed to run across a compression boundary
+2. that allowed a later batch to be scheduled from stale pre-compression state
+3. the correct repair point was the queue boundary itself, not a later
+   sample-output sync
+
+Final fix:
+
+1. detect a scheduled batch that may trigger compression
+2. mark it as a compression-boundary batch
+3. do not allow queue lookahead to pass that batch
+4. let scheduler absorb the compression event first
+5. then resume ordinary async scheduling
+
+Validated outcome:
+
+1. async compression run completes
+2. output quality matches sync control on the same long-prefill probe
+3. the repaired async path remains faster than the sync control
+
+Detailed evidence:
+
+1. `TriAttention_vLLM/docs/backend/reference/VLLM_ASYNC_BOUNDARY_FIX_2026-03-15.md`
    handoff
 
 This is the strongest direct narrowing achieved in the investigation.

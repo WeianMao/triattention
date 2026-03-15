@@ -1,4 +1,4 @@
-"""Monkey patch vLLM V1 scheduler/worker for TriAttention runtime integration.
+"""Monkey patch vLLM V1 scheduler/worker/engine for TriAttention runtime integration.
 
 This keeps vLLM class identities unchanged (native Scheduler/Worker) while
 injecting the minimum TriAttention hooks needed for current runtime behavior.
@@ -7,9 +7,11 @@ injecting the minimum TriAttention hooks needed for current runtime behavior.
 from __future__ import annotations
 
 import os
-from typing import Any, Callable
+from concurrent.futures import Future
+from typing import Any, Callable, cast
 
 from vllm.logger import init_logger
+from vllm.v1.outputs import ModelRunnerOutput
 
 from .config import TriAttentionRuntimeConfig
 from .effective_len_tracker import EffectiveCacheLenTracker
@@ -31,6 +33,7 @@ _ORIG_SCHED_UPDATE_FROM_OUTPUT: Callable[..., Any] | None = None
 _ORIG_WORKER_INIT_DEVICE: Callable[..., Any] | None = None
 _ORIG_WORKER_EXECUTE_MODEL: Callable[..., Any] | None = None
 _ORIG_KVCACHE_ALLOCATE_SLOTS: Callable[..., Any] | None = None
+_ORIG_ENGINE_CORE_STEP_WITH_BATCH_QUEUE: Callable[..., Any] | None = None
 
 
 def _maybe_rewrite_v2_output_req_map(scheduler_output: Any, model_runner_output: Any) -> None:
@@ -246,6 +249,120 @@ def _patched_kv_cache_allocate_slots(
         setattr(request, "num_computed_tokens", logical_num_computed)
 
 
+def _scheduler_output_has_compression_boundary(scheduler_output: Any) -> bool:
+    signals = getattr(scheduler_output, "triattention_signals", None)
+    if not isinstance(signals, dict) or not signals:
+        return False
+    return any(bool(getattr(sig, "should_compress", False)) for sig in signals.values())
+
+
+def _batch_queue_has_pending_compression_boundary(batch_queue: Any) -> bool:
+    if batch_queue is None:
+        return False
+    try:
+        items = list(batch_queue)
+    except Exception:
+        return False
+    for item in items:
+        if not isinstance(item, tuple) or len(item) < 2:
+            continue
+        scheduler_output = item[1]
+        if bool(getattr(scheduler_output, "_triattention_force_boundary_sync", False)):
+            return True
+    return False
+
+
+def _patched_engine_core_step_with_batch_queue(self):
+    """vLLM async step with a per-compression boundary queue barrier.
+
+    Normal async decode remains unchanged. The only special case is a batch that
+    is predicted to hit a TriAttention compression boundary in this step:
+
+    1. do not let the batch queue run ahead of that batch, and
+    2. drain the queued boundary batch before scheduling newer work.
+
+    This keeps the async speedup for ordinary decode while avoiding the exact
+    stale-state window that appears when a compression batch is still waiting in
+    the queue.
+    """
+    batch_queue = self.batch_queue
+    assert batch_queue is not None
+
+    model_executed = False
+    deferred_scheduler_output = None
+
+    boundary_pending = _batch_queue_has_pending_compression_boundary(batch_queue)
+    if self.scheduler.has_requests() and not boundary_pending:
+        scheduler_output = self.scheduler.schedule()
+        boundary_current = _scheduler_output_has_compression_boundary(scheduler_output)
+        if boundary_current:
+            setattr(scheduler_output, "_triattention_force_boundary_sync", True)
+            logger.info(
+                "TriAttention async boundary: delaying queue lookahead for compression batch"
+            )
+        exec_future = self.model_executor.execute_model(
+            scheduler_output, non_block=True
+        )
+        if not self.is_ec_producer:
+            model_executed = scheduler_output.total_num_scheduled_tokens > 0
+
+        if self.is_pooling_model or not model_executed:
+            future = cast(Future[ModelRunnerOutput], exec_future)
+        else:
+            if not scheduler_output.pending_structured_output_tokens:
+                grammar_output = self.scheduler.get_grammar_bitmask(
+                    scheduler_output
+                )
+                future = self.model_executor.sample_tokens(
+                    grammar_output, non_block=True
+                )
+            else:
+                deferred_scheduler_output = scheduler_output
+
+        if not deferred_scheduler_output:
+            batch_queue.appendleft((future, scheduler_output, exec_future))
+            if (
+                model_executed
+                and len(batch_queue) < self.batch_queue_size
+                and not batch_queue[-1][0].done()
+                and not boundary_current
+            ):
+                return None, True
+
+    elif not batch_queue:
+        return None, False
+
+    future, scheduler_output, exec_model_fut = batch_queue.pop()
+    with (
+        self.log_error_detail(scheduler_output),
+        self.log_iteration_details(scheduler_output),
+    ):
+        model_output = future.result()
+        if model_output is None:
+            exec_model_fut.result()
+            raise RuntimeError("unexpected error")
+
+    self._process_aborts_queue()
+    engine_core_outputs = self.scheduler.update_from_output(
+        scheduler_output, model_output
+    )
+
+    if deferred_scheduler_output:
+        if self.use_spec_decode:
+            draft_token_ids = self.model_executor.take_draft_token_ids()
+            assert draft_token_ids is not None
+            self.scheduler.update_draft_token_ids_in_output(
+                draft_token_ids, deferred_scheduler_output
+            )
+        grammar_output = self.scheduler.get_grammar_bitmask(
+            deferred_scheduler_output
+        )
+        future = self.model_executor.sample_tokens(grammar_output, non_block=True)
+        batch_queue.appendleft((future, deferred_scheduler_output, exec_future))
+
+    return engine_core_outputs, model_executed
+
+
 def install_vllm_integration_monkeypatches(
     *,
     patch_scheduler: bool = True,
@@ -253,7 +370,7 @@ def install_vllm_integration_monkeypatches(
 ) -> None:
     global _PATCHED, _ORIG_SCHED_INIT, _ORIG_SCHED_SCHEDULE, _ORIG_SCHED_UPDATE_FROM_OUTPUT
     global _ORIG_WORKER_INIT_DEVICE, _ORIG_WORKER_EXECUTE_MODEL
-    global _ORIG_KVCACHE_ALLOCATE_SLOTS
+    global _ORIG_KVCACHE_ALLOCATE_SLOTS, _ORIG_ENGINE_CORE_STEP_WITH_BATCH_QUEUE
     global _PATCHED_SCHEDULER_ACTIVE, _PATCHED_WORKER_ACTIVE
     if _PATCHED:
         _PATCHED_SCHEDULER_ACTIVE = _PATCHED_SCHEDULER_ACTIVE or bool(patch_scheduler)
@@ -262,8 +379,10 @@ def install_vllm_integration_monkeypatches(
 
     import vllm.v1.core.sched.scheduler as sched_mod
     import vllm.v1.core.kv_cache_manager as kv_cache_manager_mod
+    import vllm.v1.engine.core as engine_core_mod
     import vllm.v1.worker.gpu_worker as worker_mod
 
+    EngineCore = engine_core_mod.EngineCore
     Scheduler = sched_mod.Scheduler
     KVCacheManager = kv_cache_manager_mod.KVCacheManager
     Worker = worker_mod.Worker
@@ -289,6 +408,8 @@ def install_vllm_integration_monkeypatches(
         Scheduler._apply_compression_events = TriAttentionScheduler._apply_compression_events
         _ORIG_KVCACHE_ALLOCATE_SLOTS = KVCacheManager.allocate_slots
         KVCacheManager.allocate_slots = _patched_kv_cache_allocate_slots
+        _ORIG_ENGINE_CORE_STEP_WITH_BATCH_QUEUE = EngineCore.step_with_batch_queue
+        EngineCore.step_with_batch_queue = _patched_engine_core_step_with_batch_queue
 
     if patch_worker:
         _ORIG_WORKER_INIT_DEVICE = Worker.init_device

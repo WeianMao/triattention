@@ -23,9 +23,14 @@ Owner: Codex + Weian
 5. New runtime milestone:
    - `formal path + sync scheduling` now produces normal readable output on the
      long-prefill compression probe.
-   - `formal path + async scheduling` still degrades.
-   - Remaining main repair target has narrowed to the async scheduling / async
-     state-handoff path.
+   - `formal path + async scheduling` previously degraded, but is now repaired
+     on the isolated branch via a queue-boundary async fix.
+   - Current isolated-branch result:
+     repaired async quality matches sync control on the long-prefill probe while
+     retaining a real async speed advantage.
+6. Latest async-fix docs:
+   - `TriAttention_vLLM/docs/backend/reference/VLLM_ASYNC_ROOT_CAUSE_TRACE_2026-03-15.md`
+   - `TriAttention_vLLM/docs/backend/reference/VLLM_ASYNC_BOUNDARY_FIX_2026-03-15.md`
 
 ## 1) Goal (What must be achieved)
 
