@@ -1,0 +1,2 @@
+sparse_stats_path: "stats/coding_stats_2048.pt"   # modify it to absolute path if necessary
+run_tag: coding_stats_ablation

@@ -1,0 +1,22 @@
+# Experiment 001: Loss Function Sanity Check Configuration
+
+experiment:
+  name: "sanity_check"
+  description: "Verify loss function optimization behavior"
+  seed: 42
+
+model:
+  num_queries: 6000
+  num_keys: 6000
+  num_bins: 128
+
+training:
+  epochs: 1000
+  lr: 0.01
+  lambda_repel: 1.0
+  log_interval: 100
+
+output:
+  save_checkpoints: false
+  save_results: true
+  generate_figures: true

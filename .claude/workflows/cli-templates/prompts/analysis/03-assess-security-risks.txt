@@ -1,0 +1,29 @@
+Analyze security implementation and potential vulnerabilities.
+
+## CORE CHECKLIST ⚡
+□ Identify all data entry points and external system interfaces
+□ Provide file:line references for all potential vulnerabilities
+□ Classify risks by severity and type (e.g., OWASP Top 10)
+□ Apply RULES template requirements exactly as specified
+
+## REQUIRED ANALYSIS
+1. Identify authentication and authorization mechanisms
+2. Assess input validation and sanitization practices
+3. Review data encryption and secure storage methods
+4. Evaluate API security and access control patterns
+5. Document security risks and compliance considerations
+
+## OUTPUT REQUIREMENTS
+- Security vulnerability findings with file:line references
+- Authentication/authorization pattern documentation
+- Input validation examples and identified gaps
+- Encryption usage patterns and recommendations
+- Prioritized remediation plan based on risk level
+
+## VERIFICATION CHECKLIST ✓
+□ All CONTEXT files analyzed for security vulnerabilities
+□ Every finding is backed by a code reference (file:line)
+□ Both authentication and data handling are covered
+□ Recommendations include clear, actionable remediation steps
+
+Focus: Identifying security gaps and providing actionable remediation steps.

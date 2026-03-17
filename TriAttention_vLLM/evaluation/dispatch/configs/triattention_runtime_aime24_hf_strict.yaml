@@ -1,0 +1,56 @@
+# TriAttention Runtime HF-aligned sample8 config for AIME24.
+# Goal: keep runner/scheduler path as runtime, while matching HF baseline
+# generation/evaluation settings as closely as possible.
+
+experiment:
+  name: triattention_runtime_aime24_hf_strict
+  conda_env: trivllm
+  eval_conda_env: rkv
+  runner_path: TriAttention_vLLM/evaluation/runner/vllm_triattention_runtime_runner.py
+  log_dir: TriAttention_vLLM/evaluation/logs/triattention_runtime_aime24_hf_strict
+  method_output_dir: TriAttention_vLLM/evaluation/outputs/triattention_runtime_aime24_hf_strict
+  merged_dir_name: merged
+  gpus: auto
+  auto_gpu_fallback: [0, 1, 2, 3, 4, 5, 6, 7]
+  num_shards: 8
+  gpu_memory_threshold: 9000
+  env:
+    VLLM_PROCESS_NAME_PREFIX: "PD-L1_binder"
+  runner_args:
+    output_dir: TriAttention_vLLM/evaluation/outputs/triattention_runtime_aime24_hf_strict/shards
+    dataset_path: R-KV/HuggingFace/data/aime24.jsonl
+    model_path: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Qwen-7B
+    max_length: 32768
+    seed: 666
+    num_samples: 8
+    temperature: 0.6
+    top_p: 0.95
+    # HF Transformers baseline does not pass top_k explicitly; default is top_k=50.
+    # For HF-strict alignment we match that default.
+    top_k: 50
+    use_chat_template: false
+    chat_system_prompt: ""
+    load_dtype: bfloat16
+    kv_budget: 2048
+    divide_length: 128
+    score_chunk_max_tokens: 4096
+    window_size: 128
+    sparse_stats_path: R-KV/outputs/repository/sample8_fullkv_aime24_official_qwen/stats/deepseek_r1_qwen7b_plain_stats.pt
+    sparse_score_aggregation: mean
+    pruning_mode: per_layer
+    sparse_normalize_scores: false
+    include_prefill_in_budget: false
+    disable_mlr: false
+    disable_trig: false
+    disable_top_n_high_freq: 0
+    # HF SpeckV baseline keeps prefill pinned by default.
+    protect_prefill: true
+    enable_kv_usage_trigger: false
+    kv_usage_trigger: 0.98
+    kv_usage_release: 0.90
+    enable_experimental_kv_compaction: true
+    log_decisions: true
+    enforce_eager: false
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.9
+    disable_compression: false

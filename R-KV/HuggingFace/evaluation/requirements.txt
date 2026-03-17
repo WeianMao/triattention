@@ -1,0 +1,6 @@
+pebble
+latex2sympy2
+word2number
+timeout_decorator
+multiprocess
+datasets

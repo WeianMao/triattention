@@ -1,0 +1,127 @@
+Conduct comprehensive concept evaluation to assess feasibility, identify risks, and provide optimization recommendations.
+
+## CORE CHECKLIST ⚡
+□ Evaluate all 6 dimensions: Conceptual, Architectural, Technical, Resource, Risk, Dependency
+□ Provide quantified assessment scores (1-5 scale)
+□ Classify risks by severity (LOW/MEDIUM/HIGH/CRITICAL)
+□ Include specific, actionable recommendations
+□ Integrate session context and existing patterns
+
+## EVALUATION DIMENSIONS
+
+### 1. Conceptual Integrity
+- Design Coherence: Logical component connections
+- Requirement Completeness: All requirements identified
+- Scope Clarity: Defined and bounded scope
+- Success Criteria: Measurable metrics established
+
+### 2. Architectural Soundness
+- System Integration: Fit with existing architecture
+- Design Patterns: Appropriate pattern usage
+- Modularity: Maintainable structure
+- Scalability: Future requirement capacity
+
+### 3. Technical Feasibility
+- Implementation Complexity: Difficulty level assessment
+- Technology Maturity: Stable, supported technologies
+- Skill Requirements: Team expertise availability
+- Infrastructure Needs: Required changes/additions
+
+### 4. Resource Assessment
+- Development Time: Realistic estimation
+- Team Resources: Size and skill composition
+- Budget Impact: Financial implications
+- Opportunity Cost: Delayed initiatives
+
+### 5. Risk Identification
+- Technical Risks: Limitations, complexity, unknowns
+- Business Risks: Market timing, adoption, impact
+- Integration Risks: Compatibility challenges
+- Resource Risks: Availability, skills, timeline
+
+### 6. Dependency Analysis
+- External Dependencies: Third-party services/tools
+- Internal Dependencies: Systems, teams, resources
+- Temporal Dependencies: Sequence and timing
+- Critical Path: Essential blocking dependencies
+
+## ASSESSMENT METHODOLOGY
+
+**Scoring Scale** (1-5):
+- 5 - Excellent: Minimal risk, well-defined, highly feasible
+- 4 - Good: Low risk, mostly clear, feasible
+- 3 - Average: Moderate risk, needs clarification
+- 2 - Poor: High risk, major changes required
+- 1 - Critical: Very high risk, fundamental problems
+
+**Risk Levels**:
+- LOW: Minor issues, easily addressable
+- MEDIUM: Manageable challenges
+- HIGH: Significant concerns, major mitigation needed
+- CRITICAL: Fundamental viability threats
+
+**Optimization Priorities**:
+- CRITICAL: Must address before planning
+- IMPORTANT: Should address for optimal outcomes
+- OPTIONAL: Nice-to-have improvements
+
+## OUTPUT REQUIREMENTS
+
+### Evaluation Summary
+```markdown
+## Overall Assessment
+- Feasibility Score: X/5
+- Risk Level: LOW/MEDIUM/HIGH/CRITICAL
+- Recommendation: PROCEED/PROCEED_WITH_MODIFICATIONS/RECONSIDER/REJECT
+
+## Dimension Scores
+- Conceptual Integrity: X/5
+- Architectural Soundness: X/5
+- Technical Feasibility: X/5
+- Resource Assessment: X/5
+- Risk Profile: X/5
+- Dependency Complexity: X/5
+```
+
+### Detailed Analysis
+For each dimension:
+1. Assessment: Current state evaluation
+2. Strengths: What works well
+3. Concerns: Issues and risks
+4. Recommendations: Specific improvements
+
+### Risk Matrix
+| Risk Category | Level | Impact | Mitigation Strategy |
+|---------------|-------|--------|---------------------|
+| Technical     | HIGH  | Delays | Proof of concept    |
+| Resource      | MED   | Budget | Phased approach     |
+
+### Optimization Roadmap
+1. CRITICAL: [Issue] - [Recommendation] - [Impact]
+2. IMPORTANT: [Issue] - [Recommendation] - [Impact]
+3. OPTIONAL: [Issue] - [Recommendation] - [Impact]
+
+## CONTEXT INTEGRATION
+
+**Session Memory**: Reference current conversation, decisions, patterns from session history
+**Existing Patterns**: Identify similar implementations, evaluate success/failure, leverage proven approaches
+**Architectural Alignment**: Ensure consistency, consider evolution, apply standards
+**Business Context**: Strategic fit, user impact, competitive advantage, timeline alignment
+
+## PROJECT TYPE CONSIDERATIONS
+
+**Innovation Projects**: Higher risk tolerance, learning focus, phased approach
+**Critical Business**: Lower risk tolerance, reliability focus, comprehensive mitigation
+**Integration Projects**: Compatibility focus, minimal disruption, rollback strategies
+**Greenfield Projects**: Architectural innovation, scalability, technology standardization
+
+## VERIFICATION CHECKLIST ✓
+□ All 6 evaluation dimensions thoroughly assessed with scores
+□ Risk matrix completed with mitigation strategies
+□ Optimization recommendations prioritized (CRITICAL/IMPORTANT/OPTIONAL)
+□ Integration with existing systems evaluated
+□ Resource requirements and timeline implications identified
+□ Success criteria and validation metrics defined
+□ Next steps and decision points outlined
+
+Focus: Actionable insights to improve concept quality and reduce implementation risks.

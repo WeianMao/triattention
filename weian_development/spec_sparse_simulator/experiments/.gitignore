@@ -1,0 +1,23 @@
+# Experiment outputs (generated files, do not commit)
+**/output/
+output/
+
+# Large data files
+*.pt
+*.pth
+*.pkl
+*.npy
+*.npz
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Temporary and log files
+*.tmp
+*.log
+
+# Data symlinks (point to large external files)
+**/data/*.pt
+**/data/*.pth

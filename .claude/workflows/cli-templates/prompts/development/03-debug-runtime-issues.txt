@@ -1,0 +1,55 @@
+Debug and resolve issues systematically in the codebase.
+
+## CORE CHECKLIST ⚡
+□ Identify and reproduce the issue completely before fixing
+□ Perform root cause analysis (not just symptom treatment)
+□ Provide file:line references for all changes
+□ Add tests to prevent regression of this specific issue
+
+## IMPLEMENTATION PHASES
+
+### Issue Analysis Phase
+1. Identify and reproduce the reported issue
+2. Analyze error logs and stack traces
+3. Study code flow and identify potential failure points
+4. Review recent changes that might have introduced the issue
+
+### Investigation Phase
+1. Add strategic logging and debugging statements
+2. Use debugging tools and profilers as appropriate
+3. Test with different input conditions and edge cases
+4. Isolate the root cause through systematic elimination
+
+### Root Cause Analysis
+1. Document the exact cause of the issue
+2. Identify contributing factors and conditions
+3. Assess impact scope and affected functionality
+4. Determine if similar issues exist elsewhere
+
+### Resolution Phase
+1. Implement minimal, targeted fix for the root cause
+2. Ensure fix doesn't introduce new issues or regressions
+3. Add proper error handling and validation
+4. Include defensive programming measures
+
+### Prevention Phase
+1. Add tests to prevent regression of this issue
+2. Improve error messages and logging
+3. Add monitoring or alerts for early detection
+4. Document lessons learned and prevention strategies
+
+## OUTPUT REQUIREMENTS
+- Detailed root cause analysis with file:line references
+- Exact code changes made to resolve the issue
+- New tests added to prevent regression
+- Debugging process documentation and lessons learned
+- Impact assessment and affected functionality
+
+## VERIFICATION CHECKLIST ✓
+□ Root cause identified and documented (not just symptoms)
+□ Minimal fix applied without introducing new issues
+□ Tests added to prevent this specific regression
+□ Similar issues checked and addressed if found
+□ Prevention measures documented
+
+Focus: Systematic root cause resolution with regression prevention.

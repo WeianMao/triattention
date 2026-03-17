@@ -1,0 +1,53 @@
+Template for generating sessions-timeline.md
+
+## Purpose
+Create or update chronological timeline of workflow sessions with functional domain grouping.
+
+## File Location
+`.claude/skills/workflow-progress/sessions-timeline.md`
+
+## Update Strategy
+- **Incremental mode**: Append new session to timeline, keep existing content
+- **Full mode**: Regenerate entire timeline from all sessions
+
+## Structure
+
+```markdown
+# Workflow Sessions Timeline
+
+## Recent Sessions (Last 5)
+
+### {session_id} ({archived_date})
+**Description**: {description}
+**Tags**: {tag1}, {tag2}, {tag3}
+**Metrics**: {task_count} tasks, {success_rate}% success, {duration_hours} hours
+**Context Package**: [{session_id}/context-package.json](../../../.workflow/.archives/{session_id}/.process/context-package.json)
+
+**Key Outcomes**:
+- ✅ {success_item_1}
+- ✅ {success_item_2}
+- ⚠️ Watch: {watch_pattern}
+
+---
+
+## By Functional Domain
+
+### {Domain_Name} ({count} sessions)
+- {session_id_1} ({date}) - {one_line_description}
+- {session_id_2} ({date}) - {one_line_description}
+
+### {Domain_Name_2} ({count} sessions)
+...
+```
+
+## Data Sources
+- Session metadata: `.workflow/.archives/{session_id}/workflow-session.json`
+- Manifest entry: `.workflow/.archives/manifest.json`
+- Lessons: `manifest.json` -> `archives[].lessons`
+
+## Formatting Rules
+- Sort recent sessions by archived_at (newest first)
+- Group by functional domain using tags
+- Use relative paths for context package links
+- Use ✅ for successes, ⚠️ for watch patterns
+- Keep descriptions concise (one line)

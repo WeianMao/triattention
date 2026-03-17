@@ -1,0 +1,185 @@
+Template for generating tech stack SKILL.md index file
+
+## Purpose
+Create main SKILL package index with module references and loading recommendations.
+
+## File Location
+`.claude/skills/{tech_stack_name}/SKILL.md`
+
+## Template Structure
+
+```markdown
+---
+name: {TECH_STACK_NAME}
+description: {MAIN_TECH} development guidelines from industry standards (Exa research)
+version: 1.0.0
+generated: {ISO_TIMESTAMP}
+source: exa-research
+---
+# {TechStackTitle} SKILL Package
+
+## Overview
+
+{Brief 1-2 sentence description of the tech stack and purpose of this SKILL package}
+
+**Primary Technology**: {MAIN_TECH}
+{IF_COMPOSITE}**Frameworks**: {COMPONENT_LIST}{/IF_COMPOSITE}
+
+## Modular Documentation
+
+### Core Understanding (~8K tokens)
+- [Principles](./principles.md) - Core concepts and philosophies
+- [Patterns](./patterns.md) - Implementation patterns with examples
+
+### Practical Guidance (~7K tokens)
+- [Best Practices](./practices.md) - Do's, don'ts, anti-patterns
+- [Testing](./testing.md) - Testing strategies and frameworks
+
+### Configuration & Integration (~7K tokens)
+- [Configuration](./config.md) - Setup, tooling, configuration
+{IF_COMPOSITE}- [Frameworks](./frameworks.md) - Integration patterns{/IF_COMPOSITE}
+
+## Loading Recommendations
+
+### Quick Reference (~7K tokens)
+Load for quick consultation on core concepts:
+- principles.md
+- practices.md
+
+**Use When**: Need quick reminder of best practices or core principles
+
+### Implementation Focus (~8K tokens)
+Load for active development work:
+- patterns.md
+- config.md
+
+**Use When**: Writing code, setting up projects, implementing features
+
+### Complete Package (~22K tokens)
+Load all modules for comprehensive understanding:
+- All 5-6 modules
+
+**Use When**: Learning tech stack, architecture reviews, comprehensive reference
+
+## Usage
+
+**Load this SKILL when**:
+- Starting new {TECH_STACK} projects
+- Reviewing {TECH_STACK} code
+- Learning {TECH_STACK} best practices
+- Implementing {TECH_STACK} patterns
+- Troubleshooting {TECH_STACK} issues
+
+**Auto-triggers on**:
+- Keywords: {TECH_KEYWORDS}
+- File types: {FILE_EXTENSIONS}
+
+## Research Metadata
+
+- **Generated**: {ISO_TIMESTAMP}
+- **Source**: Exa Research (web search + code context)
+- **Queries Executed**: {QUERY_COUNT}
+- **Sources Consulted**: {SOURCE_COUNT}
+- **Research Quality**: {QUALITY_INDICATOR}
+
+## Tech Stack Components
+
+**Primary**: {MAIN_TECH} - {MAIN_TECH_DESCRIPTION}
+
+{IF_COMPOSITE}
+**Additional Frameworks**:
+{FOR_EACH_COMPONENT}
+- **{COMPONENT_NAME}**: {COMPONENT_DESCRIPTION}
+{/FOR_EACH_COMPONENT}
+{/IF_COMPOSITE}
+
+## Version History
+
+- **v1.0.0** ({DATE}): Initial SKILL package generated from Exa research
+
+---
+
+## Developer Notes
+
+This SKILL package was auto-generated using:
+- `/memory:tech-research` command
+- Exa AI research APIs (mcp__exa__get_code_context_exa, mcp__exa__web_search_exa)
+- Token limit: ~5K per module, ~22K total
+
+To regenerate:
+```bash
+/memory:tech-research "{tech_stack_name}" --regenerate
+```
+```
+
+---
+
+## Variable Substitution Guide
+
+### Required Variables
+- `{TECH_STACK_NAME}`: Lowercase hyphenated name (e.g., "typescript-react-nextjs")
+- `{TechStackTitle}`: Title case display name (e.g., "TypeScript React Next.js")
+- `{MAIN_TECH}`: Primary technology (e.g., "TypeScript")
+- `{ISO_TIMESTAMP}`: ISO 8601 timestamp (e.g., "2025-11-04T22:00:00Z")
+- `{QUERY_COUNT}`: Number of Exa queries executed (e.g., 6)
+- `{SOURCE_COUNT}`: Total sources consulted (e.g., 25)
+
+### Conditional Variables
+- `{IF_COMPOSITE}...{/IF_COMPOSITE}`: Only include if tech stack has multiple components
+- `{COMPONENT_LIST}`: Comma-separated list of framework names
+- `{FOR_EACH_COMPONENT}...{/FOR_EACH_COMPONENT}`: Loop through components
+
+### Optional Variables
+- `{MAIN_TECH_DESCRIPTION}`: One-line description of primary tech
+- `{COMPONENT_DESCRIPTION}`: One-line description per component
+- `{TECH_KEYWORDS}`: Comma-separated trigger keywords
+- `{FILE_EXTENSIONS}`: File extensions (e.g., ".ts, .tsx, .jsx")
+- `{QUALITY_INDICATOR}`: Research quality metric (e.g., "High", "Medium")
+
+---
+
+## Generation Instructions
+
+### Step 1: Read metadata.json
+Extract values for variables from metadata.json generated during module creation.
+
+### Step 2: Determine composite status
+- Single tech: Omit {IF_COMPOSITE} sections
+- Composite: Include frameworks section and integration module reference
+
+### Step 3: Calculate token estimates
+- Verify module files exist
+- Adjust token estimates based on actual file sizes
+- Update loading recommendation estimates
+
+### Step 4: Generate descriptions
+- **Overview**: Brief description of tech stack purpose
+- **Main tech description**: One-liner for primary technology
+- **Component descriptions**: One-liner per additional framework
+
+### Step 5: Build keyword lists
+- Extract common keywords from tech stack name
+- Add file extensions relevant to tech stack
+- Include framework-specific triggers
+
+### Step 6: Format timestamps
+- Use ISO 8601 format for all timestamps
+- Include timezone (UTC recommended)
+
+### Step 7: Write SKILL.md
+- Apply template with all substitutions
+- Validate markdown formatting
+- Verify all relative paths work
+
+---
+
+## Validation Checklist
+
+- [ ] All module files exist and are referenced
+- [ ] Token estimates are reasonably accurate
+- [ ] Conditional sections handled correctly (composite vs single)
+- [ ] Timestamps in ISO 8601 format
+- [ ] All relative paths use ./ prefix
+- [ ] Metadata section matches metadata.json
+- [ ] Loading recommendations align with actual module sizes
+- [ ] Usage section includes relevant trigger keywords

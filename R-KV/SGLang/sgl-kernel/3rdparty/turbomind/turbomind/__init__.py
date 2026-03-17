@@ -1,0 +1,5 @@
+# Copyright (c) OpenMMLab. All rights reserved.
+
+from .linear import Linear
+
+__all__ = ['Linear']

@@ -1,0 +1,98 @@
+Template for generating conflict-patterns.md
+
+## Purpose
+Document recurring conflict patterns across workflow sessions with resolutions.
+
+## File Location
+`.claude/skills/workflow-progress/conflict-patterns.md`
+
+## Update Strategy
+- **Incremental mode**: Add new conflicts, update frequency counters for existing patterns
+- **Full mode**: Regenerate entire conflict analysis from all sessions
+
+## Structure
+
+```markdown
+# Workflow Conflict Patterns
+
+## Architecture Conflicts
+
+### {Conflict_Pattern_Title}
+**Pattern**: {concise_pattern_description}
+**Sessions**: {session_id_1}, {session_id_2}
+**Resolution**: {resolution_strategy}
+
+**Code Impact**:
+- Modified: {file_path_1}, {file_path_2}
+- Added: {file_path_3}
+- Tests: {test_file_path}
+
+**Frequency**: {count} sessions
+**Severity**: {high|medium|low}
+
+---
+
+## Dependency Conflicts
+
+### {Conflict_Pattern_Title}
+**Pattern**: {concise_pattern_description}
+**Sessions**: {session_id_list}
+**Resolution**: {resolution_strategy}
+
+**Package Changes**:
+- Updated: {package_name}@{version}
+- Locked: {dependency_name}
+
+**Frequency**: {count} sessions
+**Severity**: {high|medium|low}
+
+---
+
+## Testing Conflicts
+
+### {Conflict_Pattern_Title}
+...
+
+---
+
+## Performance Conflicts
+
+### {Conflict_Pattern_Title}
+...
+```
+
+## Data Sources
+- IMPL_PLAN summaries: `.workflow/.archives/{session_id}/IMPL_PLAN.md`
+- Context packages: `.workflow/.archives/{session_id}/.process/context-package.json` (reference only)
+- Session lessons: `manifest.json` -> `archives[].lessons.challenges`
+
+## Conflict Identification (Use Gemini CLI)
+
+**Command Pattern**:
+```bash
+gemini -p "
+PURPOSE: Identify conflict patterns from workflow sessions
+TASK:
+• Extract conflicts from IMPL_PLAN and lessons
+• Group by type (architecture/dependencies/testing/performance)
+• Identify recurring patterns (same conflict in different sessions)
+• Link resolutions to specific sessions
+MODE: analysis
+CONTEXT: @.workflow/.archives/*/IMPL_PLAN.md @.workflow/.archives/manifest.json
+EXPECTED: Conflict patterns with frequency and resolution
+RULES: $(cat ~/.claude/workflows/cli-templates/prompts/workflow/skill-aggregation.txt)
+"
+```
+
+**Pattern Grouping**:
+- **Architecture**: Design conflicts, incompatible strategies, interface mismatches
+- **Dependencies**: Version conflicts, library incompatibilities, package issues
+- **Testing**: Mock data inconsistencies, test environment issues, coverage gaps
+- **Performance**: Bottlenecks, optimization conflicts, resource issues
+
+## Formatting Rules
+- Sort by frequency within each category
+- Include code impact for traceability
+- Mark high-frequency patterns (3+ sessions) as "RECURRING"
+- Keep resolution descriptions actionable
+- Use relative paths for file references

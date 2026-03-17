@@ -1,0 +1,38 @@
+# Exp 006: Module 2 Reverse Cross-Trace Validation Configuration
+# FIXED VERSION: Uses correct RoPE layout (front/back) and model inv_freq
+
+experiment:
+  name: "exp_006_module2_reverse_cross_trace_validation_fixed"
+  description: "Module 2 Reverse Cross-Trace Validation - Train on Trace B, Test on Trace A (RoPE Fixed)"
+
+model:
+  num_bins: 128
+  num_kernels: 3
+  num_freqs: 64  # head_dim / 2
+  head_dim: 128
+  model_path: "/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B"
+  # NO MLP, NO PositionScaling
+
+training:
+  epochs: 25
+  learning_rate: 0.001
+  optimizer: "adam"
+  round_window: 128
+  exclude_tail: 1000
+  save_every: 10
+  log_every: 10
+
+data:
+  trace_path: "data/qk.pt"
+  test_trace_path: "data/qk_test.pt"
+  head_sample_file: "../../hybrid_sample_heads_lowret_top10.json"
+
+evaluation:
+  topk_K: [50, 500, 1000]
+  round_window: 128
+
+output:
+  base_dir: "output_fixed"
+  logs_dir: "output_fixed/logs"
+  checkpoints_dir: "output_fixed/checkpoints"
+  results_dir: "output_fixed/results"

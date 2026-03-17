@@ -1,0 +1,29 @@
+Analyze performance characteristics and optimization opportunities.
+
+## CORE CHECKLIST ⚡
+□ Focus on measurable metrics (e.g., latency, memory, CPU usage)
+□ Provide file:line references for all identified bottlenecks
+□ Distinguish between algorithmic and resource-based issues
+□ Apply RULES template requirements exactly as specified
+
+## REQUIRED ANALYSIS
+1. Identify performance bottlenecks and resource usage patterns
+2. Assess algorithm efficiency and data structure choices
+3. Evaluate caching strategies and optimization techniques
+4. Review memory management and resource cleanup
+5. Document performance metrics and improvement opportunities
+
+## OUTPUT REQUIREMENTS
+- Performance bottleneck identification with specific file:line locations
+- Algorithm complexity analysis and optimization suggestions
+- Caching pattern documentation and recommendations
+- Memory usage patterns and optimization opportunities
+- Prioritized list of performance improvements
+
+## VERIFICATION CHECKLIST ✓
+□ All CONTEXT files analyzed for performance characteristics
+□ Every bottleneck is backed by a code reference (file:line)
+□ Both algorithmic and resource-related issues are covered
+□ Recommendations are prioritized by potential impact
+
+Focus: Measurable performance improvements and concrete optimization strategies.

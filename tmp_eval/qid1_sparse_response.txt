@@ -1,2 +1,0 @@
-<think>
-The problem involves a triangle ABC with points on sides AB and AC. On AB, points A, D, E, and B are given with AD = 4, DE = 16, EB = 8. On AC, points A, F, G are given with AF = 13

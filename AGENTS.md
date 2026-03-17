@@ -24,6 +24,9 @@
 - Add targeted unit tests with `pytest` under a new `tests/` directory when introducing reusable utilities; mirror filename + `_test.py` naming.
 - For features touching logprob persistence, validate both default (enabled) and `--no_store_logprobs` flows.
 
+## Code Isolation Policy
+- 不得直接修改已有算法/脚本的核心逻辑，除非明确授权；新算法或变体应在隔离的脚本/子类上开发，复用已有 API/类接口，确保对基线实现的侵入最小化。
+
 ## Commit & Pull Request Guidelines
 - Use Conventional Commit prefixes (e.g., `feat:`, `fix:`, `docs:`) as seen in existing history: `feat: add optional logprob persistence for offline runs`.
 - Squash work into coherent commits with descriptive bodies summarizing key changes and verification steps.
@@ -37,3 +40,7 @@
 - When launching long-running jobs, ensure the visible process command string follows the `PD-L1_binder` convention (e.g., via wrapper scripts or `setproctitle`) to align with existing cluster naming.
 - Artifact-heavy outputs（例如 `outputs/deepseek_r1_qwen3_8b/qk_*`）已经在 `.gitignore` 中屏蔽，生成后请勿尝试纳入版本管理。
 - LazyEviction 子工程默认使用 `lazy_evict` conda 环境；在运行其脚本或评测前 `conda activate lazy_evict`。
+
+## Recent Ops
+- Created conda env `rkv` (Python 3.10) for `R-KV/rkv/compression` + eval: installed torch 2.3.1+cu121, flash-attn 2.5.8 (built with `CUDA_HOME=/usr/local/cuda-12.4`), transformers stack from `R-KV/HuggingFace/requirements.txt`, and `evaluation/` deps (`latex2sympy2`, datasets, pebble, timeout_decorator, word2number). Pip cache set to `/data/rbg/users/weian/.cache/pip`, HF cache to `/data/rbg/users/weian/.cache/huggingface`.
+- Downloaded `deepseek-ai/DeepSeek-R1-Distill-Llama-8B` to `/data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-Distill-Llama-8B` for AIME runs.

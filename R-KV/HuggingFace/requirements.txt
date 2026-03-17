@@ -1,0 +1,4 @@
+transformers>=4.48.1
+numpy>=2.2.2
+tqdm>=4.67.1
+matplotlib>=3.10.0

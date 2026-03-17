@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import torch
+from transformers.cache_utils import Cache, DynamicCache
 import torch.nn.functional as F
 try:
     from dynasor.core.evaluator import math_equal
@@ -258,10 +259,18 @@ def run_sparse_generation(
 
     logits = outputs.logits[:, -1, :]
     past_key_values = outputs.past_key_values
+    if isinstance(past_key_values, Cache):
+        pkv_tuple = past_key_values.to_legacy_cache()
+    elif isinstance(past_key_values, tuple):
+        pkv_tuple = past_key_values
+        past_key_values = DynamicCache.from_legacy_cache(pkv_tuple)
+    else:
+        pkv_tuple = past_key_values
 
-    pruner.attach_initial_cache(past_key_values)
-    past_key_values = pruner.enforce_max_limit(past_key_values)
-    past_key_values = pruner.ensure_capacity(past_key_values)
+    pruner.attach_initial_cache(pkv_tuple)
+    pkv_tuple = pruner.enforce_max_limit(pkv_tuple)
+    pkv_tuple = pruner.ensure_capacity(pkv_tuple)
+    cache_for_model = DynamicCache.from_legacy_cache(pkv_tuple) if isinstance(pkv_tuple, tuple) else pkv_tuple
 
     generated: List[int] = []
 
@@ -286,17 +295,26 @@ def run_sparse_generation(
             outputs = model(
                 input_ids=next_token_tensor,
                 attention_mask=None,
-                past_key_values=past_key_values,
+                past_key_values=cache_for_model,
                 use_cache=True,
                 return_dict=True,
                 position_ids=position_ids,
             )
 
         past_key_values = outputs.past_key_values
+        if isinstance(past_key_values, Cache):
+            pkv_tuple = past_key_values.to_legacy_cache()
+        elif isinstance(past_key_values, tuple):
+            pkv_tuple = past_key_values
+            past_key_values = DynamicCache.from_legacy_cache(pkv_tuple)
+        else:
+            pkv_tuple = past_key_values
+
         pruner.on_token_appended()
         if pruner.should_start_next_round():
-            past_key_values = pruner.start_next_round(past_key_values)
+            pkv_tuple = pruner.start_next_round(pkv_tuple)
 
+        cache_for_model = DynamicCache.from_legacy_cache(pkv_tuple) if isinstance(pkv_tuple, tuple) else pkv_tuple
         logits = outputs.logits[:, -1, :]
 
     if generated:

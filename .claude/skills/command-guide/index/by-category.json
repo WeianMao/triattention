@@ -1,0 +1,800 @@
+{
+  "cli": {
+    "_root": [
+      {
+        "name": "cli-init",
+        "command": "/cli:cli-init",
+        "description": "Generate .gemini/ and .qwen/ config directories with settings.json and ignore files based on workspace technology detection",
+        "arguments": "[--tool gemini|qwen|all] [--output path] [--preview]",
+        "category": "cli",
+        "subcategory": null,
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "cli/cli-init.md"
+      }
+    ]
+  },
+  "general": {
+    "_root": [
+      {
+        "name": "enhance-prompt",
+        "command": "/enhance-prompt",
+        "description": "Enhanced prompt transformation using session memory and intent analysis with --enhance flag detection",
+        "arguments": "user input to enhance",
+        "category": "general",
+        "subcategory": null,
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "enhance-prompt.md"
+      },
+      {
+        "name": "version",
+        "command": "/version",
+        "description": "Display Claude Code version information and check for updates",
+        "arguments": "",
+        "category": "general",
+        "subcategory": null,
+        "usage_scenario": "general",
+        "difficulty": "Beginner",
+        "file_path": "version.md"
+      }
+    ]
+  },
+  "memory": {
+    "_root": [
+      {
+        "name": "code-map-memory",
+        "command": "/memory:code-map-memory",
+        "description": "3-phase orchestrator: parse feature keyword → cli-explore-agent analyzes (Deep Scan dual-source) → orchestrator generates Mermaid docs + SKILL package (skips phase 2 if exists)",
+        "arguments": "\\\"feature-keyword\\\" [--regenerate] [--tool <gemini|qwen>]",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "documentation",
+        "difficulty": "Intermediate",
+        "file_path": "memory/code-map-memory.md"
+      },
+      {
+        "name": "docs-full-cli",
+        "command": "/memory:docs-full-cli",
+        "description": "Generate full project documentation using CLI execution (Layer 3→1) with batched agents (4 modules/agent) and gemini→qwen→codex fallback, <20 modules uses direct parallel",
+        "arguments": "[path] [--tool <gemini|qwen|codex>]",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "documentation",
+        "difficulty": "Intermediate",
+        "file_path": "memory/docs-full-cli.md"
+      },
+      {
+        "name": "docs-related-cli",
+        "command": "/memory:docs-related-cli",
+        "description": "Generate/update documentation for git-changed modules using CLI execution with batched agents (4 modules/agent) and gemini→qwen→codex fallback, <15 modules uses direct parallel",
+        "arguments": "[--tool <gemini|qwen|codex>]",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "documentation",
+        "difficulty": "Intermediate",
+        "file_path": "memory/docs-related-cli.md"
+      },
+      {
+        "name": "docs",
+        "command": "/memory:docs",
+        "description": "Plan documentation workflow with dynamic grouping (≤10 docs/task), generates IMPL tasks for parallel module trees, README, ARCHITECTURE, and HTTP API docs",
+        "arguments": "[path] [--tool <gemini|qwen|codex>] [--mode <full|partial>] [--cli-execute]",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "documentation",
+        "difficulty": "Intermediate",
+        "file_path": "memory/docs.md"
+      },
+      {
+        "name": "load-skill-memory",
+        "command": "/memory:load-skill-memory",
+        "description": "Activate SKILL package (auto-detect from paths/keywords or manual) and intelligently load documentation based on task intent keywords",
+        "arguments": "[skill_name] \\\"task intent description\\",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "documentation",
+        "difficulty": "Intermediate",
+        "file_path": "memory/load-skill-memory.md"
+      },
+      {
+        "name": "load",
+        "command": "/memory:load",
+        "description": "Delegate to universal-executor agent to analyze project via Gemini/Qwen CLI and return JSON core content package for task context",
+        "arguments": "[--tool gemini|qwen] \\\"task context description\\",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "memory/load.md"
+      },
+      {
+        "name": "skill-memory",
+        "command": "/memory:skill-memory",
+        "description": "4-phase autonomous orchestrator: check docs → /memory:docs planning → /workflow:execute → generate SKILL.md with progressive loading index (skips phases 2-3 if docs exist)",
+        "arguments": "[path] [--tool <gemini|qwen|codex>] [--regenerate] [--mode <full|partial>] [--cli-execute]",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "documentation",
+        "difficulty": "Intermediate",
+        "file_path": "memory/skill-memory.md"
+      },
+      {
+        "name": "style-skill-memory",
+        "command": "/memory:style-skill-memory",
+        "description": "Generate SKILL memory package from style reference for easy loading and consistent design system usage",
+        "arguments": "[package-name] [--regenerate]",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "documentation",
+        "difficulty": "Intermediate",
+        "file_path": "memory/style-skill-memory.md"
+      },
+      {
+        "name": "tech-research",
+        "command": "/memory:tech-research",
+        "description": "3-phase orchestrator: extract tech stack from session/name → delegate to agent for Exa research and module generation → generate SKILL.md index (skips phase 2 if exists)",
+        "arguments": "[session-id | tech-stack-name] [--regenerate] [--tool <gemini|qwen>]",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "memory/tech-research.md"
+      },
+      {
+        "name": "update-full",
+        "command": "/memory:update-full",
+        "description": "Update all CLAUDE.md files using layer-based execution (Layer 3→1) with batched agents (4 modules/agent) and gemini→qwen→codex fallback, <20 modules uses direct parallel",
+        "arguments": "[--tool gemini|qwen|codex] [--path <directory>]",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "memory/update-full.md"
+      },
+      {
+        "name": "update-related",
+        "command": "/memory:update-related",
+        "description": "Update CLAUDE.md for git-changed modules using batched agent execution (4 modules/agent) with gemini→qwen→codex fallback, <15 modules uses direct execution",
+        "arguments": "[--tool gemini|qwen|codex]",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "memory/update-related.md"
+      },
+      {
+        "name": "workflow-skill-memory",
+        "command": "/memory:workflow-skill-memory",
+        "description": "Process WFS-* archived sessions using universal-executor agents with Gemini analysis to generate workflow-progress SKILL package (sessions-timeline, lessons, conflicts)",
+        "arguments": "session <session-id> | all",
+        "category": "memory",
+        "subcategory": null,
+        "usage_scenario": "documentation",
+        "difficulty": "Intermediate",
+        "file_path": "memory/workflow-skill-memory.md"
+      }
+    ]
+  },
+  "task": {
+    "_root": [
+      {
+        "name": "breakdown",
+        "command": "/task:breakdown",
+        "description": "Decompose complex task into subtasks with dependency mapping, creates child task JSONs with parent references and execution order",
+        "arguments": "task-id",
+        "category": "task",
+        "subcategory": null,
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "task/breakdown.md"
+      },
+      {
+        "name": "create",
+        "command": "/task:create",
+        "description": "Generate task JSON from natural language description with automatic file pattern detection, scope inference, and dependency analysis",
+        "arguments": "\\\"task title\\",
+        "category": "task",
+        "subcategory": null,
+        "usage_scenario": "implementation",
+        "difficulty": "Intermediate",
+        "file_path": "task/create.md"
+      },
+      {
+        "name": "execute",
+        "command": "/task:execute",
+        "description": "Execute task JSON using appropriate agent (@doc-generator/@implementation-agent/@test-agent) with pre-analysis context loading and status tracking",
+        "arguments": "task-id",
+        "category": "task",
+        "subcategory": null,
+        "usage_scenario": "implementation",
+        "difficulty": "Intermediate",
+        "file_path": "task/execute.md"
+      },
+      {
+        "name": "replan",
+        "command": "/task:replan",
+        "description": "Update task JSON with new requirements or batch-update multiple tasks from verification report, tracks changes in task-changes.json",
+        "arguments": "task-id [\\\"text\\\"|file.md] | --batch [verification-report.md]",
+        "category": "task",
+        "subcategory": null,
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "task/replan.md"
+      }
+    ]
+  },
+  "workflow": {
+    "_root": [
+      {
+        "name": "action-plan-verify",
+        "command": "/workflow:action-plan-verify",
+        "description": "Perform non-destructive cross-artifact consistency analysis between IMPL_PLAN.md and task JSONs with quality gate validation",
+        "arguments": "[optional: --session session-id]",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/action-plan-verify.md"
+      },
+      {
+        "name": "execute",
+        "command": "/workflow:execute",
+        "description": "Coordinate agent execution for workflow tasks with automatic session discovery, parallel task processing, and status tracking",
+        "arguments": "[--resume-session=\\\"session-id\\\"]",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "implementation",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/execute.md"
+      },
+      {
+        "name": "init",
+        "command": "/workflow:init",
+        "description": "Initialize project-level state with intelligent project analysis using cli-explore-agent",
+        "arguments": "[--regenerate]",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/init.md"
+      },
+      {
+        "name": "lite-execute",
+        "command": "/workflow:lite-execute",
+        "description": "Execute tasks based on in-memory plan, prompt description, or file content",
+        "arguments": "[--in-memory] [\\\"task description\\\"|file-path]",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "implementation",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/lite-execute.md"
+      },
+      {
+        "name": "lite-fix",
+        "command": "/workflow:lite-fix",
+        "description": "Lightweight bug diagnosis and fix workflow with intelligent severity assessment and optional hotfix mode for production incidents",
+        "arguments": "[--hotfix] \\\"bug description or issue reference\\",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/lite-fix.md"
+      },
+      {
+        "name": "lite-plan",
+        "command": "/workflow:lite-plan",
+        "description": "Lightweight interactive planning workflow with in-memory planning, code exploration, and execution dispatch to lite-execute after user confirmation",
+        "arguments": "[-e|--explore] \\\"task description\\\"|file.md",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/lite-plan.md"
+      },
+      {
+        "name": "plan",
+        "command": "/workflow:plan",
+        "description": "5-phase planning workflow with action-planning-agent task generation, outputs IMPL_PLAN.md and task JSONs",
+        "arguments": "\\\"text description\\\"|file.md",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/plan.md"
+      },
+      {
+        "name": "replan",
+        "command": "/workflow:replan",
+        "description": "Interactive workflow replanning with session-level artifact updates and boundary clarification through guided questioning",
+        "arguments": "[--session session-id] [task-id] \\\"requirements\\\"|file.md [--interactive]",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/replan.md"
+      },
+      {
+        "name": "review-fix",
+        "command": "/workflow:review-fix",
+        "description": "Automated fixing of code review findings with AI-powered planning and coordinated execution. Uses intelligent grouping, multi-stage timeline coordination, and test-driven verification.",
+        "arguments": "<export-file|review-dir> [--resume] [--max-iterations=N]",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "analysis",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/review-fix.md"
+      },
+      {
+        "name": "review-module-cycle",
+        "command": "/workflow:review-module-cycle",
+        "description": "Independent multi-dimensional code review for specified modules/files. Analyzes specific code paths across 7 dimensions with hybrid parallel-iterative execution, independent of workflow sessions.",
+        "arguments": "<path-pattern> [--dimensions=security,architecture,...] [--max-iterations=N]",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "analysis",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/review-module-cycle.md"
+      },
+      {
+        "name": "review-session-cycle",
+        "command": "/workflow:review-session-cycle",
+        "description": "Session-based comprehensive multi-dimensional code review. Analyzes git changes from workflow session across 7 dimensions with hybrid parallel-iterative execution, aggregates findings, and performs focused deep-dives on critical issues until quality gates met.",
+        "arguments": "[session-id] [--dimensions=security,architecture,...] [--max-iterations=N]",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "session-management",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/review-session-cycle.md"
+      },
+      {
+        "name": "review",
+        "command": "/workflow:review",
+        "description": "Post-implementation review with specialized types (security/architecture/action-items/quality) using analysis agents and Gemini",
+        "arguments": "[--type=security|architecture|action-items|quality] [optional: session-id]",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "analysis",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/review.md"
+      },
+      {
+        "name": "tdd-plan",
+        "command": "/workflow:tdd-plan",
+        "description": "TDD workflow planning with Red-Green-Refactor task chain generation, test-first development structure, and cycle tracking",
+        "arguments": "\\\"feature description\\\"|file.md",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "planning",
+        "difficulty": "Advanced",
+        "file_path": "workflow/tdd-plan.md"
+      },
+      {
+        "name": "tdd-verify",
+        "command": "/workflow:tdd-verify",
+        "description": "Verify TDD workflow compliance against Red-Green-Refactor cycles, generate quality report with coverage analysis",
+        "arguments": "[optional: WFS-session-id]",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "testing",
+        "difficulty": "Advanced",
+        "file_path": "workflow/tdd-verify.md"
+      },
+      {
+        "name": "test-cycle-execute",
+        "command": "/workflow:test-cycle-execute",
+        "description": "Execute test-fix workflow with dynamic task generation and iterative fix cycles until test pass rate >= 95% or max iterations reached. Uses @cli-planning-agent for failure analysis and task generation.",
+        "arguments": "[--resume-session=\\\"session-id\\\"] [--max-iterations=N]",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "implementation",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/test-cycle-execute.md"
+      },
+      {
+        "name": "test-fix-gen",
+        "command": "/workflow:test-fix-gen",
+        "description": "Create test-fix workflow session from session ID, description, or file path with test strategy generation and task planning",
+        "arguments": "(source-session-id | \\\"feature description\\\" | /path/to/file.md)",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "testing",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/test-fix-gen.md"
+      },
+      {
+        "name": "test-gen",
+        "command": "/workflow:test-gen",
+        "description": "Create independent test-fix workflow session from completed implementation session, analyzes code to generate test tasks",
+        "arguments": "source-session-id",
+        "category": "workflow",
+        "subcategory": null,
+        "usage_scenario": "testing",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/test-gen.md"
+      }
+    ],
+    "brainstorm": [
+      {
+        "name": "api-designer",
+        "command": "/workflow:brainstorm:api-designer",
+        "description": "Generate or update api-designer/analysis.md addressing guidance-specification discussion points for API design perspective",
+        "arguments": "optional topic - uses existing framework if available",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/brainstorm/api-designer.md"
+      },
+      {
+        "name": "artifacts",
+        "command": "/workflow:brainstorm:artifacts",
+        "description": "Interactive clarification generating confirmed guidance specification through role-based analysis and synthesis",
+        "arguments": "topic or challenge description [--count N]",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/brainstorm/artifacts.md"
+      },
+      {
+        "name": "auto-parallel",
+        "command": "/workflow:brainstorm:auto-parallel",
+        "description": "Parallel brainstorming automation with dynamic role selection and concurrent execution across multiple perspectives",
+        "arguments": "topic or challenge description\" [--count N]",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "general",
+        "difficulty": "Advanced",
+        "file_path": "workflow/brainstorm/auto-parallel.md"
+      },
+      {
+        "name": "data-architect",
+        "command": "/workflow:brainstorm:data-architect",
+        "description": "Generate or update data-architect/analysis.md addressing guidance-specification discussion points for data architecture perspective",
+        "arguments": "optional topic - uses existing framework if available",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/brainstorm/data-architect.md"
+      },
+      {
+        "name": "product-manager",
+        "command": "/workflow:brainstorm:product-manager",
+        "description": "Generate or update product-manager/analysis.md addressing guidance-specification discussion points for product management perspective",
+        "arguments": "optional topic - uses existing framework if available",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/brainstorm/product-manager.md"
+      },
+      {
+        "name": "product-owner",
+        "command": "/workflow:brainstorm:product-owner",
+        "description": "Generate or update product-owner/analysis.md addressing guidance-specification discussion points for product ownership perspective",
+        "arguments": "optional topic - uses existing framework if available",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/brainstorm/product-owner.md"
+      },
+      {
+        "name": "scrum-master",
+        "command": "/workflow:brainstorm:scrum-master",
+        "description": "Generate or update scrum-master/analysis.md addressing guidance-specification discussion points for Agile process perspective",
+        "arguments": "optional topic - uses existing framework if available",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/brainstorm/scrum-master.md"
+      },
+      {
+        "name": "subject-matter-expert",
+        "command": "/workflow:brainstorm:subject-matter-expert",
+        "description": "Generate or update subject-matter-expert/analysis.md addressing guidance-specification discussion points for domain expertise perspective",
+        "arguments": "optional topic - uses existing framework if available",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/brainstorm/subject-matter-expert.md"
+      },
+      {
+        "name": "synthesis",
+        "command": "/workflow:brainstorm:synthesis",
+        "description": "Clarify and refine role analyses through intelligent Q&A and targeted updates with synthesis agent",
+        "arguments": "[optional: --session session-id]",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "general",
+        "difficulty": "Advanced",
+        "file_path": "workflow/brainstorm/synthesis.md"
+      },
+      {
+        "name": "system-architect",
+        "command": "/workflow:brainstorm:system-architect",
+        "description": "Generate or update system-architect/analysis.md addressing guidance-specification discussion points for system architecture perspective",
+        "arguments": "optional topic - uses existing framework if available",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/brainstorm/system-architect.md"
+      },
+      {
+        "name": "ui-designer",
+        "command": "/workflow:brainstorm:ui-designer",
+        "description": "Generate or update ui-designer/analysis.md addressing guidance-specification discussion points for UI design perspective",
+        "arguments": "optional topic - uses existing framework if available",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/brainstorm/ui-designer.md"
+      },
+      {
+        "name": "ux-expert",
+        "command": "/workflow:brainstorm:ux-expert",
+        "description": "Generate or update ux-expert/analysis.md addressing guidance-specification discussion points for UX perspective",
+        "arguments": "optional topic - uses existing framework if available",
+        "category": "workflow",
+        "subcategory": "brainstorm",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/brainstorm/ux-expert.md"
+      }
+    ],
+    "session": [
+      {
+        "name": "complete",
+        "command": "/workflow:session:complete",
+        "description": "Mark active workflow session as complete, archive with lessons learned, update manifest, remove active flag",
+        "arguments": "",
+        "category": "workflow",
+        "subcategory": "session",
+        "usage_scenario": "session-management",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/session/complete.md"
+      },
+      {
+        "name": "list",
+        "command": "/workflow:session:list",
+        "description": "List all workflow sessions with status filtering, shows session metadata and progress information",
+        "arguments": "",
+        "category": "workflow",
+        "subcategory": "session",
+        "usage_scenario": "general",
+        "difficulty": "Beginner",
+        "file_path": "workflow/session/list.md"
+      },
+      {
+        "name": "resume",
+        "command": "/workflow:session:resume",
+        "description": "Resume the most recently paused workflow session with automatic session discovery and status update",
+        "arguments": "",
+        "category": "workflow",
+        "subcategory": "session",
+        "usage_scenario": "session-management",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/session/resume.md"
+      },
+      {
+        "name": "start",
+        "command": "/workflow:session:start",
+        "description": "Discover existing sessions or start new workflow session with intelligent session management and conflict detection",
+        "arguments": "[--type <workflow|review|tdd|test|docs>] [--auto|--new] [optional: task description for new session]",
+        "category": "workflow",
+        "subcategory": "session",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/session/start.md"
+      }
+    ],
+    "tools": [
+      {
+        "name": "conflict-resolution",
+        "command": "/workflow:tools:conflict-resolution",
+        "description": "Detect and resolve conflicts between plan and existing codebase using CLI-powered analysis with Gemini/Qwen",
+        "arguments": "--session WFS-session-id --context path/to/context-package.json",
+        "category": "workflow",
+        "subcategory": "tools",
+        "usage_scenario": "general",
+        "difficulty": "Advanced",
+        "file_path": "workflow/tools/conflict-resolution.md"
+      },
+      {
+        "name": "gather",
+        "command": "/workflow:tools:gather",
+        "description": "Intelligently collect project context using context-search-agent based on task description, packages into standardized JSON",
+        "arguments": "--session WFS-session-id \\\"task description\\",
+        "category": "workflow",
+        "subcategory": "tools",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/tools/context-gather.md"
+      },
+      {
+        "name": "task-generate-agent",
+        "command": "/workflow:tools:task-generate-agent",
+        "description": "Generate implementation plan documents (IMPL_PLAN.md, task JSONs, TODO_LIST.md) using action-planning-agent - produces planning artifacts, does NOT execute code implementation",
+        "arguments": "--session WFS-session-id",
+        "category": "workflow",
+        "subcategory": "tools",
+        "usage_scenario": "implementation",
+        "difficulty": "Advanced",
+        "file_path": "workflow/tools/task-generate-agent.md"
+      },
+      {
+        "name": "task-generate-tdd",
+        "command": "/workflow:tools:task-generate-tdd",
+        "description": "Autonomous TDD task generation using action-planning-agent with Red-Green-Refactor cycles, test-first structure, and cycle validation",
+        "arguments": "--session WFS-session-id",
+        "category": "workflow",
+        "subcategory": "tools",
+        "usage_scenario": "implementation",
+        "difficulty": "Advanced",
+        "file_path": "workflow/tools/task-generate-tdd.md"
+      },
+      {
+        "name": "tdd-coverage-analysis",
+        "command": "/workflow:tools:tdd-coverage-analysis",
+        "description": "Analyze test coverage and TDD cycle execution with Red-Green-Refactor compliance verification",
+        "arguments": "--session WFS-session-id",
+        "category": "workflow",
+        "subcategory": "tools",
+        "usage_scenario": "testing",
+        "difficulty": "Advanced",
+        "file_path": "workflow/tools/tdd-coverage-analysis.md"
+      },
+      {
+        "name": "test-concept-enhanced",
+        "command": "/workflow:tools:test-concept-enhanced",
+        "description": "Coordinate test analysis workflow using cli-execution-agent to generate test strategy via Gemini",
+        "arguments": "--session WFS-test-session-id --context path/to/test-context-package.json",
+        "category": "workflow",
+        "subcategory": "tools",
+        "usage_scenario": "testing",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/tools/test-concept-enhanced.md"
+      },
+      {
+        "name": "test-context-gather",
+        "command": "/workflow:tools:test-context-gather",
+        "description": "Collect test coverage context using test-context-search-agent and package into standardized test-context JSON",
+        "arguments": "--session WFS-test-session-id",
+        "category": "workflow",
+        "subcategory": "tools",
+        "usage_scenario": "testing",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/tools/test-context-gather.md"
+      },
+      {
+        "name": "test-task-generate",
+        "command": "/workflow:tools:test-task-generate",
+        "description": "Generate test planning documents (IMPL_PLAN.md, test task JSONs, TODO_LIST.md) using action-planning-agent - produces test planning artifacts, does NOT execute tests",
+        "arguments": "--session WFS-test-session-id",
+        "category": "workflow",
+        "subcategory": "tools",
+        "usage_scenario": "implementation",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/tools/test-task-generate.md"
+      }
+    ],
+    "ui-design": [
+      {
+        "name": "animation-extract",
+        "command": "/workflow:ui-design:animation-extract",
+        "description": "Extract animation and transition patterns from prompt inference and image references for design system documentation",
+        "arguments": "[--design-id <id>] [--session <id>] [--images \"<glob>\"] [--focus \"<types>\"] [--interactive] [--refine]",
+        "category": "workflow",
+        "subcategory": "ui-design",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/ui-design/animation-extract.md"
+      },
+      {
+        "name": "workflow:ui-design:codify-style",
+        "command": "/workflow:ui-design:codify-style",
+        "description": "Orchestrator to extract styles from code and generate shareable reference package with preview (automatic file discovery)",
+        "arguments": "<path> [--package-name <name>] [--output-dir <path>] [--overwrite]",
+        "category": "workflow",
+        "subcategory": "ui-design",
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/ui-design/codify-style.md"
+      },
+      {
+        "name": "design-sync",
+        "command": "/workflow:ui-design:design-sync",
+        "description": "Synchronize finalized design system references to brainstorming artifacts, preparing them for /workflow:plan consumption",
+        "arguments": "--session <session_id> [--selected-prototypes \"<list>\"]",
+        "category": "workflow",
+        "subcategory": "ui-design",
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/ui-design/design-sync.md"
+      },
+      {
+        "name": "explore-auto",
+        "command": "/workflow:ui-design:explore-auto",
+        "description": "Interactive exploratory UI design workflow with style-centric batch generation, creates design variants from prompts/images with parallel execution and user selection",
+        "arguments": "[--input \"<value>\"] [--targets \"<list>\"] [--target-type \"page|component\"] [--session <id>] [--style-variants <count>] [--layout-variants <count>]",
+        "category": "workflow",
+        "subcategory": "ui-design",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/ui-design/explore-auto.md"
+      },
+      {
+        "name": "generate",
+        "command": "/workflow:ui-design:generate",
+        "description": "Assemble UI prototypes by combining layout templates with design tokens (default animation support), pure assembler without new content generation",
+        "arguments": "[--design-id <id>] [--session <id>]",
+        "category": "workflow",
+        "subcategory": "ui-design",
+        "usage_scenario": "implementation",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/ui-design/generate.md"
+      },
+      {
+        "name": "imitate-auto",
+        "command": "/workflow:ui-design:imitate-auto",
+        "description": "UI design workflow with direct code/image input for design token extraction and prototype generation",
+        "arguments": "[--input \"<value>\"] [--session <id>]",
+        "category": "workflow",
+        "subcategory": "ui-design",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/ui-design/imitate-auto.md"
+      },
+      {
+        "name": "workflow:ui-design:import-from-code",
+        "command": "/workflow:ui-design:import-from-code",
+        "description": "Import design system from code files (CSS/JS/HTML/SCSS) with automatic file discovery and parallel agent analysis",
+        "arguments": "[--design-id <id>] [--session <id>] [--source <path>]",
+        "category": "workflow",
+        "subcategory": "ui-design",
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/ui-design/import-from-code.md"
+      },
+      {
+        "name": "layout-extract",
+        "command": "/workflow:ui-design:layout-extract",
+        "description": "Extract structural layout information from reference images or text prompts using Claude analysis with variant generation or refinement mode",
+        "arguments": "[--design-id <id>] [--session <id>] [--images \"<glob>\"] [--prompt \"<desc>\"] [--targets \"<list>\"] [--variants <count>] [--device-type <desktop|mobile|tablet|responsive>] [--interactive] [--refine]",
+        "category": "workflow",
+        "subcategory": "ui-design",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/ui-design/layout-extract.md"
+      },
+      {
+        "name": "workflow:ui-design:reference-page-generator",
+        "command": "/workflow:ui-design:reference-page-generator",
+        "description": "Generate multi-component reference pages and documentation from design run extraction",
+        "arguments": "[--design-run <path>] [--package-name <name>] [--output-dir <path>]",
+        "category": "workflow",
+        "subcategory": "ui-design",
+        "usage_scenario": "planning",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/ui-design/reference-page-generator.md"
+      },
+      {
+        "name": "style-extract",
+        "command": "/workflow:ui-design:style-extract",
+        "description": "Extract design style from reference images or text prompts using Claude analysis with variant generation or refinement mode",
+        "arguments": "[--design-id <id>] [--session <id>] [--images \"<glob>\"] [--prompt \"<desc>\"] [--variants <count>] [--interactive] [--refine]",
+        "category": "workflow",
+        "subcategory": "ui-design",
+        "usage_scenario": "general",
+        "difficulty": "Intermediate",
+        "file_path": "workflow/ui-design/style-extract.md"
+      }
+    ]
+  }
+}

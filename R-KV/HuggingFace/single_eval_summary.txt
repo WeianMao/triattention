@@ -1,0 +1,8 @@
+Single-run AIME24 evaluation (generated via R-KV/HuggingFace/evaluation/eval_math.py)
+Dataset file,Accuracy (%)
+tmp_eval/single_outputs_eval/output_kv2048.jsonl,43.3
+tmp_eval/single_outputs_eval/output_kv2048_run2.jsonl,43.3
+tmp_eval/single_outputs_eval/output_kv2048_run3.jsonl,43.3
+tmp_eval/single_outputs_eval/output_sdpa.jsonl,46.7
+tmp_eval/single_outputs_eval/output_sdpa_fp16_reset.jsonl,40.0
+tmp_eval/single_outputs_eval/output_sdpa_fp16_reset_gpu1.jsonl,40.0

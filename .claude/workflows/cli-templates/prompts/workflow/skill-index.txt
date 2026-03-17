@@ -1,0 +1,224 @@
+Template for generating SKILL.md (index file)
+
+## Purpose
+Create main SKILL package index with progressive loading structure and session references.
+
+## File Location
+`.claude/skills/workflow-progress/SKILL.md`
+
+## Update Strategy
+- **Always regenerated**: This file is always updated with latest session count, domains, dates
+
+## Structure
+
+```yaml
+---
+name: workflow-progress
+description: Progressive workflow development history (located at {project_root}). Load this SKILL when continuing development, analyzing past implementations, or learning from workflow history, especially when no relevant context exists in memory.
+version: {semantic_version}
+---
+# Workflow Progress SKILL Package
+
+## Documentation: `../../../.workflow/.archives/`
+
+**Total Sessions**: {session_count}
+**Functional Domains**: {domain_list}
+**Date Range**: {earliest_date} - {latest_date}
+
+## Progressive Loading
+
+### Level 0: Quick Overview (~2K tokens)
+- [Sessions Timeline](sessions-timeline.md#recent-sessions-last-5) - Recent 5 sessions
+- [Top Conflict Patterns](conflict-patterns.md#top-patterns) - Top 3 recurring conflicts
+- Quick reference for last completed work
+
+**Use Case**: Quick context refresh before starting new task
+
+### Level 1: Core History (~8K tokens)
+- [Sessions Timeline](sessions-timeline.md) - Recent 10 sessions with details
+- [Lessons Learned](lessons-learned.md#best-practices) - Success patterns by category
+- [Conflict Patterns](conflict-patterns.md) - Known conflict types and resolutions
+- Context package references (metadata only)
+
+**Use Case**: Understanding recent development patterns and avoiding known pitfalls
+
+### Level 2: Complete History (~25K tokens)
+- All archived sessions with metadata
+- Full lessons learned (successes, challenges, watch patterns)
+- Complete conflict analysis with resolutions
+- IMPL_PLAN summaries from all sessions
+- Context package paths for on-demand loading
+
+**Use Case**: Comprehensive review before major refactoring or architecture changes
+
+### Level 3: Deep Dive (~40K tokens)
+- Full IMPL_PLAN.md and TODO_LIST.md from all sessions
+- Detailed task completion summaries
+- Cross-session dependency analysis
+- Direct context package file references
+
+**Use Case**: Investigating specific implementation details or debugging historical decisions
+
+---
+
+## Quick Access
+
+### Recent Sessions
+{list of 5 most recent sessions with one-line descriptions}
+
+### By Domain
+- **{Domain_1}**: {count} sessions
+- **{Domain_2}**: {count} sessions
+- **{Domain_3}**: {count} sessions
+
+### Top Watch Patterns
+1. {most_frequent_watch_pattern}
+2. {second_most_frequent}
+3. {third_most_frequent}
+
+---
+
+## Session Index
+
+### {Domain_Category} Sessions
+- [{session_id}](../../../.workflow/.archives/{session_id}/) - {one_line_description} ({date})
+  - Context: [context-package.json](../../../.workflow/.archives/{session_id}/.process/context-package.json)
+  - Plan: [IMPL_PLAN.md](../../../.workflow/.archives/{session_id}/IMPL_PLAN.md)
+  - Tags: {tag1}, {tag2}, {tag3}
+
+---
+
+## Usage Examples
+
+### Loading Quick Context
+```markdown
+Load Level 0 from workflow-progress SKILL for overview of recent work
+```
+
+### Investigating {Domain} History
+```markdown
+Load Level 2 from workflow-progress SKILL, filter by "{domain}" tag
+```
+
+### Full Historical Analysis
+```markdown
+Load Level 3 from workflow-progress SKILL for complete development history
+```
+```
+
+## Data Sources
+- Manifest: `.workflow/.archives/manifest.json`
+- All session metadata from manifest entries
+
+## Generation Rules
+- Version format: `{major}.{minor}.{patch}` (increment patch for each update)
+- Domain list: Extract unique tags from all sessions, sort by frequency
+- Date range: Find earliest and latest archived_at timestamps
+- Token estimates: Approximate based on content length
+- Use relative paths (../../../.workflow/.archives/) for session references
+
+## Formatting Rules
+- Keep descriptions concise
+- Sort sessions by date (newest first)
+- Group sessions by primary tag
+- Include only top 5 recent sessions in Quick Access
+- Include top 3 watch patterns
+
+---
+
+## Variable Substitution Guide
+
+### Required Variables
+- `{project_root}`: Absolute project path from git root (e.g., "/d/Claude_dms3")
+- `{semantic_version}`: Version string (e.g., "1.0.0", increment patch for each update)
+- `{session_count}`: Total number of archived sessions
+- `{domain_list}`: Comma-separated unique tags sorted by frequency
+- `{earliest_date}`: Earliest session archived_at timestamp
+- `{latest_date}`: Most recent session archived_at timestamp
+
+### Generated Variables
+- `{one_line_description}`: Extract from session description (first sentence, max 80 chars)
+- `{domain_category}`: Primary tag from session metadata
+- `{most_frequent_watch_pattern}`: Top recurring watch pattern across sessions
+- `{date}`: Session archived_at in YYYY-MM-DD format
+
+### Description Field Generation
+
+**Format Template**:
+```
+Progressive workflow development history (located at {project_root}).
+Load this SKILL when continuing development, analyzing past implementations,
+or learning from workflow history, especially when no relevant context exists in memory.
+```
+
+**Generation Rules**:
+1. **Project Root**: Use `git rev-parse --show-toplevel` to get absolute path
+2. **Use Cases**: ALWAYS include these trigger phrases:
+   - "continuing development" (开发延续)
+   - "analyzing past implementations" (分析历史)
+   - "learning from workflow history" (学习历史)
+3. **Trigger Optimization**: MUST include "especially when no relevant context exists in memory"
+4. **Path Format**: Use forward slashes for cross-platform compatibility (e.g., "/d/project")
+
+**Why This Matters**:
+- **Auto-loading precision**: Path reference ensures Claude loads correct project's SKILL
+- **Context awareness**: "when no relevant context exists" prevents redundant loading
+- **Action coverage**: Three use cases cover all workflow scenarios
+
+---
+
+## Generation Instructions
+
+### Step 1: Get Project Root
+```bash
+git rev-parse --show-toplevel  # Returns: /d/Claude_dms3
+```
+
+### Step 2: Read Manifest
+```bash
+cat .workflow/.archives/manifest.json
+```
+
+Extract:
+- Total session count
+- All session tags (for domain list)
+- Date range (earliest/latest archived_at)
+
+### Step 3: Aggregate Session Data
+- Count sessions per domain
+- Extract top 5 recent sessions
+- Identify top 3 watch patterns from lessons
+
+### Step 4: Generate Description
+Apply format template with project_root from Step 1.
+
+### Step 5: Calculate Version
+- Read existing SKILL.md version (if exists)
+- Increment patch version (e.g., 1.0.5 → 1.0.6)
+- Use 1.0.0 for new SKILL package
+
+### Step 6: Build Progressive Loading Sections
+- Level 0: Recent 5 sessions + Top 3 conflicts
+- Level 1: Recent 10 sessions + Best practices
+- Level 2: All sessions + Full lessons + Full conflicts
+- Level 3: Include IMPL_PLAN and TODO_LIST references
+
+### Step 7: Write SKILL.md
+- Apply all variable substitutions
+- Use relative paths: `../../../.workflow/.archives/`
+- Validate all referenced files exist
+
+---
+
+## Validation Checklist
+
+- [ ] `{project_root}` uses absolute path with forward slashes
+- [ ] Description includes all three use cases
+- [ ] Description includes trigger optimization phrase
+- [ ] Version incremented correctly
+- [ ] All session references use relative paths
+- [ ] Domain list sorted by frequency
+- [ ] Date range matches manifest
+- [ ] Quick Access section has exactly 5 recent sessions
+- [ ] Top Watch Patterns section has exactly 3 items
+- [ ] All referenced files exist in archives

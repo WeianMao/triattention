@@ -1,0 +1,18 @@
+# Experiment outputs
+output/results/
+output/figures/
+output/mock_data/
+output/checkpoints/
+output/logs/
+
+# Large files
+*.pt
+*.pth
+*.png
+*.jpg
+*.jpeg
+*.json
+
+# Python cache
+__pycache__/
+*.pyc

@@ -1,0 +1,48 @@
+{
+  "$schema": "fix-progress-template.json",
+  "$comment": "Template for fix-progress-{N}.json - one per group, initialized by planning agent, updated by execution agent",
+
+  "progress_id": "fix-progress-N",
+  "group_id": "GN",
+  "group_name": "Group name from fix plan",
+  "status": "pending",
+  "phase": "waiting",
+
+  "assigned_agent": null,
+  "started_at": null,
+  "last_update": "ISO 8601 timestamp",
+
+  "findings": [
+    {
+      "finding_id": "finding-uuid",
+      "finding_title": "Finding title from review",
+      "file": "path/to/file.ts",
+      "line": 0,
+      "status": "pending",
+      "result": null,
+      "attempts": 0,
+      "started_at": null,
+      "completed_at": null,
+      "commit_hash": null,
+      "test_passed": null
+    }
+  ],
+
+  "summary": {
+    "total_findings": 0,
+    "pending": 0,
+    "in_progress": 0,
+    "fixed": 0,
+    "failed": 0,
+    "percent_complete": 0.0
+  },
+
+  "current_finding": null,
+
+  "flow_control": {
+    "implementation_approach": [],
+    "current_step": null
+  },
+
+  "errors": []
+}

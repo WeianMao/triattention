@@ -1,0 +1,14 @@
+# Output directories
+output/
+output_fixed/
+output_fixed_L17H25/
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Checkpoints and logs
+*.pt
+*.log

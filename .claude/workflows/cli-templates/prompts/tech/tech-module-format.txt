@@ -1,0 +1,359 @@
+Template for generating tech stack module documentation files
+
+## Purpose
+Guide agent to create modular tech stack documentation from Exa research results.
+
+## File Location
+`.claude/skills/{tech_stack_name}/*.md`
+
+## Module Structure
+
+Each module should include:
+- **Frontmatter**: YAML with module name and tech stack
+- **Main Sections**: Clear headings with hierarchical organization
+- **Code Examples**: Real examples from Exa research
+- **Best Practices**: Do's and don'ts sections
+- **References**: Attribution to Exa sources
+
+---
+
+## Module 1: principles.md (~3K tokens)
+
+**Purpose**: Core concepts, philosophies, and fundamental principles
+
+**Frontmatter**:
+```yaml
+---
+module: principles
+tech_stack: {tech_stack_name}
+description: Core concepts and philosophies
+tokens: ~3000
+---
+```
+
+**Structure**:
+```markdown
+# {Tech} Principles
+
+## Core Concepts
+- Fundamental principle 1
+- Fundamental principle 2
+- Key philosophy
+
+## Design Philosophy
+- Approach to problem-solving
+- Architectural principles
+- Core values
+
+## Key Features
+- Feature 1: Description
+- Feature 2: Description
+
+## When to Use
+- Use case scenarios
+- Best fit situations
+
+## References
+- Source 1 from Exa
+- Source 2 from Exa
+```
+
+---
+
+## Module 2: patterns.md (~5K tokens)
+
+**Purpose**: Implementation patterns with code examples
+
+**Frontmatter**:
+```yaml
+---
+module: patterns
+tech_stack: {tech_stack_name}
+description: Implementation patterns with examples
+tokens: ~5000
+---
+```
+
+**Structure**:
+```markdown
+# {Tech} Patterns
+
+## Common Patterns
+
+### Pattern 1: {Name}
+**Use Case**: When to use this pattern
+**Implementation**:
+\`\`\`{language}
+// Code example from Exa
+\`\`\`
+**Benefits**: Why use this pattern
+
+### Pattern 2: {Name}
+[Same structure]
+
+## Architectural Patterns
+- Pattern descriptions
+- Code examples
+
+## Component Patterns
+- Reusable component structures
+- Integration examples
+
+## References
+- Exa sources with pattern examples
+```
+
+---
+
+## Module 3: practices.md (~4K tokens)
+
+**Purpose**: Best practices, anti-patterns, pitfalls
+
+**Frontmatter**:
+```yaml
+---
+module: practices
+tech_stack: {tech_stack_name}
+description: Best practices and anti-patterns
+tokens: ~4000
+---
+```
+
+**Structure**:
+```markdown
+# {Tech} Best Practices
+
+## Do's
+✅ **Practice 1**: Description
+   - Rationale
+   - Example scenario
+
+✅ **Practice 2**: Description
+
+## Don'ts
+❌ **Anti-pattern 1**: What to avoid
+   - Why it's problematic
+   - Better alternative
+
+❌ **Anti-pattern 2**: What to avoid
+
+## Common Pitfalls
+1. **Pitfall 1**: Description and solution
+2. **Pitfall 2**: Description and solution
+
+## Performance Considerations
+- Optimization techniques
+- Common bottlenecks
+
+## Security Best Practices
+- Security considerations
+- Common vulnerabilities
+
+## References
+- Exa sources for best practices
+```
+
+---
+
+## Module 4: testing.md (~3K tokens)
+
+**Purpose**: Testing strategies, frameworks, and examples
+
+**Frontmatter**:
+```yaml
+---
+module: testing
+tech_stack: {tech_stack_name}
+description: Testing strategies and frameworks
+tokens: ~3000
+---
+```
+
+**Structure**:
+```markdown
+# {Tech} Testing
+
+## Testing Strategies
+- Unit testing approach
+- Integration testing approach
+- E2E testing approach
+
+## Testing Frameworks
+### Framework 1
+- Setup
+- Basic usage
+- Example:
+\`\`\`{language}
+// Test example from Exa
+\`\`\`
+
+## Test Patterns
+- Common test patterns
+- Mock strategies
+- Assertion best practices
+
+## Coverage Recommendations
+- What to test
+- Coverage targets
+
+## References
+- Exa sources for testing examples
+```
+
+---
+
+## Module 5: config.md (~3K tokens)
+
+**Purpose**: Setup, configuration, and tooling
+
+**Frontmatter**:
+```yaml
+---
+module: config
+tech_stack: {tech_stack_name}
+description: Setup, configuration, and tooling
+tokens: ~3000
+---
+```
+
+**Structure**:
+```markdown
+# {Tech} Configuration
+
+## Installation
+\`\`\`bash
+# Installation commands
+\`\`\`
+
+## Basic Configuration
+\`\`\`{config-format}
+// Configuration example from Exa
+\`\`\`
+
+## Common Configurations
+### Development
+- Dev config setup
+- Hot reload configuration
+
+### Production
+- Production optimizations
+- Build configurations
+
+## Tooling
+- Recommended tools
+- IDE/Editor setup
+- Linters and formatters
+
+## Environment Setup
+- Environment variables
+- Config file structure
+
+## References
+- Exa sources for configuration
+```
+
+---
+
+## Module 6: frameworks.md (~4K tokens) [CONDITIONAL]
+
+**Purpose**: Framework integration patterns (only for composite tech stacks)
+
+**Condition**: Only generate if `is_composite = true`
+
+**Frontmatter**:
+```yaml
+---
+module: frameworks
+tech_stack: {tech_stack_name}
+description: Framework integration patterns
+tokens: ~4000
+conditional: composite_only
+---
+```
+
+**Structure**:
+```markdown
+# {Main Tech} + {Framework} Integration
+
+## Integration Overview
+- How {main_tech} works with {framework}
+- Architecture considerations
+
+## Setup
+\`\`\`bash
+# Integration setup commands
+\`\`\`
+
+## Integration Patterns
+
+### Pattern 1: {Name}
+\`\`\`{language}
+// Integration example from Exa
+\`\`\`
+
+## Best Practices
+- Integration best practices
+- Common pitfalls
+
+## Examples
+- Real-world integration examples
+- Code samples from Exa
+
+## References
+- Exa sources for integration patterns
+```
+
+---
+
+## Metadata File: metadata.json
+
+**Purpose**: Store generation metadata and research summary
+
+**Structure**:
+```json
+{
+  "tech_stack_name": "typescript-react-nextjs",
+  "components": ["typescript", "react", "nextjs"],
+  "is_composite": true,
+  "generated_at": "2025-11-04T22:00:00Z",
+  "source": "exa-research",
+  "research_summary": {
+    "total_queries": 6,
+    "total_sources": 25,
+    "query_list": [
+      "typescript core principles best practices 2025",
+      "react common patterns architecture examples",
+      "nextjs configuration setup tooling 2025",
+      "testing strategies",
+      "react nextjs integration",
+      "typescript react integration"
+    ]
+  }
+}
+```
+
+---
+
+## Generation Guidelines
+
+### Content Synthesis from Exa
+- Extract relevant code examples from Exa results
+- Synthesize information from multiple sources
+- Maintain technical accuracy
+- Cite sources in References section
+
+### Formatting Rules
+- Use clear markdown headers
+- Include code fences with language specification
+- Use emoji for Do's (✅) and Don'ts (❌)
+- Keep token estimates accurate
+
+### Error Handling
+- If Exa query fails, note in References section
+- If insufficient data, mark section as "Limited research available"
+- Handle missing components gracefully
+
+### Token Distribution
+- Total budget: ~22K tokens for 6 modules
+- Adjust module size based on content availability
+- Prioritize quality over hitting exact token counts

@@ -1,0 +1,2 @@
+per_head_pruning: false
+per_layer_perhead_pruning: true

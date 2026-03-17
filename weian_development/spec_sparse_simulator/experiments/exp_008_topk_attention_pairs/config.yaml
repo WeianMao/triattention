@@ -1,0 +1,45 @@
+# Exp 008: Top-K Attention Pairs Ablation Study Configuration
+
+experiment:
+  name: "exp_008_topk_attention_pairs"
+  description: "Module 2 with Top-K Attention Pairs - Ground Truth Selection Ablation Study"
+
+model:
+  num_bins: 128
+  num_kernels: 3
+  num_freqs: 64  # head_dim / 2
+  head_dim: 128
+  # NO MLP, NO PositionScaling
+
+training:
+  epochs: 25
+  learning_rate: 0.001
+  optimizer: "adam"
+  round_window: 128
+  exclude_tail: 1000
+  save_every: 10
+  log_every: 10
+  query_batch_size: 64
+  # Top-K Ground Truth selection
+  topk_gt: 1  # Number of top attention keys as Ground Truth (1=Top-1, 3=Top-3, etc.)
+  # Loss type selection
+  loss_type: "attraction"  # "attraction" (exp_008 original) or "mrl" (Masked Ranking Loss, exp_010)
+  # Anti-collapse loss hyperparameters
+  alpha_dead_threshold: 0.05  # Dead probe threshold: tau = alpha / num_bins (5% of uniform)
+  lambda_activation: 0.0  # Probe activation loss weight (0.0 = disabled for baseline)
+  lambda_balance: 0.0  # Load balancing loss weight (Phase 2 placeholder, not implemented)
+
+data:
+  trace_path: "data/qk.pt"
+  test_trace_path: "data/qk_test.pt"
+  head_sample_file: "../../hybrid_sample_heads_lowret_top10.json"
+
+evaluation:
+  topk_K: [50, 500, 1000]
+  round_window: 128
+
+output:
+  base_dir: "output"
+  logs_dir: "output/logs"
+  checkpoints_dir: "output/checkpoints"
+  results_dir: "output/results"

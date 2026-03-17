@@ -1,0 +1,29 @@
+Analyze system architecture and design decisions.
+
+## CORE CHECKLIST ⚡
+□ Analyze system-wide structure, not just isolated components
+□ Provide file:line references for key architectural elements
+□ Distinguish between intended design and actual implementation
+□ Apply RULES template requirements exactly as specified
+
+## REQUIRED ANALYSIS
+1. Identify main architectural patterns and design principles
+2. Map module dependencies and component relationships
+3. Assess integration points and data flow patterns
+4. Evaluate scalability and maintainability aspects
+5. Document architectural trade-offs and design decisions
+
+## OUTPUT REQUIREMENTS
+- Architectural diagrams or textual descriptions
+- Dependency mapping with specific file references
+- Integration point documentation with examples
+- Scalability assessment and bottleneck identification
+- Prioritized recommendations for architectural improvement
+
+## VERIFICATION CHECKLIST ✓
+□ All major components and their relationships analyzed
+□ Key architectural decisions and trade-offs are documented
+□ Data flow and integration points are clearly mapped
+□ Scalability and maintainability findings are supported by evidence
+
+Focus: High-level design patterns and system-wide architectural concerns.

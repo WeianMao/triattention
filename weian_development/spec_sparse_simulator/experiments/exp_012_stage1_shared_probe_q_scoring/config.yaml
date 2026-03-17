@@ -1,0 +1,39 @@
+# Exp 012 Stage 3: Shared Probe + L2 Normalization + Magnitude-Aware Scoring + K-means Init
+
+experiment:
+  name: "exp_012_stage3_l2_normalized"
+  description: "Stage 3: L2 normalization on Q and probes + distance-based scoring"
+
+model:
+  num_bins: 128
+  num_kernels: 3
+  num_freqs: 64  # head_dim / 2
+  head_dim: 128
+  use_kmeans_init: true  # Use K-means cluster centers to initialize probes
+  # Stage 3: L2 normalize Q and probes before distance computation
+  # K-side: s_K = P_normalized_rot^T * K + u^T * m^K + k_bias
+  # Q-side: s_Q = tilde_w^T * d + v^T * m^Q_normalized + c
+
+training:
+  epochs: 10
+  learning_rate: 0.001
+  optimizer: "adam"
+  round_window: 128
+  exclude_tail: 1000
+  save_every: 10
+  log_every: 10
+
+data:
+  trace_path: "data/qk.pt"
+  test_trace_path: "data/qk_test.pt"
+  head_sample_file: "hardest_head.json"  # Layer 17, Head 25 - hardest among top 10
+
+evaluation:
+  topk_K: [50, 500, 1000]
+  round_window: 128
+
+output:
+  base_dir: "output"
+  logs_dir: "output/logs"
+  checkpoints_dir: "output/checkpoints"
+  results_dir: "output/results"

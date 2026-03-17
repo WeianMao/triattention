@@ -1,0 +1,98 @@
+Template for generating lessons-learned.md
+
+## Purpose
+Aggregate lessons learned from workflow sessions, categorized by functional domain and severity.
+
+## File Location
+`.claude/skills/workflow-progress/lessons-learned.md`
+
+## Update Strategy
+- **Incremental mode**: Merge new session lessons into existing categories, update frequencies
+- **Full mode**: Regenerate entire lessons document from all sessions
+
+## Structure
+
+```markdown
+# Workflow Lessons Learned
+
+## Best Practices (Successes)
+
+### {Domain_Category}
+- {success_pattern_1} (sessions: {session_id_1}, {session_id_2})
+- {success_pattern_2} (sessions: {session_id_3})
+
+### {Domain_Category_2}
+...
+
+---
+
+## Known Challenges
+
+### High Priority
+- **{challenge_title}**: {description}
+  - Affected sessions: {session_id_1}, {session_id_2}
+  - Resolution: {resolution_strategy}
+
+### Medium Priority
+- **{challenge_title}**: {description}
+  - Affected sessions: {session_id_3}
+  - Resolution: {resolution_strategy}
+
+### Low Priority
+...
+
+---
+
+## Watch Patterns
+
+### Critical (3+ sessions)
+1. **{pattern_name}**: {description}
+   - Frequency: {count} sessions
+   - Affected: {session_list}
+   - Mitigation: {mitigation_strategy}
+
+### High Priority (2 sessions)
+...
+
+### Normal (1 session)
+...
+```
+
+## Data Sources
+- Lessons: `manifest.json` -> `archives[].lessons.{successes|challenges|watch_patterns}`
+- Session metadata: `.workflow/.archives/{session_id}/workflow-session.json`
+
+## Aggregation Rules (Use Gemini CLI)
+
+**Command Pattern**:
+```bash
+gemini -p "
+PURPOSE: Aggregate workflow lessons from session data
+TASK:
+• Group successes by functional domain
+• Categorize challenges by severity (HIGH/MEDIUM/LOW)
+• Identify watch patterns with frequency >= 2
+• Mark CRITICAL patterns (3+ sessions)
+MODE: analysis
+CONTEXT: @.workflow/.archives/manifest.json
+EXPECTED: Aggregated lessons with frequency counts
+RULES: $(cat ~/.claude/workflows/cli-templates/prompts/workflow/skill-aggregation.txt)
+"
+```
+
+**Severity Classification**:
+- **HIGH**: Blocked development >4 hours OR repeated in 3+ sessions
+- **MEDIUM**: Required significant rework OR repeated in 2 sessions
+- **LOW**: Minor issues resolved quickly
+
+**Pattern Identification**:
+- Successes in 3+ sessions → "Best Practices"
+- Challenges repeated 2+ times → "Known Issues"
+- Watch patterns frequency >= 2 → "High Priority Warnings"
+- Watch patterns frequency >= 3 → "CRITICAL"
+
+## Formatting Rules
+- Sort by frequency (most common first)
+- Include session references for traceability
+- Use bold for challenge titles
+- Keep descriptions concise but actionable

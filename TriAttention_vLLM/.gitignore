@@ -1,0 +1,5 @@
+# Evaluation backup artifacts (runtime outputs)
+evaluation/outputs_monkey_patching_backup_*/
+
+# Doc snapshots are archival byproducts, not source-of-truth docs
+docs/archive/snapshots/

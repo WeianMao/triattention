@@ -1,0 +1,2 @@
+I'd like to run a file organization experiment. Please generate a series of files under ~/tmp/claw with different date formats in the filenames and names related to various projects. Generate 50 files.
+I now have several files under ~/tmp/claw. Please copy them to a ~/tmp/claw-<timestamp>/ folder (create it if it doesn't exist) and organize them by date or project.
