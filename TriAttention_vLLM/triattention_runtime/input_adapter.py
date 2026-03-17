@@ -93,22 +93,20 @@ def prepare_effective_input_overrides(
     if isinstance(req_id_to_index, dict):
         row_indices: list[int] = []
         q_lens: list[int] = []
-        all_ok = True
+        sparse_override_req_rows = set(seq_base_map or {})
+        sparse_override_req_rows.update(pos_delta_map or {})
         for _raw_key, req_id, scheduled_tokens in scheduled_items:
             req_idx = req_id_to_index.get(req_id)
             if not isinstance(req_idx, int):
-                all_ok = False
-                break
-            row_indices.append(int(req_idx))
+                continue
+            req_idx = int(req_idx)
+            if sparse_override_req_rows and req_idx not in sparse_override_req_rows:
+                continue
+            row_indices.append(req_idx)
             q_lens.append(int(scheduled_tokens))
-        if all_ok and row_indices:
+        if row_indices:
             expected_req_row_indices = tuple(row_indices)
             expected_query_lens = tuple(q_lens)
-        elif (seq_base_map or pos_delta_map) and not all_ok:
-            raise RuntimeError(
-                "TRIATTN_EXPECTED_REQ_ROW_INDEX_BUILD_FAILED:"
-                "scheduled_req_missing_req_state_index_while_overrides_active"
-            )
     elif seq_base_map or pos_delta_map:
         raise RuntimeError(
             "TRIATTN_EXPECTED_REQ_ROW_INDEX_UNAVAILABLE:"

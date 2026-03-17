@@ -17,6 +17,33 @@ from .input_patch_ops import (
 )
 
 
+def _debug_disable_seq_override() -> bool:
+    return os.environ.get("TRIATTN_DEBUG_DISABLE_SEQ_OVERRIDE", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _debug_disable_slot_shift() -> bool:
+    return os.environ.get("TRIATTN_DEBUG_DISABLE_SLOT_SHIFT", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _debug_enable_slot_shift() -> bool:
+    return os.environ.get("TRIATTN_DEBUG_ENABLE_SLOT_SHIFT", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _validate_idx_mapping_matches_expected_rows(idx_mapping: torch.Tensor) -> None:
     expected = _patch_state.get_active_expected_req_row_indices(idx_mapping.device)
     if expected is None:
@@ -107,6 +134,8 @@ def make_patched_prepare_pos_seq_lens(
             pos,
             seq_lens,
         )
+        if _debug_disable_seq_override():
+            return
         eff = _patch_state.ACTIVE_EFFECTIVE_NUM_COMPUTED_TOKENS
         if eff is None:
             if (
@@ -160,6 +189,15 @@ def make_patched_compute_slot_mappings(
             return original_compute_slot_mappings(self, idx_mapping, query_start_loc, positions)
         _patch_state.mark_active_effective_overrides_consumed()
         _validate_mapping_once(idx_mapping, query_start_loc)
+        # Keep decode positions in the original absolute RoPE space. After
+        # compaction we still need seq_len overrides so attention/masking sees
+        # the effective compressed history length, but shifting token positions
+        # here corrupts continuation semantics for real serve/chat payloads.
+        #
+        # The old shift path is retained behind a debug-only opt-in so we can
+        # bisect regressions without putting extra work back on the hot path.
+        if _debug_disable_slot_shift() or not _debug_enable_slot_shift():
+            return original_compute_slot_mappings(self, idx_mapping, query_start_loc, positions)
         eff_positions = _patch_state.ACTIVE_EFFECTIVE_POSITIONS
         if (
             isinstance(eff_positions, torch.Tensor)

@@ -466,6 +466,7 @@ def parse_arguments() -> argparse.Namespace:
 
 def _apply_runtime_env(args: argparse.Namespace) -> None:
     env_values = {
+        "MODEL_PATH": str(resolve_path(args.model_path)),
         "KV_BUDGET": str(args.kv_budget),
         "DIVIDE_LENGTH": str(args.divide_length),
         "PROTECT_PREFILL": str(args.protect_prefill).lower(),

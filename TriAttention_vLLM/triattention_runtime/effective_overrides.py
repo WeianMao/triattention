@@ -97,6 +97,51 @@ def _effective_base_before_step(
     return max(0, current_len - max(0, int(scheduled_tokens)))
 
 
+def _resolve_abs_progress_for_override(
+    *,
+    req_state: Any,
+    state: Any,
+    scheduled_tokens: int,
+    scheduler_step: int | None,
+) -> int:
+    abs_progress = (
+        int(getattr(req_state, "num_computed_tokens", 0))
+        if req_state is not None
+        else 0
+    )
+    if state is None:
+        return abs_progress
+
+    compression_count = getattr(state, "compression_count", None)
+    prefill_len = getattr(state, "prefill_len", None)
+    if not isinstance(compression_count, int) or compression_count <= 0:
+        return abs_progress
+    if not isinstance(prefill_len, int) or prefill_len <= 0:
+        return abs_progress
+    if abs_progress >= prefill_len:
+        return abs_progress
+
+    # In chunked-prefill serve mode, the first decode step after the final
+    # prefill chunk can transiently expose a request progress counter that is
+    # still one prefill chunk behind. Clamp that one-step lag to the full
+    # prompt length so sparse position overrides stay aligned with the actual
+    # cache contents after prefill compression.
+    if int(scheduled_tokens) == 1 and _state_marks_effective_pre_step_base(
+        state=state,
+        scheduler_step=scheduler_step,
+    ) is True:
+        trace_event(
+            "effective_override_prefill_progress_clamp",
+            abs_progress=int(abs_progress),
+            prefill_len=int(prefill_len),
+            scheduled_tokens=int(scheduled_tokens),
+            scheduler_step=int(scheduler_step) if isinstance(scheduler_step, int) else -1,
+            compression_count=int(compression_count),
+        )
+        return int(prefill_len)
+    return abs_progress
+
+
 def _get_cached_sparse_overrides_result(
     *,
     scheduler_output: Any,
@@ -234,10 +279,11 @@ def build_effective_sparse_overrides(
                 # follow native vLLM seq_len / slot-mapping semantics.
                 continue
         req_state = requests_get(req_id)
-        abs_progress = (
-            int(getattr(req_state, "num_computed_tokens", 0))
-            if req_state is not None
-            else 0
+        abs_progress = _resolve_abs_progress_for_override(
+            req_state=req_state,
+            state=state,
+            scheduled_tokens=scheduled_tokens,
+            scheduler_step=scheduler_step,
         )
         effective_before_step = _effective_base_before_step(
             state=state,

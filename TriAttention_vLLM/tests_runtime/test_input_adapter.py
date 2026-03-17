@@ -87,8 +87,8 @@ def test_prepare_effective_input_overrides_populates_expected_req_row_indices(mo
         state_store=object(),
         scheduler_output=scheduler_output,
     )
-    assert out.expected_req_row_indices == (5, 1)
-    assert out.expected_query_lens == (2, 1)
+    assert out.expected_req_row_indices == (1,)
+    assert out.expected_query_lens == (1,)
 
 
 def test_prepare_effective_input_overrides_fails_if_overrides_active_but_req_index_unavailable(
@@ -115,3 +115,35 @@ def test_prepare_effective_input_overrides_fails_if_overrides_active_but_req_ind
         assert "TRIATTN_EXPECTED_REQ_ROW_INDEX_UNAVAILABLE" in str(exc)
     else:
         raise AssertionError("expected fail-fast when req_id_to_index is unavailable")
+
+
+def test_prepare_effective_input_overrides_skips_scheduled_rows_without_overrides(
+    monkeypatch,
+):
+    import triattention_runtime.input_adapter as mod
+
+    monkeypatch.setattr(
+        mod,
+        "build_effective_sparse_overrides",
+        lambda **kwargs: ({5: 10}, {5: -2}, None, 0),
+    )
+
+    base_runner = type(
+        "_BR",
+        (),
+        {"req_states": type("_RS", (), {"req_id_to_index": {"rA": 5}})()},
+    )()
+    scheduler_output = type(
+        "_SO",
+        (),
+        {"num_scheduled_tokens": {"rA": 2, "rB": 1}},
+    )()
+
+    out = prepare_effective_input_overrides(
+        base_runner=base_runner,
+        state_store=object(),
+        scheduler_output=scheduler_output,
+    )
+
+    assert out.expected_req_row_indices == (5,)
+    assert out.expected_query_lens == (2,)

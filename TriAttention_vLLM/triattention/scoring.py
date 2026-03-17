@@ -133,9 +133,13 @@ def compute_scores_triton(
 
     # Keep K as-is to avoid an extra full-tensor copy on scoring hot path.
     K_rot = key_states
-    freq_scale_sq_input = freq_scale_sq.contiguous().to(dtype=key_states.dtype)
-    omega_input = omega.contiguous().to(dtype=key_states.dtype)
-    offsets_input = offsets.contiguous().to(dtype=key_states.dtype)
+    # Keep stats / frequency tables in fp32 for scoring equivalence.
+    # The kernel already promotes loads to fp32 internally; downcasting these
+    # tensors to key_states.dtype here only throws away signal before the hot
+    # path even starts.
+    freq_scale_sq_input = freq_scale_sq.contiguous().to(dtype=torch.float32)
+    omega_input = omega.contiguous().to(dtype=torch.float32)
+    offsets_input = offsets.contiguous().to(dtype=torch.float32)
 
     # NOTE: position_indices is NOT used in Triton kernel anymore
     # Phase calculation uses t*omega + phi_rot, no per-token positions needed
@@ -179,9 +183,9 @@ def compute_scores_triton(
     scores = speckv_scoring(
         K_rot=K_rot,
         position_indices=position_indices,
-        q_mean_real=q_mean_real.to(dtype=key_states.dtype),
-        q_mean_imag=q_mean_imag.to(dtype=key_states.dtype),
-        q_abs_mean=q_abs_mean.to(dtype=key_states.dtype),
+        q_mean_real=q_mean_real.to(dtype=torch.float32),
+        q_mean_imag=q_mean_imag.to(dtype=torch.float32),
+        q_abs_mean=q_abs_mean.to(dtype=torch.float32),
         freq_scale_sq=freq_scale_sq_input,
         omega=omega_input,
         offsets=offsets_input,
@@ -190,6 +194,7 @@ def compute_scores_triton(
         disable_mlr=config.disable_mlr,
         trig_cache=active_trig_cache,
         trig_values=active_trig_values,
+        rope_style=config.rope_style,
     )  # [batch, num_kv_heads, seq_len]
 
     # For per_layer mode, aggregate across heads
@@ -265,28 +270,25 @@ def compute_scores_pytorch(
         # If not provided, assume it equals q_mean_abs (no MLR effect)
         q_abs_mean = q_mean_abs
 
-    # Convert K to complex representation (assuming RoPE 'half' style)
-    # K shape: [batch, num_kv_heads, seq_len, head_dim]
-    # Split into pairs: [batch, num_kv_heads, seq_len, freq_count, 2]
-    k_pairs = key_states.reshape(batch_size, num_kv_heads, seq_len, freq_count, 2)
-    k_real = k_pairs[..., 0]  # [batch, num_kv_heads, seq_len, freq_count]
-    k_imag = k_pairs[..., 1]  # [batch, num_kv_heads, seq_len, freq_count]
+    # Convert K to complex representation according to the configured RoPE layout.
+    # Qwen-family models use "half" layout: [r0, r1, ..., i0, i1, ...].
+    if config.rope_style == "interleaved":
+        k_pairs = key_states.reshape(batch_size, num_kv_heads, seq_len, freq_count, 2)
+        k_real = k_pairs[..., 0]
+        k_imag = k_pairs[..., 1]
+    else:
+        half_dim = head_dim // 2
+        k_real = key_states[..., :half_dim]
+        k_imag = key_states[..., half_dim:]
     k_abs = torch.sqrt(k_real ** 2 + k_imag ** 2)  # [batch, num_kv_heads, seq_len, freq_count]
 
-    # Compute amplitude term: |Q_mean| * |K|
-    # Expand q_abs_mean: [num_kv_heads, freq_count] -> [batch, num_kv_heads, seq_len, freq_count]
-    q_abs_expanded = q_abs_mean.unsqueeze(0).unsqueeze(2)
-    amp = q_abs_expanded * k_abs  # [batch, num_kv_heads, seq_len, freq_count]
-
-    # Compute phase difference: phi = atan2(q_imag, q_real) - atan2(k_imag, k_real)
-    # For numerical stability, use complex division formula
+    # Compute Q * conj(K_rot) directly. This is the mathematically equivalent
+    # optimized form for K_rot inputs and avoids the lossy amp/phi reconstruction
+    # path that is only valid for K_unrot.
     q_real_expanded = q_mean_real.unsqueeze(0).unsqueeze(2)
     q_imag_expanded = q_mean_imag.unsqueeze(0).unsqueeze(2)
-
-    # Phase = atan2(q_imag * k_real - q_real * k_imag, q_real * k_real + q_imag * k_imag)
-    numerator = q_imag_expanded * k_real - q_real_expanded * k_imag
-    denominator = q_real_expanded * k_real + q_imag_expanded * k_imag
-    phi = torch.atan2(numerator, denominator)  # [batch, num_kv_heads, seq_len, freq_count]
+    prod_real = q_real_expanded * k_real + q_imag_expanded * k_imag
+    prod_imag = q_imag_expanded * k_real - q_real_expanded * k_imag
 
     # Determine round_start
     if round_start is None:
@@ -306,28 +308,25 @@ def compute_scores_pytorch(
     # Compute scores for each offset
     for offset_val in offsets:
         # Since K already contains RoPE rotation (K_rot = K_unrot * e^{i*p*omega}),
-        # phase only depends on query position t, not on key position p.
-        # Correct formula: phase = t * omega + phi
-        # where t = round_start + offset (query position)
+        # the optimized equivalent form uses Q * conj(K_rot) directly and only
+        # needs the query-side phase t * omega.
         t = round_start + offset_val.item()
 
         # omega: [freq_count] -> [1, 1, 1, freq_count]
         omega_expanded = omega.unsqueeze(0).unsqueeze(0).unsqueeze(0)
 
-        # phase = t * omega + phi
-        # t is scalar, omega: [1, 1, 1, freq_count]
-        # phi: [batch, num_kv_heads, seq_len, freq_count]
-        phase = t * omega_expanded + phi  # [batch, num_kv_heads, seq_len, freq_count]
-
-        # Position-dependent term: amp * freq_scale_sq * cos(phase)
         # freq_scale_sq: [num_kv_heads, freq_count] -> [1, num_kv_heads, 1, freq_count]
         freq_scale_expanded = freq_scale_sq.unsqueeze(0).unsqueeze(2)
 
         if not config.disable_trig:
-            position_term = amp * freq_scale_expanded * torch.cos(phase)
+            phase = t * omega_expanded
+            cos_vals = torch.cos(phase)
+            sin_vals = torch.sin(phase)
+            position_term = freq_scale_expanded * (
+                prod_real * cos_vals - prod_imag * sin_vals
+            )
         else:
-            # If trigonometric term disabled, use only magnitude
-            position_term = amp * freq_scale_expanded
+            position_term = torch.zeros_like(prod_real)
 
         # Sum over frequencies
         score_offset = position_term.sum(dim=-1)  # [batch, num_kv_heads, seq_len]

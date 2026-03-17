@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import itertools
 import json
 import math
@@ -24,6 +25,16 @@ if TYPE_CHECKING:
     from weian_development.speckv.speckv_rkv_style import SpeckVRKVStyle
 
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
+
+
+def _load_module_from_path(module_name: str, module_path: Path):
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load module {module_name} from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @dataclass
@@ -79,7 +90,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=("baseline", "compress_once", "both"),
+        choices=("baseline", "compress_once", "compress_iterative", "both"),
         default="both",
     )
     parser.add_argument("--kv-budget", type=int, default=7000)
@@ -88,12 +99,42 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-p", type=float, default=0.95)
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--compression-seed",
+        type=int,
+        default=None,
+        help="Optional seed for HF-side compression tie-break noise. Default disables compressor noise.",
+    )
     parser.add_argument("--attn-implementation", type=str, default="flash_attention_2")
     parser.add_argument("--load-dtype", type=str, default="float16")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--use-chat-template", action="store_true")
     parser.add_argument("--system-prompt", type=str, default=DEFAULT_SYSTEM_PROMPT)
     parser.add_argument("--prompt-key", type=str, default="question")
+    parser.add_argument(
+        "--prompt-file",
+        type=Path,
+        default=None,
+        help="Optional raw prompt file. When provided, bypass dataset/template building.",
+    )
+    parser.add_argument(
+        "--dump-keep-indices-out",
+        type=Path,
+        default=None,
+        help="Optional JSON path for the first compression keep indices dump.",
+    )
+    parser.add_argument(
+        "--dump-k-sample-out",
+        type=Path,
+        default=None,
+        help="Optional JSON path for sampled K vectors before manual compression.",
+    )
+    parser.add_argument(
+        "--dump-compression-round-dir",
+        type=Path,
+        default=None,
+        help="Optional directory to dump every compression round's keep indices.",
+    )
     parser.add_argument("--score-aggregation", type=str, default="mean")
     parser.add_argument("--normalize-scores", action="store_true")
     parser.add_argument("--use-rank-aggregation", action="store_true")
@@ -105,6 +146,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--disable-top-n-high-freq", type=int, default=0)
     parser.add_argument("--disable-mlr", action="store_true")
     parser.add_argument("--disable-trig", action="store_true")
+    parser.add_argument(
+        "--window-size",
+        type=int,
+        default=128,
+        help="Protect the most recent N tokens during compression, aligned with vLLM runtime semantics.",
+    )
+    parser.add_argument(
+        "--divide-length",
+        type=int,
+        default=128,
+        help="Overflow chunk length used by iterative compression trigger.",
+    )
+    parser.add_argument(
+        "--compare-vllm-step-semantics",
+        action="store_true",
+        help=(
+            "Align iterative decode compression timing with vLLM runtime semantics: "
+            "compress on the pre-step cache when current_len + scheduled_tokens reaches "
+            "budget + divide_length."
+        ),
+    )
     parser.add_argument("--device", type=str, default="cuda")
     return parser.parse_args()
 
@@ -280,7 +342,24 @@ def sample_next_token(
 
 
 def create_compressor(args: argparse.Namespace, device: torch.device) -> "SpeckVRKVStyle":
-    from weian_development.speckv.speckv_rkv_style import SpeckVRKVStyle, SpeckVRKVStyleConfig
+    try:
+        from weian_development.speckv.speckv_rkv_style import SpeckVRKVStyle, SpeckVRKVStyleConfig
+    except ModuleNotFoundError:
+        speckv_dir = RKV_ROOT / "weian_development/speckv"
+        _load_module_from_path(
+            "weian_development.speckv.round_pruning_utils",
+            speckv_dir / "round_pruning_utils.py",
+        )
+        _load_module_from_path(
+            "weian_development.speckv.stats_utils",
+            speckv_dir / "stats_utils.py",
+        )
+        module = _load_module_from_path(
+            "weian_development.speckv.speckv_rkv_style",
+            speckv_dir / "speckv_rkv_style.py",
+        )
+        SpeckVRKVStyle = module.SpeckVRKVStyle
+        SpeckVRKVStyleConfig = module.SpeckVRKVStyleConfig
 
     config = SpeckVRKVStyleConfig(
         stats_path=args.stats_path,
@@ -290,14 +369,14 @@ def create_compressor(args: argparse.Namespace, device: torch.device) -> "SpeckV
         budget=int(args.kv_budget),
         offset_max_length=65536,
         score_aggregation=args.score_aggregation,
-        seed=args.seed,
+        seed=args.compression_seed,
         head_limit=None,
         metadata_expectations=None,
         normalize_scores=bool(args.normalize_scores),
         use_rank_aggregation=bool(args.use_rank_aggregation),
         include_prefill_in_budget=True,
         allow_prefill_compression=True,
-        divide_length=128,
+        divide_length=int(args.divide_length),
         use_slack_trigger=False,
         per_head_pruning=bool(args.per_head_pruning),
         per_layer_perhead_pruning=bool(args.per_layer_perhead_pruning),
@@ -308,19 +387,382 @@ def create_compressor(args: argparse.Namespace, device: torch.device) -> "SpeckV
         disable_mlr=bool(args.disable_mlr),
         disable_trig=bool(args.disable_trig),
     )
-    return SpeckVRKVStyle(config)
+    comp = SpeckVRKVStyle(config)
+    setattr(comp.config, "window_size", int(args.window_size))
+    return comp
+
+
+def _compute_keep_indices_with_window(
+    comp: "SpeckVRKVStyle",
+    pkv_tuple: Tuple[Tuple[torch.Tensor, torch.Tensor], ...],
+    *,
+    recent_unabsorbed_tokens: int | None,
+) -> torch.Tensor:
+    """Debug-only keep-index path that mirrors vLLM recent-window protection.
+
+    This keeps the HF-side scoring/selection semantics intact while adding the
+    runtime-only recent-token guard used by the vLLM path. It is intentionally
+    scoped to the probe script so we can compare like-for-like without touching
+    production code.
+    """
+    if not pkv_tuple:
+        return torch.arange(0, device=comp.config.device)
+
+    kv_cache_len = pkv_tuple[0][0].shape[-2]
+    if kv_cache_len <= comp.budget:
+        return torch.arange(kv_cache_len, device=comp.config.device)
+
+    prefix_length = 0 if comp.allow_prefill_compression else comp.prefix_length
+    decode_start = min(prefix_length, kv_cache_len)
+    decode_count = max(0, kv_cache_len - decode_start)
+    if decode_count == 0:
+        return torch.arange(min(comp.budget, kv_cache_len), device=comp.config.device)
+
+    decode_budget = max(0, comp.budget - decode_start)
+    if decode_budget == 0:
+        return torch.arange(min(comp.budget, decode_start), device=comp.config.device)
+
+    decode_positions = torch.tensor(
+        comp.cache_positions[decode_start:kv_cache_len],
+        device=comp.config.device,
+        dtype=torch.long,
+    )
+    positions_per_kv_head: List[torch.Tensor] | None = None
+    if comp.cache_positions_per_head is not None:
+        positions_per_kv_head = [
+            torch.tensor(
+                head_positions[decode_start:kv_cache_len],
+                device=comp.config.device,
+                dtype=torch.long,
+            )
+            for head_positions in comp.cache_positions_per_head
+        ]
+
+    all_head_scores: List[torch.Tensor] = []
+    for layer_idx, (key_states, _) in enumerate(pkv_tuple):
+        layer_scores = comp._compute_layer_head_scores(
+            key_states,
+            decode_positions,
+            layer_idx,
+            start_index=decode_start,
+            positions_per_kv_head=positions_per_kv_head,
+        )
+        if layer_scores is not None:
+            all_head_scores.append(layer_scores)
+
+    if not all_head_scores:
+        prefill_indices = torch.arange(decode_start, device=comp.config.device)
+        decode_indices = torch.arange(
+            decode_start,
+            min(decode_start + decode_budget, kv_cache_len),
+            device=comp.config.device,
+        )
+        return torch.cat([prefill_indices, decode_indices])
+
+    head_matrix = torch.cat(all_head_scores, dim=0)
+    if comp.use_rank_aggregation:
+        ranks = torch.argsort(torch.argsort(head_matrix, dim=1, descending=True), dim=1)
+        head_matrix = ranks.float()
+    elif comp.normalize_scores and head_matrix.numel() > 0:
+        mean = head_matrix.mean(dim=1, keepdim=True)
+        std = head_matrix.std(dim=1, unbiased=False, keepdim=True).clamp_min(1e-6)
+        head_matrix = (head_matrix - mean) / std
+
+    if comp.generator is not None and head_matrix.numel() > 0:
+        noise = torch.rand(
+            head_matrix.shape,
+            device=head_matrix.device,
+            generator=comp.generator,
+        ) * 1e-6
+        head_matrix = head_matrix + noise
+
+    if comp.config.window_size > 0 and head_matrix.numel() > 0:
+        if recent_unabsorbed_tokens is None:
+            recent_count = min(int(comp.config.window_size), int(head_matrix.shape[-1]))
+        else:
+            recent_count = min(
+                int(comp.config.window_size),
+                max(0, min(int(head_matrix.shape[-1]), int(recent_unabsorbed_tokens))),
+            )
+        if recent_count > 0:
+            head_matrix = head_matrix.clone()
+            head_matrix[:, -recent_count:] = float("inf")
+
+    keep_count = min(decode_budget, decode_count)
+    if comp.per_head_pruning:
+        return comp._select_per_head_independent(head_matrix, keep_count, decode_start)
+
+    if comp.use_rank_aggregation:
+        combined = -head_matrix.min(dim=0).values
+    else:
+        combined = head_matrix.max(dim=0).values
+    decode_keep_indices = comp._select_union_based(head_matrix, combined, keep_count)
+    prefill_indices = torch.arange(decode_start, device=comp.config.device)
+    decode_keep_absolute = decode_keep_indices + decode_start
+    keep_indices = torch.cat([prefill_indices, decode_keep_absolute])
+    return torch.sort(keep_indices).values
 
 
 def apply_manual_compression(
     comp: "SpeckVRKVStyle",
     pkv_tuple: Tuple[Tuple[torch.Tensor, torch.Tensor], ...],
+    *,
+    dump_keep_indices_out: Path | None = None,
+    dump_k_sample_out: Path | None = None,
+    recent_unabsorbed_tokens: int | None = None,
 ) -> Tuple[Tuple[Tuple[torch.Tensor, torch.Tensor], ...], int]:
     seq_len = current_cache_len(pkv_tuple)
     comp.cache_positions = list(range(seq_len))
     comp.absolute_position = seq_len
     comp.prefix_length = seq_len
 
-    keep_indices = comp.compute_keep_indices(pkv_tuple, prefix_length=comp.prefix_length)
+    if dump_k_sample_out is not None and pkv_tuple:
+        dump_k_sample_out.parent.mkdir(parents=True, exist_ok=True)
+        sample_positions = sorted(
+            set(
+                [0, 1, 2, 3, 4]
+                + [max(0, seq_len // 4 - 1), seq_len // 4, min(seq_len - 1, seq_len // 4 + 1)]
+                + [max(0, seq_len // 2 - 1), seq_len // 2, min(seq_len - 1, seq_len // 2 + 1)]
+                + [max(0, (3 * seq_len) // 4 - 1), (3 * seq_len) // 4, min(seq_len - 1, (3 * seq_len) // 4 + 1)]
+                + [max(0, seq_len - 5), max(0, seq_len - 4), max(0, seq_len - 3), max(0, seq_len - 2), seq_len - 1]
+            )
+        )
+        head_limit = min(2, int(pkv_tuple[0][0].shape[1]))
+        preferred_layers = [idx for idx in (0, 1, 16, 32, 48, 63) if idx < len(pkv_tuple)]
+        if not preferred_layers:
+            preferred_layers = list(range(min(2, len(pkv_tuple))))
+        payload = {
+            "seq_len": int(seq_len),
+            "sample_positions": [int(x) for x in sample_positions],
+            "layers": {},
+        }
+        for layer_idx in preferred_layers:
+            k, _ = pkv_tuple[layer_idx]
+            layer_payload = {}
+            for head_idx in range(head_limit):
+                vectors = []
+                for pos in sample_positions:
+                    vectors.append(
+                        k[0, head_idx, pos]
+                        .detach()
+                        .to(device="cpu", dtype=torch.float32)
+                        .tolist()
+                    )
+                layer_payload[str(head_idx)] = vectors
+            payload["layers"][str(layer_idx)] = layer_payload
+        dump_k_sample_out.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    keep_indices = _compute_keep_indices_with_window(
+        comp,
+        pkv_tuple,
+        recent_unabsorbed_tokens=recent_unabsorbed_tokens,
+    )
+    if dump_keep_indices_out is not None:
+        dump_keep_indices_out.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "seq_len": int(seq_len),
+            "budget": int(comp.budget),
+            "prefix_length": int(comp.prefix_length),
+            "window_size": int(comp.config.window_size),
+            "recent_unabsorbed_tokens": (
+                int(recent_unabsorbed_tokens)
+                if recent_unabsorbed_tokens is not None
+                else None
+            ),
+            "shape": list(keep_indices.shape),
+            "indices": keep_indices.detach().to(device="cpu", dtype=torch.long).tolist(),
+        }
+        dump_keep_indices_out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    reclaimed = seq_len - (keep_indices.size(-1) if keep_indices.dim() > 1 else keep_indices.numel())
+
+    if keep_indices.dim() == 3:
+        num_layers = keep_indices.size(0)
+        num_kv_heads = keep_indices.size(1)
+        budget = keep_indices.size(2)
+        new_pkv = []
+        for layer_idx, (k, v) in enumerate(pkv_tuple):
+            batch_size = k.size(0)
+            head_dim = k.size(3)
+            layer_indices = keep_indices[layer_idx]
+            expanded_indices = layer_indices.unsqueeze(0).unsqueeze(-1).expand(
+                batch_size, num_kv_heads, budget, head_dim
+            )
+            k_new = k.gather(dim=2, index=expanded_indices)
+            v_new = v.gather(dim=2, index=expanded_indices)
+            new_pkv.append((k_new.contiguous(), v_new.contiguous()))
+        pkv_tuple = tuple(new_pkv)
+        comp.cache_positions_per_layer_perhead = {
+            (layer_idx, kv_head): [comp.cache_positions[idx] for idx in keep_indices[layer_idx, kv_head].tolist()]
+            for layer_idx in range(num_layers)
+            for kv_head in range(num_kv_heads)
+        }
+        comp.cache_positions = comp.cache_positions_per_layer_perhead[(0, 0)].copy()
+    elif keep_indices.dim() == 2 and comp.per_layer_pruning:
+        num_layers = keep_indices.size(0)
+        budget = keep_indices.size(1)
+        new_pkv = []
+        for layer_idx, (k, v) in enumerate(pkv_tuple):
+            batch_size = k.size(0)
+            num_kv_heads = k.size(1)
+            head_dim = k.size(3)
+            layer_indices = keep_indices[layer_idx]
+            expanded_indices = layer_indices.unsqueeze(0).unsqueeze(0).unsqueeze(-1).expand(
+                batch_size, num_kv_heads, budget, head_dim
+            )
+            k_new = k.gather(dim=2, index=expanded_indices)
+            v_new = v.gather(dim=2, index=expanded_indices)
+            new_pkv.append((k_new.contiguous(), v_new.contiguous()))
+        pkv_tuple = tuple(new_pkv)
+        comp.cache_positions_per_layer = {
+            layer_idx: [comp.cache_positions[idx] for idx in keep_indices[layer_idx].tolist()]
+            for layer_idx in range(num_layers)
+        }
+        comp.cache_positions = comp.cache_positions_per_layer[0].copy()
+    elif keep_indices.dim() == 2:
+        new_pkv = []
+        for k, v in pkv_tuple:
+            batch_size = k.size(0)
+            num_kv_heads = k.size(1)
+            budget = keep_indices.size(1)
+            head_dim = k.size(3)
+            expanded_indices = keep_indices.unsqueeze(0).unsqueeze(-1).expand(
+                batch_size, num_kv_heads, budget, head_dim
+            )
+            k_new = k.gather(dim=2, index=expanded_indices)
+            v_new = v.gather(dim=2, index=expanded_indices)
+            new_pkv.append((k_new.contiguous(), v_new.contiguous()))
+        pkv_tuple = tuple(new_pkv)
+        comp.cache_positions_per_head = [
+            [comp.cache_positions[idx] for idx in keep_indices[kv_head].tolist()]
+            for kv_head in range(keep_indices.size(0))
+        ]
+        comp.cache_positions = comp.cache_positions_per_head[0].copy()
+    else:
+        new_pkv = []
+        for k, v in pkv_tuple:
+            new_pkv.append((k.index_select(2, keep_indices), v.index_select(2, keep_indices)))
+        pkv_tuple = tuple(new_pkv)
+        comp.cache_positions = [comp.cache_positions[i] for i in keep_indices.tolist()]
+
+    return pkv_tuple, reclaimed
+
+
+def append_generated_position(comp: "SpeckVRKVStyle", absolute_position: int, pkv_tuple) -> None:
+    """Append one newly generated token's absolute position to compressor state.
+
+    This mirrors the runtime semantics after a single decode token has been appended
+    to the KV cache. We keep the position bookkeeping in sync without resetting the
+    compressor, so later-round iterative compression uses the true absolute indices.
+    """
+    if comp.cache_positions_per_layer_perhead is not None:
+        num_layers = len(pkv_tuple)
+        num_kv_heads = int(pkv_tuple[0][0].shape[1])
+        for layer_idx in range(num_layers):
+            for kv_head_idx in range(num_kv_heads):
+                comp.cache_positions_per_layer_perhead[(layer_idx, kv_head_idx)].append(int(absolute_position))
+        comp.cache_positions = comp.cache_positions_per_layer_perhead[(0, 0)].copy()
+        return
+
+    if comp.cache_positions_per_layer is not None:
+        num_layers = len(pkv_tuple)
+        for layer_idx in range(num_layers):
+            comp.cache_positions_per_layer[layer_idx].append(int(absolute_position))
+        comp.cache_positions = comp.cache_positions_per_layer[0].copy()
+        return
+
+    if comp.cache_positions_per_head is not None:
+        num_kv_heads = int(pkv_tuple[0][0].shape[1])
+        for kv_head_idx in range(num_kv_heads):
+            comp.cache_positions_per_head[kv_head_idx].append(int(absolute_position))
+        comp.cache_positions = comp.cache_positions_per_head[0].copy()
+        return
+
+    comp.cache_positions.append(int(absolute_position))
+
+
+def apply_iterative_compression(
+    comp: "SpeckVRKVStyle",
+    pkv_tuple: Tuple[Tuple[torch.Tensor, torch.Tensor], ...],
+    *,
+    dump_keep_indices_out: Path | None = None,
+    dump_k_sample_out: Path | None = None,
+    recent_unabsorbed_tokens: int | None = None,
+) -> Tuple[Tuple[Tuple[torch.Tensor, torch.Tensor], ...], int]:
+    """Compress using existing compressor state instead of rebuilding prefill state.
+
+    Unlike apply_manual_compression(), this preserves cache_positions / absolute_position
+    accumulated across previous compression rounds and decode steps.
+    """
+    seq_len = current_cache_len(pkv_tuple)
+    if len(comp.cache_positions) != seq_len:
+        raise ValueError(
+            f"Compressor state/cache length mismatch: state={len(comp.cache_positions)} cache={seq_len}"
+        )
+
+    if dump_k_sample_out is not None and pkv_tuple:
+        dump_k_sample_out.parent.mkdir(parents=True, exist_ok=True)
+        sample_positions = sorted(
+            set(
+                [0, 1, 2, 3, 4]
+                + [max(0, seq_len // 4 - 1), seq_len // 4, min(seq_len - 1, seq_len // 4 + 1)]
+                + [max(0, seq_len // 2 - 1), seq_len // 2, min(seq_len - 1, seq_len // 2 + 1)]
+                + [max(0, (3 * seq_len) // 4 - 1), (3 * seq_len) // 4, min(seq_len - 1, (3 * seq_len) // 4 + 1)]
+                + [max(0, seq_len - 5), max(0, seq_len - 4), max(0, seq_len - 3), max(0, seq_len - 2), seq_len - 1]
+            )
+        )
+        head_limit = min(2, int(pkv_tuple[0][0].shape[1]))
+        preferred_layers = [idx for idx in (0, 1, 16, 32, 48, 63) if idx < len(pkv_tuple)]
+        if not preferred_layers:
+            preferred_layers = list(range(min(2, len(pkv_tuple))))
+        payload = {
+            "seq_len": int(seq_len),
+            "sample_positions": [int(x) for x in sample_positions],
+            "layers": {},
+        }
+        for layer_idx in preferred_layers:
+            k, _ = pkv_tuple[layer_idx]
+            layer_payload = {}
+            for head_idx in range(head_limit):
+                vectors = []
+                for pos in sample_positions:
+                    vectors.append(
+                        k[0, head_idx, pos]
+                        .detach()
+                        .to(device="cpu", dtype=torch.float32)
+                        .tolist()
+                    )
+                layer_payload[str(head_idx)] = vectors
+            payload["layers"][str(layer_idx)] = layer_payload
+        dump_k_sample_out.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    keep_indices = _compute_keep_indices_with_window(
+        comp,
+        pkv_tuple,
+        recent_unabsorbed_tokens=recent_unabsorbed_tokens,
+    )
+    if dump_keep_indices_out is not None:
+        dump_keep_indices_out.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "seq_len": int(seq_len),
+            "budget": int(comp.budget),
+            "prefix_length": int(comp.prefix_length),
+            "absolute_position": int(comp.absolute_position),
+            "window_size": int(comp.config.window_size),
+            "recent_unabsorbed_tokens": (
+                int(recent_unabsorbed_tokens)
+                if recent_unabsorbed_tokens is not None
+                else None
+            ),
+            "shape": list(keep_indices.shape),
+            "indices": keep_indices.detach().to(device="cpu", dtype=torch.long).tolist(),
+        }
+        dump_keep_indices_out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     reclaimed = seq_len - (keep_indices.size(-1) if keep_indices.dim() > 1 else keep_indices.numel())
 
     if keep_indices.dim() == 3:
@@ -451,12 +893,43 @@ def run_mode(
     if mode == "compress_once":
         print("[hf-probe] mode=compress_once manual compression start", file=sys.stderr, flush=True)
         compressor = create_compressor(args, device)
-        pkv_tuple, reclaimed = apply_manual_compression(compressor, pkv_tuple)
+        pkv_tuple, reclaimed = apply_manual_compression(
+            compressor,
+            pkv_tuple,
+            dump_keep_indices_out=args.dump_keep_indices_out,
+            dump_k_sample_out=args.dump_k_sample_out,
+            recent_unabsorbed_tokens=None,
+        )
         compressed_prompt_tokens = current_cache_len(pkv_tuple)
         sys.stderr.write(
             f"[hf-probe] manual prefill compression applied: before={prompt_tokens} "
             f"after={compressed_prompt_tokens} reclaimed={reclaimed}\n"
         )
+        absolute_position = prompt_tokens
+    elif mode == "compress_iterative":
+        print("[hf-probe] mode=compress_iterative setup", file=sys.stderr, flush=True)
+        compressor = create_compressor(args, device)
+        compressor.cache_positions = list(range(prompt_tokens))
+        compressor.absolute_position = prompt_tokens
+        compressor.prefix_length = prompt_tokens
+        compression_round = 0
+        if prompt_tokens > args.kv_budget:
+            print("[hf-probe] mode=compress_iterative prefill compression start", file=sys.stderr, flush=True)
+            round_dump_path = None
+            if args.dump_compression_round_dir is not None:
+                round_dump_path = args.dump_compression_round_dir / f"round_{compression_round:03d}_prefill.json"
+            pkv_tuple, reclaimed = apply_iterative_compression(
+                compressor,
+                pkv_tuple,
+                dump_keep_indices_out=round_dump_path or args.dump_keep_indices_out,
+                dump_k_sample_out=args.dump_k_sample_out,
+            )
+            compressed_prompt_tokens = current_cache_len(pkv_tuple)
+            sys.stderr.write(
+                f"[hf-probe] iterative prefill compression applied: before={prompt_tokens} "
+                f"after={compressed_prompt_tokens} reclaimed={reclaimed}\n"
+            )
+            compression_round += 1
         absolute_position = prompt_tokens
     else:
         absolute_position = prompt_tokens
@@ -501,6 +974,32 @@ def run_mode(
     print(f"[hf-probe] mode={mode} decode start", file=sys.stderr, flush=True)
     for _ in range(max(0, args.max_new_tokens - 1)):
         current_len = current_cache_len(past_key_values)
+        if mode == "compress_iterative" and args.compare_vllm_step_semantics:
+            trigger_len = int(args.kv_budget) + int(args.divide_length)
+            # vLLM scheduler triggers on estimated length that already includes the
+            # currently scheduled decode token, while the selector sees the effective
+            # pre-step cache. Mirror that timing here for keep-index comparisons.
+            if (current_len + 1) >= trigger_len:
+                round_dump_path = None
+                if args.dump_compression_round_dir is not None:
+                    round_dump_path = (
+                        args.dump_compression_round_dir
+                        / f"round_{compression_round:03d}_decode.json"
+                    )
+                past_key_values, reclaimed = apply_iterative_compression(
+                    compressor,
+                    past_key_values,
+                    dump_keep_indices_out=round_dump_path,
+                    dump_k_sample_out=None,
+                    recent_unabsorbed_tokens=max(0, current_len - int(args.kv_budget)),
+                )
+                sys.stderr.write(
+                    f"[hf-probe] iterative decode compression applied (vllm-step): "
+                    f"before={current_len} after={current_cache_len(past_key_values)} "
+                    f"reclaimed={reclaimed} absolute_position={absolute_position}\n"
+                )
+                compression_round += 1
+                current_len = current_cache_len(past_key_values)
         position_ids = torch.tensor(
             [[absolute_position]],
             device=device,
@@ -535,6 +1034,28 @@ def run_mode(
         next_input_ids = next_token.view(1, 1)
         absolute_position += 1
         past_key_values = normalize_past_key_values(outputs.past_key_values)
+        if mode == "compress_iterative":
+            append_generated_position(compressor, absolute_position - 1, past_key_values)
+            compressor.absolute_position = absolute_position
+            current_total = current_cache_len(past_key_values)
+            trigger_len = int(args.kv_budget) + int(args.divide_length)
+            if (not args.compare_vllm_step_semantics) and current_total >= trigger_len:
+                round_dump_path = None
+                if args.dump_compression_round_dir is not None:
+                    round_dump_path = args.dump_compression_round_dir / f"round_{compression_round:03d}_decode.json"
+                past_key_values, reclaimed = apply_iterative_compression(
+                    compressor,
+                    past_key_values,
+                    dump_keep_indices_out=round_dump_path,
+                    dump_k_sample_out=None,
+                    recent_unabsorbed_tokens=max(0, current_total - int(args.kv_budget)),
+                )
+                sys.stderr.write(
+                    f"[hf-probe] iterative decode compression applied: before={current_total} "
+                    f"after={current_cache_len(past_key_values)} reclaimed={reclaimed} "
+                    f"absolute_position={absolute_position}\n"
+                )
+                compression_round += 1
 
     output_text = tokenizer.decode(generated, skip_special_tokens=False)
     max_ws, max_char, max_char_c = compute_repetition_metrics(output_text)
@@ -572,16 +1093,20 @@ def write_result(output_dir: Path, result: ProbeResult) -> Path:
 
 def main() -> None:
     args = parse_args()
-    print("[hf-probe] loading dataset", file=sys.stderr, flush=True)
-    record = load_record(args.dataset_path, args.sample_index)
     model, tokenizer = load_model_and_tokenizer(args)
-    prompt = build_probe_prompt(
-        tokenizer,
-        record,
-        use_chat_template=bool(args.use_chat_template),
-        system_prompt=args.system_prompt,
-        prompt_key=args.prompt_key,
-    )
+    if args.prompt_file is not None:
+        prompt = args.prompt_file.read_text(encoding="utf-8")
+        print(f"[hf-probe] using raw prompt file {args.prompt_file}", file=sys.stderr, flush=True)
+    else:
+        print("[hf-probe] loading dataset", file=sys.stderr, flush=True)
+        record = load_record(args.dataset_path, args.sample_index)
+        prompt = build_probe_prompt(
+            tokenizer,
+            record,
+            use_chat_template=bool(args.use_chat_template),
+            system_prompt=args.system_prompt,
+            prompt_key=args.prompt_key,
+        )
 
     modes: Sequence[str]
     if args.mode == "both":

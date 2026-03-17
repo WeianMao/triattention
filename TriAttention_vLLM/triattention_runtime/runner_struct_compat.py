@@ -13,17 +13,44 @@ def debug_v1_override_path_enabled() -> bool:
     return os.environ.get("TRIATTN_DEBUG_ENABLE_V1_OVERRIDE_PATH", "0") == "1"
 
 
+def debug_input_batch_req_state_enabled() -> bool:
+    return os.environ.get("TRIATTN_DEBUG_ALLOW_INPUT_BATCH_REQ_STATE", "0") == "1"
+
+
+def _build_req_id_map_from_input_batch(input_batch: Any) -> dict[Any, int] | None:
+    if input_batch is None:
+        return None
+    req_ids_attr = getattr(input_batch, "req_ids", None)
+    try:
+        req_ids = req_ids_attr() if callable(req_ids_attr) else req_ids_attr
+    except Exception:
+        req_ids = None
+    if not isinstance(req_ids, list):
+        req_ids = getattr(input_batch, "_req_ids", None)
+    if not isinstance(req_ids, list):
+        return None
+    rebuilt = {
+        req_id: idx
+        for idx, req_id in enumerate(req_ids)
+        if req_id is not None
+    }
+    return rebuilt or None
+
+
 def resolve_req_id_to_index(base_runner: Any) -> tuple[dict[Any, int] | None, str]:
     req_states = getattr(base_runner, "req_states", None)
     req_id_to_index = getattr(req_states, "req_id_to_index", None) if req_states is not None else None
-    if isinstance(req_id_to_index, dict):
+    if isinstance(req_id_to_index, dict) and len(req_id_to_index) > 0:
         return req_id_to_index, "req_states"
 
-    if debug_v1_override_path_enabled():
-        input_batch = getattr(base_runner, "input_batch", None)
-        req_id_to_index = getattr(input_batch, "req_id_to_index", None) if input_batch is not None else None
-        if isinstance(req_id_to_index, dict):
-            return req_id_to_index, "input_batch"
+    input_batch = getattr(base_runner, "input_batch", None)
+    req_id_to_index = getattr(input_batch, "req_id_to_index", None) if input_batch is not None else None
+    if isinstance(req_id_to_index, dict) and len(req_id_to_index) > 0:
+        return req_id_to_index, "input_batch"
+
+    rebuilt = _build_req_id_map_from_input_batch(input_batch)
+    if isinstance(rebuilt, dict) and len(rebuilt) > 0:
+        return rebuilt, "input_batch_req_ids"
 
     return None, "none"
 
@@ -103,5 +130,26 @@ def resolve_request_state_view(base_runner: Any, req_id: str) -> tuple[Any | Non
                 req_id=req_id,
                 req_index=req_index,
             ), "req_states_proxy"
+
+    input_batch = getattr(base_runner, "input_batch", None)
+    req_id_to_index = getattr(input_batch, "req_id_to_index", None) if input_batch is not None else None
+    if isinstance(req_id_to_index, dict):
+        req_index = req_id_to_index.get(req_id)
+        if isinstance(req_index, int):
+            return CompatRequestStateView(
+                base_runner=base_runner,
+                req_id=req_id,
+                req_index=req_index,
+            ), "input_batch_proxy"
+
+    rebuilt = _build_req_id_map_from_input_batch(input_batch)
+    if isinstance(rebuilt, dict):
+        req_index = rebuilt.get(req_id)
+        if isinstance(req_index, int):
+            return CompatRequestStateView(
+                base_runner=base_runner,
+                req_id=req_id,
+                req_index=req_index,
+            ), "input_batch_req_ids_proxy"
 
     return None, "none"

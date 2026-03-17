@@ -2034,6 +2034,145 @@ def test_selector_hf_global_per_head_paged_matches_dense_with_normalize():
     )
 
 
+def test_selector_hf_global_per_head_paged_uses_mean_across_layers_by_default():
+    import triattention.compressor as compressor_module
+    import triattention.scoring as scoring_module
+    import triattention_runtime.hook_impl as hook_impl_module
+
+    class _FakeCompressor:
+        def __init__(self, _cfg):
+            head_stats_l0 = {
+                "q_abs_mean": torch.zeros((8, 2), dtype=torch.float32),
+                "q_mean_complex": torch.zeros((8, 2, 2), dtype=torch.float32),
+            }
+            head_stats_l1 = {
+                "q_abs_mean": torch.ones((8, 2), dtype=torch.float32),
+                "q_mean_complex": torch.zeros((8, 2, 2), dtype=torch.float32),
+            }
+            self.head_stats = {0: head_stats_l0, 1: head_stats_l1}
+            self.freq_scale_sq = torch.ones((2, 8, 2), dtype=torch.float32)
+            self.omega = torch.ones((2,), dtype=torch.float32)
+            self.offsets = torch.ones((1,), dtype=torch.float32)
+
+        def _lazy_init(self):
+            return None
+
+    def _fake_compute_scores_triton(
+        key_states,
+        cache_positions,
+        head_stats,
+        omega,
+        offsets,
+        freq_scale_sq,
+        config,
+        round_start=None,
+        trig_cache=None,
+    ):
+        del cache_positions, omega, offsets, freq_scale_sq, config, round_start, trig_cache
+        token_ids = key_states[0, 0, :, 0].to(dtype=torch.float32)
+        layer_marker = float(head_stats["q_abs_mean"][0, 0].item())
+        if layer_marker < 0.5:
+            base = torch.where(
+                token_ids == 0,
+                10.0,
+                torch.where(token_ids == 1, 7.0, torch.zeros_like(token_ids)),
+            )
+        else:
+            base = torch.where(
+                token_ids == 2,
+                9.0,
+                torch.where(token_ids == 1, 7.0, torch.zeros_like(token_ids)),
+            )
+        num_heads = int(key_states.shape[1])
+        out = []
+        for head in range(num_heads):
+            out.append(base + head * 0.01)
+        return torch.stack(out, dim=0).unsqueeze(0).contiguous()
+
+    def _make_kv(total_tokens: int, block_size: int) -> torch.Tensor:
+        num_blocks = (total_tokens + block_size - 1) // block_size
+        kv = torch.zeros((2, num_blocks, block_size, 2, 2), dtype=torch.float32)
+        for token in range(total_tokens):
+            b = token // block_size
+            o = token % block_size
+            kv[0, b, o, :, 0] = float(token)
+        if num_blocks == 2:
+            register_kv_layout_axis_hint(kv, 0)
+        return kv
+
+    old_compressor = compressor_module.TriAttentionCompressor
+    old_compute = scoring_module.compute_scores_triton
+    compressor_module.TriAttentionCompressor = _FakeCompressor
+    scoring_module.compute_scores_triton = _fake_compute_scores_triton
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pt") as stats_file:
+            cfg = TriAttentionRuntimeConfig(
+                kv_budget=2,
+                pruning_mode="per_head",
+                per_head_selection_semantics="hf_aligned_global_per_head",
+                sparse_stats_path=stats_file.name,
+                sparse_normalize_scores=False,
+                window_size=0,
+                enable_experimental_kv_compaction=True,
+                require_triton_scoring=False,
+            )
+            _, group_selector, status = hook_impl_module._build_speckv_selector(cfg)
+            assert status == "enabled"
+            assert callable(group_selector)
+
+            total_tokens = 8
+            block_size = 4
+            kv0 = _make_kv(total_tokens, block_size)
+            kv1 = _make_kv(total_tokens, block_size)
+
+            dense0 = hook_impl_module.gather_request_k_dense(
+                kv_cache=kv0,
+                block_ids=[0, 1],
+                block_size=block_size,
+                total_tokens=total_tokens,
+            )
+            dense1 = hook_impl_module.gather_request_k_dense(
+                kv_cache=kv1,
+                block_ids=[0, 1],
+                block_size=block_size,
+                total_tokens=total_tokens,
+            )
+
+            dense_out = group_selector(
+                layer_inputs=[(0, dense0), (1, dense1)],
+                layer_input_iter=None,
+                layer_kv_iter=None,
+                total_tokens=total_tokens,
+                prefill_len=0,
+                protect_prefill=False,
+                round_start=7,
+                budget_total=2,
+            )
+            paged_out = group_selector(
+                layer_inputs=None,
+                layer_input_iter=None,
+                layer_kv_iter=lambda: iter(
+                    [
+                        (0, kv0, [0, 1], block_size),
+                        (1, kv1, [0, 1], block_size),
+                    ]
+                ),
+                total_tokens=total_tokens,
+                prefill_len=0,
+                protect_prefill=False,
+                round_start=7,
+                budget_total=2,
+            )
+    finally:
+        compressor_module.TriAttentionCompressor = old_compressor
+        scoring_module.compute_scores_triton = old_compute
+
+    assert dense_out is not None and paged_out is not None
+    assert dense_out["group_agg_mode"] == "mean"
+    assert paged_out["group_agg_mode"] == "mean"
+    assert torch.equal(dense_out["indices"], paged_out["indices"])
+
+
 def test_selector_hf_per_layer_paged_matches_dense_with_normalize():
     import triattention.compressor as compressor_module
     import triattention.scoring as scoring_module

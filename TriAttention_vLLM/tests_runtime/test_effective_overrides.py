@@ -286,6 +286,39 @@ def test_build_effective_sparse_overrides_prefers_request_state_semantics_marker
     assert single_pos_delta == -20
 
 
+def test_build_effective_sparse_overrides_clamps_prefill_progress_on_first_decode_after_chunked_prefill():
+    req_states = SimpleNamespace(req_id_to_index={"r1": 0})
+    base_runner = SimpleNamespace(
+        req_states=req_states,
+        requests={"r1": SimpleNamespace(num_computed_tokens=14336)},
+    )
+    state_store = SimpleNamespace(
+        has_active_compressed_requests=lambda: True,
+        get=lambda req_id: SimpleNamespace(
+            current_cache_len=7000,
+            current_cache_len_semantics="effective_pre_step",
+            current_cache_len_step=9,
+            compression_count=2,
+            prefill_len=15165,
+        )
+        if req_id == "r1"
+        else None,
+    )
+    scheduler_output = SimpleNamespace(triattention_step=9, num_scheduled_tokens={"r1": 1})
+
+    seq_map, pos_delta_map, single_seq_base, single_pos_delta = build_effective_sparse_overrides(
+        base_runner=base_runner,
+        state_store=state_store,
+        scheduler_output=scheduler_output,
+        compression_events=[],
+    )
+
+    assert seq_map == {0: 7000}
+    assert pos_delta_map == {0: -8165}
+    assert single_seq_base == 7000
+    assert single_pos_delta == -8165
+
+
 def test_build_effective_sparse_overrides_ignores_stale_effective_marker_from_prior_step():
     req_states = SimpleNamespace(req_id_to_index={"r1": 0})
     base_runner = SimpleNamespace(

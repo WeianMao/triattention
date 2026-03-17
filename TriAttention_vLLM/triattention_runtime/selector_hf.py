@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -76,6 +77,7 @@ def build_speckv_selector(
 
     tri_cfg = TriAttentionConfig(
         stats_path=stats_path,
+        model_path=config.model_path,
         kv_budget=config.kv_budget,
         divide_length=config.divide_length,
         pruning_mode=pruning_mode,
@@ -88,33 +90,41 @@ def build_speckv_selector(
         disable_trig=config.disable_trig,
         disable_top_n_high_freq=config.disable_top_n_high_freq,
         use_triton_scoring=True,
+        compute_dtype=torch.float32,
+        topk_dtype=torch.float32,
     )
     compressor = TriAttentionCompressor(tri_cfg)
     available_layers_sorted: tuple[int, ...] | None = None
     available_layers_set: set[int] | None = None
-
-    def _resolve_recent_unabsorbed_tokens(total_tokens: int) -> int | None:
-        if base_runner is None:
-            return None
-        active_recent = getattr(base_runner, "_triattention_active_recent_unabsorbed_tokens", None)
-        if isinstance(active_recent, int):
-            return max(0, min(int(total_tokens), active_recent))
-        req_id = getattr(base_runner, "_triattention_active_req_id", None)
-        if req_id is None:
-            return None
-        state_store = getattr(base_runner, "_triattention_state_store", None)
-        if state_store is None or not hasattr(state_store, "get"):
-            return None
-        try:
-            state = state_store.get(req_id)
-        except Exception:
-            return None
-        if state is None:
-            return None
-        recent = getattr(state, "recent_unabsorbed_tokens", None)
-        if not isinstance(recent, int):
-            return None
-        return max(0, min(int(total_tokens), recent))
+    dump_k_sample_path = os.environ.get(
+        "TRIATTN_DEBUG_DUMP_FIRST_K_SAMPLE_PATH",
+        "",
+    ).strip()
+    dump_k_sample_done = False
+    dump_dense_keys_path = os.environ.get(
+        "TRIATTN_DEBUG_DUMP_FIRST_DENSE_KEYS_PATH",
+        "",
+    ).strip()
+    dump_single_layer_dense_keys_path = os.environ.get(
+        "TRIATTN_DEBUG_DUMP_FIRST_DENSE_LAYER_PATH",
+        "",
+    ).strip()
+    dump_dense_keys_done = False
+    dump_single_layer_dense_keys_done = False
+    debug_dump_group_score_samples = (
+        os.environ.get("TRIATTN_DEBUG_DUMP_GROUP_SCORE_SAMPLES", "0").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    def _resolve_effective_recent_count(total_tokens: int) -> int:
+        if total_tokens <= 0 or config.window_size <= 0:
+            return 0
+        # The runtime selector must preserve the same trailing protection window
+        # regardless of request lifecycle details. Tying this to transient
+        # "recent_unabsorbed" bookkeeping lets live serve requests under-protect
+        # the tail (often collapsing to zero) even though fresh/offline
+        # selection correctly preserves `window_size` tokens. That divergence
+        # changes the keep set and cascades into output corruption.
+        return min(config.window_size, total_tokens)
 
     def _resolve_layer_idx_for_stats(layer_idx: int) -> int:
         nonlocal available_layers_sorted
@@ -207,6 +217,26 @@ def build_speckv_selector(
             layer_idx=layer_idx,
             runtime_heads=runtime_heads,
         )
+        nonlocal dump_single_layer_dense_keys_done
+
+        if dump_single_layer_dense_keys_path and not dump_single_layer_dense_keys_done:
+            try:
+                dump_path = Path(dump_single_layer_dense_keys_path)
+                dump_path.parent.mkdir(parents=True, exist_ok=True)
+                payload = {
+                    "layer_idx": int(layer_idx),
+                    "round_start": int(round_start),
+                    "total_tokens": int(keys_dense.shape[0]),
+                    "num_heads": int(keys_dense.shape[1]),
+                    "head_dim": int(keys_dense.shape[2]),
+                    "dtype": str(keys_dense.dtype),
+                    "keys_dense": keys_dense.detach().to(device="cpu"),
+                }
+                torch.save(payload, dump_path)
+                dump_single_layer_dense_keys_done = True
+            except Exception:
+                pass
+
         scores = _compute_layer_scores_raw(
             keys_dense=keys_dense,
             score_head_stats=score_head_stats,
@@ -333,11 +363,7 @@ def build_speckv_selector(
             scores = scores.clone()
         if config.window_size > 0:
             total_tokens = int(scores.shape[-1])
-            recent_count = _resolve_recent_unabsorbed_tokens(total_tokens)
-            if recent_count is None:
-                recent_count = min(config.window_size, total_tokens)
-            else:
-                recent_count = min(config.window_size, recent_count)
+            recent_count = _resolve_effective_recent_count(total_tokens)
             if recent_count > 0:
                 scores[..., total_tokens - recent_count :] = float("inf")
         if protect_prefill and prefill_len > 0:
@@ -372,6 +398,30 @@ def build_speckv_selector(
             layer_idx=layer_idx,
             runtime_heads=runtime_heads,
         )
+        nonlocal dump_single_layer_dense_keys_done
+        if dump_single_layer_dense_keys_path and not dump_single_layer_dense_keys_done:
+            try:
+                dump_path = Path(dump_single_layer_dense_keys_path)
+                dump_path.parent.mkdir(parents=True, exist_ok=True)
+                dense_keys_full = gather_request_k_dense(
+                    kv_cache=kv_cache,
+                    block_ids=block_ids,
+                    block_size=block_size,
+                    total_tokens=total_tokens,
+                )
+                payload = {
+                    "layer_idx": int(layer_idx),
+                    "round_start": int(round_start),
+                    "total_tokens": int(total_tokens),
+                    "num_heads": int(dense_keys_full.shape[1]),
+                    "head_dim": int(dense_keys_full.shape[2]),
+                    "dtype": str(dense_keys_full.dtype),
+                    "keys_dense": dense_keys_full.detach().to(device="cpu"),
+                }
+                torch.save(payload, dump_path)
+                dump_single_layer_dense_keys_done = True
+            except Exception:
+                pass
         chunk_tokens = _score_chunk_tokens(block_size, total_tokens)
         chunks: list[torch.Tensor] = []
         start = 0
@@ -423,16 +473,68 @@ def build_speckv_selector(
         )
         guard_mask = torch.zeros_like(token_positions, dtype=torch.bool)
         if config.window_size > 0:
-            recent_count = _resolve_recent_unabsorbed_tokens(total_tokens)
-            if recent_count is None:
-                recent_count = min(config.window_size, total_tokens)
-            else:
-                recent_count = min(config.window_size, recent_count)
+            recent_count = _resolve_effective_recent_count(total_tokens)
             window_start = max(0, total_tokens - recent_count)
             guard_mask |= token_positions >= window_start
         if protect_prefill and prefill_len > 0:
             guard_mask |= token_positions < prefill_len
         return guard_mask
+
+    def _dump_first_k_sample(
+        *,
+        layer_entries: list[dict[str, Any]],
+        total_tokens: int,
+    ) -> None:
+        nonlocal dump_k_sample_done
+        if dump_k_sample_done or not dump_k_sample_path or not layer_entries:
+            return
+        sample_positions = sorted(
+            set(
+                [0, 1, 2, 3, 4]
+                + [max(0, total_tokens // 4 - 1), total_tokens // 4, min(total_tokens - 1, total_tokens // 4 + 1)]
+                + [max(0, total_tokens // 2 - 1), total_tokens // 2, min(total_tokens - 1, total_tokens // 2 + 1)]
+                + [max(0, (3 * total_tokens) // 4 - 1), (3 * total_tokens) // 4, min(total_tokens - 1, (3 * total_tokens) // 4 + 1)]
+                + [max(0, total_tokens - 5), max(0, total_tokens - 4), max(0, total_tokens - 3), max(0, total_tokens - 2), total_tokens - 1]
+            )
+        )
+        payload = {
+            "total_tokens": int(total_tokens),
+            "sample_positions": [int(x) for x in sample_positions],
+            "layers": {},
+        }
+        preferred_layers = {0, 1, 16, 32, 48, 63}
+        selected_entries = [
+            entry for entry in layer_entries if int(entry["layer_idx"]) in preferred_layers
+        ]
+        if not selected_entries:
+            selected_entries = layer_entries[:2]
+        for entry in selected_entries:
+            keys_dense = gather_request_k_dense(
+                kv_cache=entry["kv_cache"],
+                block_ids=entry["block_ids"],
+                block_size=entry["block_size"],
+                total_tokens=total_tokens,
+            )
+            layer_payload = {}
+            head_limit = min(2, int(keys_dense.shape[1]))
+            for head_idx in range(head_limit):
+                vectors = []
+                for pos in sample_positions:
+                    vectors.append(
+                        keys_dense[0, head_idx, pos]
+                        .detach()
+                        .to(device="cpu", dtype=torch.float32)
+                        .tolist()
+                    )
+                layer_payload[str(head_idx)] = vectors
+            payload["layers"][str(entry["layer_idx"])] = layer_payload
+        out_path = Path(dump_k_sample_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        dump_k_sample_done = True
 
     def _apply_token_guards(
         *,
@@ -948,9 +1050,10 @@ def build_speckv_selector(
             return None
 
         if iter_mode == "paged":
+            nonlocal dump_dense_keys_done
             group_agg_mode = os.environ.get(
                 "TRIATTN_RUNTIME_DEBUG_GROUP_PERHEAD_AGG_MODE",
-                "max",
+                "mean",
             ).strip().lower()
             if group_agg_mode not in {"mean", "max"}:
                 group_agg_mode = "mean"
@@ -985,6 +1088,63 @@ def build_speckv_selector(
                         "group_size": group_size,
                     }
                 )
+
+            _dump_first_k_sample(
+                layer_entries=prepared_layers,
+                total_tokens=total_tokens,
+            )
+            if dump_dense_keys_path and not dump_dense_keys_done:
+                try:
+                    dump_path = Path(dump_dense_keys_path)
+                    dump_path.parent.mkdir(parents=True, exist_ok=True)
+                    preferred_layers_env = os.environ.get(
+                        "TRIATTN_DEBUG_DUMP_FIRST_DENSE_KEYS_LAYERS",
+                        "",
+                    ).strip()
+                    if preferred_layers_env.lower() == "all":
+                        selected_entries = prepared_layers
+                    else:
+                        preferred_layers = {0, 1, 16, 32, 48, 63}
+                        if preferred_layers_env:
+                            try:
+                                preferred_layers = {
+                                    int(part.strip())
+                                    for part in preferred_layers_env.split(",")
+                                    if part.strip()
+                                }
+                            except Exception:
+                                preferred_layers = {0, 1, 16, 32, 48, 63}
+                        selected_entries = [
+                            entry
+                            for entry in prepared_layers
+                            if int(entry["layer_idx"]) in preferred_layers
+                        ]
+                        if not selected_entries:
+                            selected_entries = prepared_layers[:1]
+                    payload = {
+                        "round_start": int(round_start),
+                        "total_tokens": int(total_tokens),
+                        "layers": {},
+                    }
+                    for entry in selected_entries:
+                        dense_keys_full = gather_request_k_dense(
+                            kv_cache=entry["kv_cache"],
+                            block_ids=entry["block_ids"],
+                            block_size=entry["block_size"],
+                            total_tokens=total_tokens,
+                        )
+                        payload["layers"][str(int(entry["layer_idx"]))] = {
+                            "num_heads": int(dense_keys_full.shape[1]),
+                            "head_dim": int(dense_keys_full.shape[2]),
+                            "dtype": str(dense_keys_full.dtype),
+                            "keys_dense": dense_keys_full.detach().to(device="cpu"),
+                        }
+                    torch.save(payload, dump_path)
+                    dump_dense_keys_done = True
+                except Exception:
+                    pass
+
+            prepared_layer_indices = [int(entry["layer_idx"]) for entry in prepared_layers]
 
             min_block_size = min(entry["block_size"] for entry in prepared_layers)
             chunk_tokens = _score_chunk_tokens(min_block_size, total_tokens)
@@ -1162,11 +1322,18 @@ def build_speckv_selector(
                 "mode": "per_head",
                 "indices": keep_per_head,
                 "semantic": "hf_aligned_global_per_head",
+                "group_agg_mode": group_agg_mode,
+                "debug_group_layer_indices": prepared_layer_indices,
+                "debug_recent_count": _resolve_effective_recent_count(total_tokens),
             }
         else:
             aggregated_scores: torch.Tensor | None = None
             layer_count = 0
+            dense_layer_indices: list[int] = []
+            sample_positions: list[int] | None = None
+            layer_score_samples: dict[str, Any] = {}
             for layer_idx, keys_dense in iter_inputs:
+                dense_layer_indices.append(int(layer_idx))
                 scores = _compute_layer_scores(
                     keys_dense=keys_dense,
                     layer_idx=layer_idx,
@@ -1183,6 +1350,26 @@ def build_speckv_selector(
                     aggregated_scores = layer_scores.clone()
                 else:
                     aggregated_scores.add_(layer_scores)
+                if debug_dump_group_score_samples and int(layer_idx) in {0, 1, 16, 32, 48, 63}:
+                    total = int(layer_scores.shape[-1])
+                    if sample_positions is None:
+                        sample_positions = sorted(
+                            {
+                                0,
+                                1,
+                                2,
+                                max(0, total // 2),
+                                max(0, total - 3),
+                                max(0, total - 2),
+                                max(0, total - 1),
+                            }
+                        )
+                    layer_score_samples[str(int(layer_idx))] = {
+                        "head0_scores": [
+                            float(layer_scores[0, pos].detach().to(device="cpu", dtype=torch.float32).item())
+                            for pos in sample_positions
+                        ]
+                    }
                 layer_count += 1
             if aggregated_scores is None or layer_count <= 0:
                 return None
@@ -1199,11 +1386,35 @@ def build_speckv_selector(
                 sorted=False,
             ).indices
             keep_per_head = torch.sort(topk, dim=-1).values.contiguous()
-            return {
+            payload = {
                 "mode": "per_head",
                 "indices": keep_per_head,
                 "semantic": "hf_aligned_global_per_head",
+                "group_agg_mode": "mean",
+                "debug_group_layer_indices": dense_layer_indices,
+                "debug_recent_count": _resolve_effective_recent_count(total_tokens),
             }
+            if debug_dump_group_score_samples:
+                total = int(aggregated_scores.shape[-1])
+                if sample_positions is None:
+                    sample_positions = sorted(
+                        {
+                            0,
+                            1,
+                            2,
+                            max(0, total // 2),
+                            max(0, total - 3),
+                            max(0, total - 2),
+                            max(0, total - 1),
+                        }
+                    )
+                payload["debug_score_sample_positions"] = sample_positions
+                payload["debug_layer_score_samples"] = layer_score_samples
+                payload["debug_agg_head0_scores"] = [
+                    float(aggregated_scores[0, pos].detach().to(device="cpu", dtype=torch.float32).item())
+                    for pos in sample_positions
+                ]
+            return payload
 
     setattr(_select_keep_indices, "_supports_paged", True)
     setattr(_select_keep_indices_for_group_per_head, "_supports_paged_group", True)

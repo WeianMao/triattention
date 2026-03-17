@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from vllm.logger import init_logger
 from vllm.v1.worker.gpu_worker import Worker as VLLMGPUWorker
 
@@ -10,6 +12,10 @@ from .hook_impl import install_runner_compression_hook
 from .runner import TriAttentionModelRunner
 
 logger = init_logger(__name__)
+
+
+def _debug_early_install_proxy_enabled() -> bool:
+    return os.environ.get("TRIATTN_DEBUG_EARLY_INSTALL_PROXY", "0") == "1"
 
 
 class TriAttentionWorker(VLLMGPUWorker):
@@ -26,6 +32,9 @@ class TriAttentionWorker(VLLMGPUWorker):
         # impact on the common no-compression path.
         self._triattention_runtime_config = TriAttentionRuntimeConfig.from_env()
         self._triattention_runner_proxy_installed = False
+        if _debug_early_install_proxy_enabled():
+            self._ensure_triattention_runner_proxy()
+            logger.info("TriAttentionWorker debug: eagerly installed runner proxy during init_device")
 
     def _ensure_triattention_runner_proxy(self) -> None:
         if getattr(self, "_triattention_runner_proxy_installed", False):

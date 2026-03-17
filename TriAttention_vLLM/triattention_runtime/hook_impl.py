@@ -61,7 +61,11 @@ def make_runner_compression_hook(
         strict_triton_required = bool(
             config.enable_experimental_kv_compaction and config.require_triton_scoring
         )
-        req_ctx = resolve_hook_request_context(base_runner=base_runner, req_id=req_id)
+        req_ctx = resolve_hook_request_context(
+            base_runner=base_runner,
+            req_id=req_id,
+            scheduler_output=scheduler_output,
+        )
         if isinstance(req_ctx, dict):
             return req_ctx
         req_state = req_ctx.req_state

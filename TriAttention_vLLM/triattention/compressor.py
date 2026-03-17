@@ -99,6 +99,8 @@ class TriAttentionCompressor:
             self.config.num_kv_heads = self.metadata["num_kv_heads"]
         if self.config.num_layers is None:
             self.config.num_layers = self.metadata["num_layers"]
+        if "rope_style" in self.metadata:
+            self.config.rope_style = str(self.metadata["rope_style"])
 
         # Initialize RoPE frequencies
         self._init_rope()
@@ -119,7 +121,8 @@ class TriAttentionCompressor:
 
         Preference order:
         1) metadata.inv_freq (if present) for model-exact rotary semantics;
-        2) fallback to legacy rope_theta-based construction.
+        2) derive inv_freq from the real model config when model_path is available;
+        3) fallback to metadata/legacy rope_theta-based construction.
         """
         inv_freq_raw = self.metadata.get("inv_freq")
         if isinstance(inv_freq_raw, torch.Tensor):
@@ -147,14 +150,48 @@ class TriAttentionCompressor:
                 )
             self.inv_freq = inv_freq[:expected_freq_count].contiguous()
         else:
-            rope_theta = self.metadata.get("rope_theta", 10000.0)
-            self.inv_freq = compute_rope_frequencies(
-                self.config.head_dim,
-                rope_theta=rope_theta,
-                device=self.config.device,
-            )
-        # omega = 2 * pi * inv_freq (angular frequency)
-        self.omega = 2.0 * torch.pi * self.inv_freq
+            derived_inv_freq: torch.Tensor | None = None
+            model_path = getattr(self.config, "model_path", None)
+            if model_path is not None:
+                try:
+                    from transformers import AutoConfig
+
+                    from weian_development.speckv.round_pruning_utils import build_rotary
+
+                    model_config = AutoConfig.from_pretrained(
+                        str(model_path),
+                        trust_remote_code=True,
+                    )
+                    rotary = build_rotary(
+                        cache_device=self.config.device,
+                        model_path=model_path,
+                        dtype=self.config.compute_dtype,
+                        config=model_config,
+                    )
+                    inv_freq = getattr(rotary, "inv_freq", None)
+                    if isinstance(inv_freq, torch.Tensor):
+                        derived_inv_freq = inv_freq.to(
+                            device=self.config.device,
+                            dtype=torch.float32,
+                        )[: int(self.config.head_dim) // 2].contiguous()
+                        self.config.rope_style = str(
+                            getattr(rotary, "_rope_style", self.config.rope_style)
+                        )
+                except Exception:
+                    derived_inv_freq = None
+
+            if derived_inv_freq is not None:
+                self.inv_freq = derived_inv_freq
+            else:
+                rope_theta = self.metadata.get("rope_theta", 10000.0)
+                self.inv_freq = compute_rope_frequencies(
+                    self.config.head_dim,
+                    rope_theta=rope_theta,
+                    device=self.config.device,
+                )
+        # Match HF/R-KV reference scoring semantics: use rotary inv_freq directly.
+        # The scoring formula expects the same frequency basis as the model's RoPE.
+        self.omega = self.inv_freq
 
     def _precompute_freq_scale(self):
         """Precompute frequency scaling factors from stats.

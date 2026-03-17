@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 
 from triattention.config import TriAttentionConfig
-from triattention.scoring import compute_scores_triton
+from triattention.scoring import compute_scores_pytorch, compute_scores_triton
 
 
 class _FakeTrigCache:
@@ -162,3 +162,93 @@ def test_compute_scores_triton_falls_back_when_round_start_out_of_cache_range():
 
     assert captured["trig_cache"] is None
     assert captured["trig_values"] is None
+
+
+def test_compute_scores_triton_passes_rope_style_to_kernel():
+    import triattention.kernels.triton_scoring as kernel_module
+
+    captured = {}
+    old_kernel = kernel_module.speckv_scoring
+
+    def _fake_kernel(**kwargs):
+        captured["rope_style"] = kwargs.get("rope_style")
+        k = kwargs["K_rot"]
+        return torch.zeros((k.shape[0], k.shape[1], k.shape[2]), dtype=torch.float32)
+
+    kernel_module.speckv_scoring = _fake_kernel
+    try:
+        key_states, head_stats, omega, offsets, freq_scale_sq, config = _build_inputs()
+        config.rope_style = "half"
+        compute_scores_triton(
+            key_states=key_states,
+            cache_positions=None,
+            head_stats=head_stats,
+            omega=omega,
+            offsets=offsets,
+            freq_scale_sq=freq_scale_sq,
+            config=config,
+            round_start=8,
+            trig_cache=None,
+        )
+    finally:
+        kernel_module.speckv_scoring = old_kernel
+
+    assert captured["rope_style"] == "half"
+
+
+def test_compute_scores_pytorch_half_and_interleaved_layouts_differ():
+    key_states = torch.tensor(
+        [[[[1.0, 2.0, 10.0, 20.0]]]],
+        dtype=torch.float32,
+    )
+    head_stats = {
+        "q_mean_complex": torch.tensor([[[1.0, 0.0], [1.0, 0.0]]], dtype=torch.float32),
+        "q_abs_mean": torch.tensor([[1.0, 1.0]], dtype=torch.float32),
+    }
+    omega = torch.tensor([0.1, 0.2], dtype=torch.float32)
+    offsets = torch.tensor([0.0], dtype=torch.float32)
+    freq_scale_sq = torch.ones((1, 2), dtype=torch.float32)
+
+    half_cfg = TriAttentionConfig(
+        kv_budget=16,
+        divide_length=4,
+        window_size=1,
+        pruning_mode="per_head",
+        score_aggregation="mean",
+        use_triton_scoring=False,
+        disable_mlr=False,
+        rope_style="half",
+    )
+    interleaved_cfg = TriAttentionConfig(
+        kv_budget=16,
+        divide_length=4,
+        window_size=1,
+        pruning_mode="per_head",
+        score_aggregation="mean",
+        use_triton_scoring=False,
+        disable_mlr=False,
+        rope_style="interleaved",
+    )
+
+    half_scores = compute_scores_pytorch(
+        key_states=key_states,
+        cache_positions=None,
+        head_stats=head_stats,
+        omega=omega,
+        offsets=offsets,
+        freq_scale_sq=freq_scale_sq,
+        config=half_cfg,
+        round_start=4,
+    )
+    interleaved_scores = compute_scores_pytorch(
+        key_states=key_states,
+        cache_positions=None,
+        head_stats=head_stats,
+        omega=omega,
+        offsets=offsets,
+        freq_scale_sq=freq_scale_sq,
+        config=interleaved_cfg,
+        round_start=4,
+    )
+
+    assert not torch.allclose(half_scores, interleaved_scores)

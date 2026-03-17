@@ -7,6 +7,7 @@ This module is the first step of splitting layout/reclaim logic out of
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Any
 
 import torch
@@ -14,6 +15,11 @@ import torch
 from .constants import TRITON_SCORING_REQUIRED_MARKER
 from .kv_compaction import compact_request_kv_in_place, compact_request_kv_in_place_per_head
 from .plan_models import KeepPlan, ReclaimGroup
+
+_DEBUG_FORCE_PRESERVE_DROPPED = (
+    os.environ.get("TRIATTN_DEBUG_FORCE_PRESERVE_DROPPED", "0").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 
 
 def num_required_blocks(total_tokens: int, block_size: int) -> int:
@@ -65,6 +71,8 @@ def compact_layer_with_keep_plan(
     preserve_dropped_tokens = True
     if enable_experimental_block_reclaim and after_required < before_required:
         preserve_dropped_tokens = False
+    if _DEBUG_FORCE_PRESERVE_DROPPED:
+        preserve_dropped_tokens = True
 
     if keep_plan.mode == "per_head":
         per_head_fn = per_head_compact_fn or compact_request_kv_in_place_per_head

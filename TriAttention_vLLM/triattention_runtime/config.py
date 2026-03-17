@@ -45,6 +45,7 @@ class TriAttentionRuntimeConfig:
 
     # Optional SpeckV-style scoring path (used by runtime hook when enabled).
     sparse_stats_path: Path | None = None
+    model_path: Path | None = None
     pruning_mode: str = "per_head"
     sparse_score_aggregation: str = "mean"
     sparse_normalize_scores: bool = True
@@ -85,6 +86,7 @@ class TriAttentionRuntimeConfig:
             return raw if raw else default
 
         sparse_stats_path_raw = maybe_str("SPARSE_STATS_PATH", None)
+        model_path_raw = maybe_str("MODEL_PATH", None)
 
         config = cls(
             kv_budget=maybe_int("KV_BUDGET", cls.kv_budget),
@@ -132,6 +134,7 @@ class TriAttentionRuntimeConfig:
                 cls.score_chunk_max_tokens,
             ),
             sparse_stats_path=Path(sparse_stats_path_raw) if sparse_stats_path_raw else None,
+            model_path=Path(model_path_raw) if model_path_raw else None,
             pruning_mode=maybe_str("PRUNING_MODE", cls.pruning_mode) or cls.pruning_mode,
             sparse_score_aggregation=(
                 maybe_str("SPARSE_SCORE_AGGREGATION", cls.sparse_score_aggregation)
