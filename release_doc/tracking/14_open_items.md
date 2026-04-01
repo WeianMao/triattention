@@ -16,7 +16,7 @@
 - [x] **LICENSE**：已确认 — Apache 2.0
 - [x] **公布的 setting 清单**：已确认 — 论文全部主实验（Table 1,2, Figure 5）+ 消融（Table 3）+ DFS benchmark 全部公布。详见 [../scope/experiment_settings.md](../scope/experiment_settings.md)
 - [x] **GPT-OSS 模型**：已确认是 GPT-OSS-20B（`openai/gpt-oss-20b`），不是 120B。代码中 deepconf 示例文件的 120B default 是历史遗留，实际实验用的是 20B
-- [ ] **Figure 5 budget sweep flag 差异**：Table 1 和 Figure 5 可能用了不同的压缩触发机制（rkv-style vs rkv-aligned-budget），需要确认统一方案。详见 [../scope/experiment_settings.md](../scope/experiment_settings.md)
+- [x] **Figure 5 budget sweep flag 差异**：已确认 — 不存在差异。Table 1 和 Figure 5 都使用 `--rkv-style-compression` + `--rkv-style-slack-trigger`。之前发现的 `--rkv-aligned-budget` 脚本是 DS-Qwen-7B 的另一种实现路径，不是论文 Figure 5 用的。Qwen3-8B 的 budget sweep 通过 `speckv_experiments_cli_v2.py` 执行，CLI 默认即为 rkv_style
 - [ ] **DFS benchmark 代码审查**：代码在 linxi-dev 分支，release 前需审查逻辑正确性和学术合规性
 - [ ] **实验框架选择**：speckv_experiments vs weian_script，待确认
 - [ ] **第一阶段执行顺序**：具体步骤排序

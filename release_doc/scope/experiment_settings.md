@@ -86,15 +86,13 @@
 
 ## 待确认事项
 
-### 1. Figure 5 budget sweep 的 flag 差异
+### 1. ~~Figure 5 budget sweep 的 flag 差异~~ — 已解决
 
-Agent 调查发现：Table 1 和 Figure 5 的 budget sweep 可能用了不同的压缩触发机制：
-- Table 1（默认 budget）：`--rkv-style-compression` + `--rkv-style-slack-trigger`
-- Figure 5（budget sweep）：可能用了 `--rkv-aligned-budget`（精确 budget 对齐）
+**结论：不存在差异。** Table 1 和 Figure 5 都使用 `--rkv-style-compression` + `--rkv-style-slack-trigger`。
 
-这两个机制的 KV cache 峰值不同（~2176 vs ~2080，详见 [../execution/10_technical_notes.md](../execution/10_technical_notes.md)）。
+之前发现的 `--rkv-aligned-budget` 脚本是 DS-Qwen-7B 的另一种实现路径（`weian_script/aime_sampled8/speckv/` 下），不是论文 Figure 5 用的。Qwen3-8B 的 budget sweep 通过 `speckv_experiments_cli_v2.py` 执行，CLI 默认即为 `rkv_style_compression=True` + `rkv_style_slack_trigger=True`。
 
-**需要确认**：Figure 5 实际用的是哪套 flag？release 时是否统一为一种？
+Release 时所有实验统一使用同一套 flag，无需区分。
 
 ### 2. GPT-OSS-20B 的实验脚本
 
