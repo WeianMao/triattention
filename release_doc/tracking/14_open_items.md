@@ -10,7 +10,7 @@
 
 ## 待确认项
 
-- [ ] **数据集**：用户自己下载，我们提供链接。链接是什么？合规性确认？
+- [x] **数据集**：已确认 -- 不 release 数据集文件，只在 README 提供 HuggingFace 下载链接。详见 [../scope/datasets.md](../scope/datasets.md)
 - [ ] **运行脚本硬编码路径**：`/data/rbg/users/weian/...`、本地 model 路径改成什么？HuggingFace hub 名称？（替换策略已确认，具体 hub 名称见 [../code_cleanup/06_path_cleanup.md](../code_cleanup/06_path_cleanup.md)）
 - [ ] **README 大纲**：内容规划
 - [ ] **LICENSE**：暂定 Apache 2.0，需和导师确认

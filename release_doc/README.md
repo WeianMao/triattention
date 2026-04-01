@@ -18,6 +18,7 @@
 | [scope/01_overview.md](scope/01_overview.md) | 发布目标、分阶段策略、时间线 |
 | [scope/02_scope_include.md](scope/02_scope_include.md) | 第一阶段要公布的内容 |
 | [scope/03_scope_exclude.md](scope/03_scope_exclude.md) | 排除清单、敏感信息识别 |
+| [scope/datasets.md](scope/datasets.md) | 数据集：下载链接、字段映射、一致性验证 |
 
 ### code_cleanup/ -- 代码清理相关
 
