@@ -45,22 +45,34 @@
 | `--rkv-style-compression` | `--attention-layer-compression` |
 | `--rkv-style-slack-trigger` | `--slack-budget-trigger` |
 
-### `sparse-*` flag（去掉前缀）
+### `sparse-*` flag — TriAttention 方法特有（加 `triattention-` 前缀）
 
-| 当前 flag | Release flag |
-|----------|-------------|
-| `--sparse-normalize-scores` | `--normalize-scores` |
-| `--sparse-seed` | `--pruning-seed` |
-| `--sparse-score-aggregation` | `--score-aggregation` |
-| `--sparse-offset-max-length` | `--frequency-window` |
-| `--sparse-round-window` | `--round-window` |
-| `--sparse-stats-path` | `--stats-file` |
+| 当前 flag | Release flag | 功能 |
+|----------|-------------|------|
+| `--sparse-normalize-scores` | `--triattention-normalize-scores` | z-score 归一化频域评分 |
+| `--sparse-score-aggregation` | `--triattention-score-aggregation` | 多 head 频域评分聚合方式 |
+| `--sparse-offset-max-length` | `--triattention-frequency-window` | 频域评分的几何偏移网格范围 |
+| `--sparse-stats-path` | `--triattention-stats-file` | 预计算频率统计文件路径 |
 
-### 其他 flag
+### `sparse-*` flag — 通用（去掉前缀）
 
-| 当前 flag | Release flag |
-|----------|-------------|
-| `--include-prefill-in-budget` | `--count-prompt-tokens` |
+| 当前 flag | Release flag | 功能 |
+|----------|-------------|------|
+| `--sparse-seed` | `--pruning-seed` | 打分平局噪声的随机种子 |
+| `--sparse-round-window` | `--round-window` | 压缩批次窗口大小 |
+
+### 其他通用 flag
+
+| 当前 flag | Release flag | 功能 |
+|----------|-------------|------|
+| `--rkv-style-compression` | `--attention-layer-compression` | 在 attention 层触发压缩 |
+| `--rkv-style-slack-trigger` | `--slack-budget-trigger` | 允许 cache 增长到 budget+window 再触发 |
+| `--include-prefill-in-budget` | `--count-prompt-tokens` | prefill token 计入 budget |
+
+### 分类原则
+
+- **TriAttention 特有**：和频域评分、频谱分析直接相关的参数 → 加 `triattention-` 前缀
+- **通用**：任何 KV cache 压缩方法都可能用到的参数 → 去掉前缀，用功能描述名
 
 ## 文件名中的 "aime" 泛化
 
