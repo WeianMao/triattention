@@ -10,16 +10,19 @@ TriAttention/
 ├── setup.py
 │
 ├── triattention/                   # 我们的方法（所有命名统一为 triattention）
+│   ├── __init__.py
 │   ├── triattention.py             # 主实现（原 speckv_rkv_style.py）
 │   ├── pruning_utils.py            # 核心工具（原 round_pruning_utils.py）
 │   ├── stats_utils.py              # 统计验证
 │   └── prompt_utils.py             # prompt 构建
 │
 ├── kv_compress/                    # 通用 KV cache 压缩框架 + baseline 方法
+│   ├── __init__.py
 │   ├── r1_kv.py
 │   ├── snapkv.py
 │   ├── h2o.py
 │   └── streamingllm.py
+│   # 注：FullKV 是无压缩模式（完整 KV cache），通过 --method fullkv 选择，不需要独立实现文件
 │
 ├── integration/                    # HuggingFace 集成
 │   ├── modeling.py
@@ -29,16 +32,16 @@ TriAttention/
 ├── evaluation/                     # 评估管线（13个文件 + latex2sympy/，详见 07_evaluation.md）
 │
 ├── scripts/                        # 运行/复现脚本
+│   ├── run_math.py                 # 推理入口脚本（需重构 import weian_development.* → 使用 release 包名）
 │   ├── run_eval.py
 │   ├── dispatch.py
-│   ├── calibrate.py
 │   └── merge_shards.py
 │
 ├── configs/                        # 实验配置（待精简）
 │
 ├── calibration/                    # 校准结果 .pt 文件（文件名不含 aime）
 │
-├── data/                           # 数据集（待确认：用户自行下载 or 提供链接）
+├── data/                           # 数据集（自动下载，不含数据文件。详见 ../scope/datasets.md）
 │
 ├── tests/                          # 单元测试（公布）
 │   ├── test_triattention.py

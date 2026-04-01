@@ -20,6 +20,7 @@
 
 - [ ] 单元测试：验证 RKV 和 TriAttention rkv-style 在相同 budget + divide_length 配置下峰值 KV cache 一致
 - [ ] 确保清理后代码行为不变（AB 对比测试）
+- [ ] 排查 KV cache 状态重置 bug：多问题单进程推理时状态变量是否正确重置（详见 ../code_cleanup/flag_cleanup.md）
 - [ ] 全局扫描敏感信息（完整关键词清单见 [../scope/03_scope_exclude.md](../scope/03_scope_exclude.md)）
 
 ## 文档

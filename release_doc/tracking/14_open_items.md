@@ -11,7 +11,7 @@
 ## 待确认项
 
 - [x] **数据集**：已确认 -- 不 release 数据集文件，只在 README 提供 HuggingFace 下载链接。详见 [../scope/datasets.md](../scope/datasets.md)
-- [ ] **运行脚本硬编码路径**：`/data/rbg/users/weian/...`、本地 model 路径改成什么？HuggingFace hub 名称？（替换策略已确认，具体 hub 名称见 [../code_cleanup/06_path_cleanup.md](../code_cleanup/06_path_cleanup.md)）
+- [x] **运行脚本硬编码路径**：已确认 — 替换策略见 [../code_cleanup/06_path_cleanup.md](../code_cleanup/06_path_cleanup.md)
 - [x] **README 大纲**：已确认 -- 精致版（对标 MInference），含 demo 视频占位符。详见 [../components/readme_outline.md](../components/readme_outline.md)
 - [x] **LICENSE**：已确认 — Apache 2.0
 - [ ] **第一阶段执行顺序**：具体步骤排序

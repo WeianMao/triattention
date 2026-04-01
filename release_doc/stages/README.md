@@ -55,7 +55,7 @@
 | [stage_07_docs.md](stage_07_docs.md) | 文档编写 | 待创建 |
 | [stage_08_verify.md](stage_08_verify.md) | 对比验证 | 待创建 |
 | [stage_09_final_scan.md](stage_09_final_scan.md) | 最终扫描 | 待创建 |
-| [stage_10_e2e_test.md](stage_10_e2e_test.md) | 端到端测试 | 待创建 |
+| [stage_10_e2e_test.md](stage_10_e2e_test.md) | 端到端测试 | 已创建 |
 | [stage_11_publish.md](stage_11_publish.md) | Clean-room 发布 | 待创建 |
 | [stage_12_cleanup.md](stage_12_cleanup.md) | 清理 | 待创建 |
 

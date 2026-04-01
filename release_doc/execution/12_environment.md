@@ -32,6 +32,6 @@
 - `scripts/gpu_occupier.py` 及测试脚本 -- GPU 占领工具
 - `.claude/`、`.workflow/` -- 开发工具配置
 
-以下目录**待确认**是否 release：
-- `paper_visualizations/` -- 论文可视化脚本（已确认不公布）
-- `experiments/` -- 第一阶段不公布，第二阶段视情况（已确认）
+以下目录**已确认**不 release：
+- `paper_visualizations/` -- 论文可视化脚本（不公布）
+- `experiments/` -- 第一阶段不公布，第二阶段视情况

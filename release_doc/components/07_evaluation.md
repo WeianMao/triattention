@@ -19,6 +19,7 @@
 | `examples.py` | 社区 | few-shot 示例 |
 | `model_utils.py` | 社区 | 模型加载/生成 |
 | `rm_maj_eval.py` | 自定义 | majority voting（清理 __main__ 硬编码路径） |
+| `run_math.py` | 自定义 | 推理入口脚本（需重构 import weian_development.* → 使用 release 包名） |
 | `latex2sympy/` | 第三方 | LaTeX 解析库 |
 
 ## 不公布的评估文件
