@@ -35,6 +35,7 @@
 | [components/07_evaluation.md](components/07_evaluation.md) | 评估管线：公布/不公布文件清单、清理要求 |
 | [components/08_launcher.md](components/08_launcher.md) | 分布式启动器：文件清单、功能、命名清理 |
 | [components/09_reference_script.md](components/09_reference_script.md) | 起点脚本、关键 flag 组合、参数基准 |
+| [components/readme_outline.md](components/readme_outline.md) | README 大纲（精致版，含占位符清单） |
 
 ### execution/ -- 执行相关
 

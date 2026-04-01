@@ -12,7 +12,7 @@
 
 - [x] **数据集**：已确认 -- 不 release 数据集文件，只在 README 提供 HuggingFace 下载链接。详见 [../scope/datasets.md](../scope/datasets.md)
 - [ ] **运行脚本硬编码路径**：`/data/rbg/users/weian/...`、本地 model 路径改成什么？HuggingFace hub 名称？（替换策略已确认，具体 hub 名称见 [../code_cleanup/06_path_cleanup.md](../code_cleanup/06_path_cleanup.md)）
-- [ ] **README 大纲**：内容规划
+- [x] **README 大纲**：已确认 -- 精致版（对标 MInference），含 demo 视频占位符。详见 [../components/readme_outline.md](../components/readme_outline.md)
 - [ ] **LICENSE**：暂定 Apache 2.0，需和导师确认
 - [ ] **第一阶段执行顺序**：具体步骤排序
 - [ ] **启动器文件命名方案**：`rkv_sharded` 等内部命名替换为正式名称的具体方案。详见 [../components/08_launcher.md](../components/08_launcher.md)
