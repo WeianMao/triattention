@@ -1,3 +1,5 @@
+> **注意：本文件已拆分为多个文档，请查看 [README.md](README.md) 获取最新索引。本文件保留作为历史归档。**
+
 # TriAttention Release Plan
 
 ## 1. Release Target
