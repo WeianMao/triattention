@@ -31,6 +31,8 @@
   ↓
 阶段 11: Clean-room 发布（创建干净 repo，push 到 GitHub）
   ↓
+阶段 1.5: GPT-OSS-20B 集成（从 gptoss 分支合并代码，独立 conda 环境）
+  ↓
 阶段 12: 清理（删除 worktree）
 ```
 

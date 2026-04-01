@@ -94,11 +94,13 @@
 
 Release 时所有实验统一使用同一套 flag，无需区分。
 
-### 2. GPT-OSS-20B 的实验脚本
+### 2. GPT-OSS-20B 的实验脚本（Phase 1.5）
 
 GPT-OSS 实验由协作者在 gptoss 分支上运行。本地 main 分支上没有对应的脚本。release 时需要从 gptoss 分支提取或重建。
 
 **已确认**：模型是 GPT-OSS-20B（`openai/gpt-oss-20b`），不是 120B。HuggingFace 上可下载。
+
+**处理策略**：当作 **1.5 阶段**处理。GPT-OSS-20B 与其他模型差异较大（不同 conda 环境、FlashAttention-3 on H100、代码在独立分支），不阻塞其他模型进度，但在第一阶段完成后紧接着处理，不拖到第二阶段。详见 [../tracking/14_open_items.md](../tracking/14_open_items.md) 中 "GPT-OSS-20B Phase 1.5" 章节。
 
 ### 3. DFS Benchmark 代码来源
 
@@ -122,3 +124,9 @@ DFS 测试的数据生成/评估代码在 linxi-dev 分支的 `R-KV/linxi_develo
 - `speckv_experiments/` — 协作者 Xi Lin 的框架，更规范但覆盖不全
 
 **待确认**：以哪套为基础整理 release 的实验脚本。建议以 speckv_experiments 为基础（更规范），补充缺失的方法和模型支持。
+
+**speckv_experiments 覆盖情况分析**：
+- 已覆盖模型：Qwen3-8B、DS-Qwen-7B、DS-Llama-8B
+- 缺失：GPT-OSS-20B（在 gptoss 分支）、DFS benchmark（在 linxi-dev 分支）
+- Table 3 消融实验：只有 Qwen3-8B — 论文只报告 Qwen3，足够
+- H2O 和 StreamingLLM baseline：不需要补充（用户明确决定不管）

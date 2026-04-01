@@ -23,6 +23,24 @@
 - [ ] 排查 KV cache 状态重置 bug：多问题单进程推理时状态变量是否正确重置（详见 ../code_cleanup/flag_cleanup.md）
 - [ ] 全局扫描敏感信息（完整关键词清单见 [../scope/03_scope_exclude.md](../scope/03_scope_exclude.md)）
 
+## DFS Benchmark 代码修复（审查已通过）
+
+代码逻辑正确、学术合规。以下 5 项需在 release 前修复：
+
+- [ ] 硬编码路径 `/home/linxi/...` 替换（3 个文件）
+- [ ] 重复代码 `build_prompt` 合并去重
+- [ ] 裸 `except:` 改为 `except Exception:`
+- [ ] 中文文档翻译或删除
+- [ ] 删除内部开发日志 `PROGRESS_SUMMARY.md`
+
+## 跨分支代码合并
+
+- [ ] 从 `gptoss` 分支提取 GPT-OSS-20B 模型支持代码（monkeypatch、modeling）— Phase 1.5
+- [ ] 从 `linxi-dev` 分支提取 DFS benchmark 代码
+- [ ] 统一双 rkv 包（`R-KV/rkv/` 和 `R-KV/HuggingFace/rkv/`）→ 重组为 `kv_compress/` + `triattention/`
+- [ ] 清理 `sys.path.insert()` hack，改为正规包结构
+- [ ] 生成每个模型×数据集的校准 stats .pt 文件（需先跑 fullkv 再 build-stats）
+
 ## 文档
 
 - [ ] README
