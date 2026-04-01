@@ -27,6 +27,7 @@
 | [code_cleanup/04_naming.md](code_cleanup/04_naming.md) | 命名规范（speckv -> triattention 映射表） |
 | [code_cleanup/05_repo_structure.md](code_cleanup/05_repo_structure.md) | 目标 repo 目录结构 |
 | [code_cleanup/06_path_cleanup.md](code_cleanup/06_path_cleanup.md) | 硬编码路径替换方案（含完整调查结果） |
+| [code_cleanup/flag_cleanup.md](code_cleanup/flag_cleanup.md) | Flag 清理：删除/保留/改名清单 + KV cache bug 排查 |
 
 ### components/ -- 各组件详情
 
