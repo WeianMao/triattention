@@ -25,15 +25,19 @@
   ↓
 阶段 7: 文档编写（README, LICENSE, 使用说明, 复现指南）
   ↓
-阶段 8: 对比验证（AB 测试 + 单元测试）
+阶段 8: 测试阶段 1 — 轻量单元测试（快速验证基本功能正确）
   ↓
 阶段 9: 敏感信息最终扫描
   ↓
-阶段 10: 端到端测试（从零验证公布代码可用性）
+阶段 10: 端到端测试（从零验证公布代码可用性：conda 环境创建、数据下载、脚本运行）
   ↓
-阶段 11: Clean-room 发布（创建干净 repo，push 到 GitHub）
+阶段 11: 内部公布（共享给团队成员做初步检查，非正式发布）
   ↓
-阶段 12: 清理（删除 worktree）
+阶段 12: 测试阶段 2 — 头对头对比测试（内部代码 vs 公布代码，跑完整 LLM 推理，只跑主要模型×主要 setting）
+  ↓
+阶段 13: 正式公布（创建干净 repo，push 到 GitHub）
+  ↓
+阶段 14: 清理（删除 worktree）
 ```
 
 ## 阶段文件
@@ -55,10 +59,12 @@
 | [stage_05_sensitive.md](stage_05_sensitive.md) | 敏感信息扫描 | 待创建 |
 | [stage_06_restructure.md](stage_06_restructure.md) | 目录结构重组 | 待创建 |
 | [stage_07_docs.md](stage_07_docs.md) | 文档编写 | 待创建 |
-| [stage_08_verify.md](stage_08_verify.md) | 对比验证 | 待创建 |
+| [stage_08_unit_test.md](stage_08_unit_test.md) | 测试阶段 1：轻量单元测试 | 待创建 |
 | [stage_09_final_scan.md](stage_09_final_scan.md) | 最终扫描 | 待创建 |
 | [stage_10_e2e_test.md](stage_10_e2e_test.md) | 端到端测试 | 已创建 |
-| [stage_11_publish.md](stage_11_publish.md) | Clean-room 发布 | 待创建 |
-| [stage_12_cleanup.md](stage_12_cleanup.md) | 清理 | 待创建 |
+| [stage_11_internal_release.md](stage_11_internal_release.md) | 内部公布（团队初步检查） | 待创建 |
+| [stage_12_h2h_test.md](stage_12_h2h_test.md) | 测试阶段 2：头对头对比测试 | 待创建 |
+| [stage_13_publish.md](stage_13_publish.md) | 正式公布 | 待创建 |
+| [stage_14_cleanup.md](stage_14_cleanup.md) | 清理 | 待创建 |
 
 **注意**：每个阶段的具体步骤文件会在 Open Items 全部确认后，根据最终确认的方案来填充。现在先建立框架，后续逐步细化。
