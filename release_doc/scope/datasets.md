@@ -59,30 +59,43 @@
 | AIME25 | `question` / `answer` | `problem` / `answer` | 是 — `question` → `problem` |
 | MATH-500 | `problem` / `answer` | `problem` / `answer` | 否 — 已一致 |
 
-**处理方案**：release 版本的 data_loader 统一使用 `problem` / `answer` 字段名，与 HuggingFace 格式对齐。README 里提供下载和格式说明。
+**处理方案**：release 版本的 data_loader 统一使用 `problem` / `answer` 字段名，与 HuggingFace 格式对齐。
 
-## README 中的数据集说明模板
+## 数据集自动下载（已确认）
 
-```markdown
-## Datasets
+**不在 README 里写下载链接，也不放数据文件进 repo。** 改为在代码中实现自动下载：
 
-We evaluate on three math reasoning benchmarks. Download via HuggingFace:
+- data_loader 在第一次运行时自动从 HuggingFace 下载数据集
+- 下载后缓存到本地 `./data/` 目录，后续运行不重复下载
+- 下载链接硬编码在 data_loader 代码中
 
 ```python
-from datasets import load_dataset
+# data_loader.py 中的自动下载逻辑（伪代码）
+DATASET_SOURCES = {
+    "aime24": "HuggingFaceH4/aime_2024",
+    "aime25": "MathArena/aime_2025",
+    "math500": "HuggingFaceH4/MATH-500",
+}
 
-aime24 = load_dataset("HuggingFaceH4/aime_2024")
-aime25 = load_dataset("MathArena/aime_2025")
-math500 = load_dataset("HuggingFaceH4/MATH-500")
+def load_data(dataset_name, data_dir="./data"):
+    local_path = f"{data_dir}/{dataset_name}.jsonl"
+    if not os.path.exists(local_path):
+        # 自动从 HuggingFace 下载并转换为 JSONL
+        ds = load_dataset(DATASET_SOURCES[dataset_name])
+        save_as_jsonl(ds, local_path)
+    return load_jsonl(local_path)
 ```
 
-Save as JSONL files in `./data/` directory:
-- `data/aime24.jsonl`
-- `data/aime25.jsonl`
-- `data/math500.jsonl`
+这样用户 clone 后直接运行脚本即可，无需手动下载数据。
 
-Expected format: one JSON object per line with `problem` and `answer` fields.
-```
+### 对比 RKV 官方做法
+
+| 做法 | RKV 官方 | 我们 |
+|------|---------|------|
+| AIME24 | 直接 commit 到 repo | 代码自动下载 |
+| MATH-500 | 直接 commit 到 repo | 代码自动下载 |
+| AIME25 | 未公布 | 代码自动下载 |
+| 用户操作 | clone 即可用 | clone + 首次运行自动下载 |
 
 ## 字段名兼容性（已确认无问题）
 

@@ -27,9 +27,11 @@
   ↓
 阶段 9: 敏感信息最终扫描
   ↓
-阶段 10: Clean-room 发布（创建干净 repo，push 到 GitHub）
+阶段 10: 端到端测试（从零验证公布代码可用性）
   ↓
-阶段 11: 清理（删除 worktree）
+阶段 11: Clean-room 发布（创建干净 repo，push 到 GitHub）
+  ↓
+阶段 12: 清理（删除 worktree）
 ```
 
 ## 阶段文件
@@ -53,7 +55,8 @@
 | [stage_07_docs.md](stage_07_docs.md) | 文档编写 | 待创建 |
 | [stage_08_verify.md](stage_08_verify.md) | 对比验证 | 待创建 |
 | [stage_09_final_scan.md](stage_09_final_scan.md) | 最终扫描 | 待创建 |
-| [stage_10_publish.md](stage_10_publish.md) | Clean-room 发布 | 待创建 |
-| [stage_11_cleanup.md](stage_11_cleanup.md) | 清理 | 待创建 |
+| [stage_10_e2e_test.md](stage_10_e2e_test.md) | 端到端测试 | 待创建 |
+| [stage_11_publish.md](stage_11_publish.md) | Clean-room 发布 | 待创建 |
+| [stage_12_cleanup.md](stage_12_cleanup.md) | 清理 | 待创建 |
 
 **注意**：每个阶段的具体步骤文件会在 Open Items 全部确认后，根据最终确认的方案来填充。现在先建立框架，后续逐步细化。
