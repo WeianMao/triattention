@@ -1,5 +1,7 @@
 # TriAttention Release Documentation
 
+> **Agent 必读**：开始工作前先读 [CURRENT_STATUS.md](CURRENT_STATUS.md)，了解当前进展和下一步行动。工作过程中及时更新该文件。
+
 ## 文档标准
 
 **本目录是 release 工作的唯一权威文档。** 所有决策、细节、调查结论都必须记录在此，确保：

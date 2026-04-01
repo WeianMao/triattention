@@ -31,6 +31,17 @@
 - 如果发现了新问题或需要新决策，记录到 `tracking/14_open_items.md`
 - commit 修改
 
+## 断点恢复机制
+
+**每个 agent 必须遵守**：
+
+1. **开始工作时**：先读 `release_doc/CURRENT_STATUS.md`，了解当前进展到哪了、下一步是什么
+2. **工作过程中**：及时更新 `CURRENT_STATUS.md` 中的"已完成"、"未完成"、"下一步行动"
+3. **对话结束前**（无论正常结束还是可能中断）：确保 `CURRENT_STATUS.md` 反映最新状态并已 commit
+4. **完成一个 open item 或重要决策后**：立即更新 `CURRENT_STATUS.md` 并 commit
+
+这样即使 agent 意外断掉，下一个 agent 读这个文件就能恢复到断点。
+
 ## 关键原则
 
 1. **不跨阶段操作** — 每个 agent 只执行自己阶段的任务
