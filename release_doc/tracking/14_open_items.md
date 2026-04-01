@@ -15,5 +15,5 @@
 - [x] **README 大纲**：已确认 -- 精致版（对标 MInference），含 demo 视频占位符。详见 [../components/readme_outline.md](../components/readme_outline.md)
 - [x] **LICENSE**：已确认 — Apache 2.0
 - [ ] **第一阶段执行顺序**：具体步骤排序
-- [ ] **启动器文件命名方案**：`rkv_sharded` 等内部命名替换为正式名称的具体方案。详见 [../components/08_launcher.md](../components/08_launcher.md)
+- [x] **启动器文件命名方案**：已确认 — 详见 [../components/08_launcher.md](../components/08_launcher.md)
 - [ ] **Flag 名清理**：起点脚本中 `rkv-style` 等 flag 名是否需要改名。详见 [../components/09_reference_script.md](../components/09_reference_script.md)

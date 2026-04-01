@@ -1,17 +1,29 @@
 # 分布式启动器
 
-## 决策状态：已确认，全部公布
+## 决策状态：已确认
 
-## 核心文件
+## 命名方案（已确认）
 
-| 文件 | 大小 | 作用 |
-|------|------|------|
-| `rkv_sharded_dispatch.py` | 31KB | 主调度器：多GPU分配、断点恢复、自动评估 |
-| `rkv_sharded_eval.py` | 33KB | 推理 worker：每GPU一个实例 |
-| `rkv_sharded_runner.py` | 689B | 轻量 wrapper（需去掉 PD-L1_binder） |
-| `merge_rkv_shards.py` | 2.8KB | 分片结果合并 |
-| `process_utils.py` | 1.1KB | 进程命名（需去掉 PD-L1_binder） |
-| `rkv_cache_utils.py` | 882B | cache 管理 |
+| 当前名字 | Release 名字 | 作用 | 说明 |
+|---------|-------------|------|------|
+| `rkv_sharded_dispatch.py` | `dispatch.py` | 主调度器：多GPU分配、断点恢复、自动评估 | 去掉 `rkv_sharded` 前缀 |
+| `rkv_sharded_eval.py` | `worker.py` | 推理 worker：每GPU一个实例 | 更准确描述功能 |
+| `rkv_sharded_runner.py` | **删除** | 原为 PD-L1_binder wrapper | 进程伪装删除后无存在意义，dispatch.py 直接调用 worker.py |
+| `merge_rkv_shards.py` | `merge_shards.py` | 分片结果合并 | 去掉 `rkv` 前缀 |
+| `process_utils.py` | `process_utils.py` | 进程工具 | 保留名字，**删除所有进程伪装功能**（mask_process_command、PD-L1_binder） |
+| `rkv_cache_utils.py` | `cache_utils.py` | cache 管理 | 去掉 `rkv` 前缀 |
+
+## 依赖关系
+
+```
+shell 脚本 → dispatch.py
+               → worker.py（subprocess 调用）
+               → merge_shards.py（合并结果）
+               → eval_math_multi.py（评估）
+```
+
+注意：原来 dispatch.py → runner.py → worker.py 的调用链简化为 dispatch.py → worker.py。
+dispatch.py 中调用 runner.py 的代码需要改为直接调用 worker.py。
 
 ## 功能
 
@@ -21,30 +33,36 @@
 - **自动评估**：合并后自动调用 eval_math_multi.py
 - **错误处理**：fail-fast，任一 shard 失败终止全部
 
-## 完整流程
+## 完整流程（Release 版本）
 
 ```
-用户 shell 脚本 → rkv_sharded_dispatch.py
+用户 shell 脚本 → dispatch.py
   → 分配任务到多个 GPU
-  → 每个 GPU 运行 rkv_sharded_eval.py（推理）
-  → merge_rkv_shards.py（合并分片）
+  → 每个 GPU 运行 worker.py（推理）
+  → merge_shards.py（合并分片）
   → eval_math_multi.py（评估）
 ```
 
 ## 清理要求
 
-### 进程伪装代码删除
+### 进程伪装代码 — 全部删除
 
-以下文件中包含 PD-L1_binder 相关代码，release 时必须删除：
-- `rkv_sharded_runner.py` — 去掉 PD-L1_binder wrapper
-- `process_utils.py` — 去掉 mask_process_command 等进程伪装功能
-
-### 命名清理
-
-release 时启动器文件名中的 `rkv_sharded` 等内部命名需要替换为正式名称。具体方案待确认（见 [../tracking/14_open_items.md](../tracking/14_open_items.md)）。
+| 文件 | 要删除的内容 |
+|------|-------------|
+| `rkv_sharded_runner.py` | **整个文件删除**（唯一功能是进程伪装） |
+| `process_utils.py` | 删除 `mask_process_command()` 函数及所有 PD-L1_binder 相关代码 |
+| `rkv_sharded_dispatch.py` | 删除对 `mask_process_command()` 的调用 |
+| `rkv_sharded_eval.py` | 删除对 `mask_process_command()` 的调用 |
 
 ### 路径清理
 
 - `rkv_sharded_eval.py` 中 PYTHONPATH 添加了内部路径，需改为相对路径
 - `weian_development` 路径引用需要重构
 - 详见 [../code_cleanup/06_path_cleanup.md](../code_cleanup/06_path_cleanup.md)
+
+### 代码修改要点
+
+1. `dispatch.py` 中 hardcoded 的 `rkv_sharded_eval.py` 路径（约 line 9）改为 `worker.py`
+2. `dispatch.py` 中 hardcoded 的 `merge_rkv_shards.py` 路径（约 line 25）改为 `merge_shards.py`
+3. `dispatch.py` 中删除对 runner.py 的调用，直接调用 worker.py
+4. `worker.py` 中 `rkv_cache_utils` import 改为 `cache_utils`
