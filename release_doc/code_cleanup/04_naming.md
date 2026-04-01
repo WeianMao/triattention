@@ -23,6 +23,45 @@
 2. **重构前必须报告** — 实在需要重构时，先说明：要改什么、为什么
 3. **重构后必须验证** — 严格的 AB 对比测试 + 单元测试，确保行为一致
 
+## `--method` 值改名（已确认）
+
+| 当前值 | Release 值 |
+|--------|-----------|
+| `speckv` | `triattention` |
+| `rkv` | `r1kv` |
+| `fullkv` | `fullkv`（不变） |
+| `snapkv` | `snapkv`（不变） |
+| `h2o` | `h2o`（不变） |
+| `streamingllm` | `streamingllm`（不变） |
+
+## CLI Flag 改名（已确认）
+
+**原则**：去掉 `sparse-` 前缀和 `rkv-style-` 前缀，用功能描述性名字。
+
+### `rkv-style-*` flag
+
+| 当前 flag | Release flag |
+|----------|-------------|
+| `--rkv-style-compression` | `--attention-layer-compression` |
+| `--rkv-style-slack-trigger` | `--slack-budget-trigger` |
+
+### `sparse-*` flag（去掉前缀）
+
+| 当前 flag | Release flag |
+|----------|-------------|
+| `--sparse-normalize-scores` | `--normalize-scores` |
+| `--sparse-seed` | `--pruning-seed` |
+| `--sparse-score-aggregation` | `--score-aggregation` |
+| `--sparse-offset-max-length` | `--frequency-window` |
+| `--sparse-round-window` | `--round-window` |
+| `--sparse-stats-path` | `--stats-file` |
+
+### 其他 flag
+
+| 当前 flag | Release flag |
+|----------|-------------|
+| `--include-prefill-in-budget` | `--count-prompt-tokens` |
+
 ## 文件名中的 "aime" 泛化
 
 脚本名中的 "aime" 需要泛化处理，例如：
