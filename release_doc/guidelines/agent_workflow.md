@@ -37,8 +37,9 @@
 
 1. **开始工作时**：先读 `release_doc/CURRENT_STATUS.md`，了解当前进展到哪了、下一步是什么
 2. **工作过程中**：及时更新 `CURRENT_STATUS.md` 中的"已完成"、"未完成"、"下一步行动"
-3. **对话结束前**（无论正常结束还是可能中断）：确保 `CURRENT_STATUS.md` 反映最新状态并已 commit
+3. **每 2-3 轮对话必须更新一次** `CURRENT_STATUS.md` 并 commit — 这是硬性要求，不是建议。因为 agent 随时可能意外断掉，如果不频繁保存状态，断点恢复就会丢失信息
 4. **完成一个 open item 或重要决策后**：立即更新 `CURRENT_STATUS.md` 并 commit
+5. **对话结束前**（无论正常结束还是可能中断）：确保 `CURRENT_STATUS.md` 反映最新状态并已 commit
 
 这样即使 agent 意外断掉，下一个 agent 读这个文件就能恢复到断点。
 
