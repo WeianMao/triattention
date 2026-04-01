@@ -84,6 +84,39 @@ Save as JSONL files in `./data/` directory:
 Expected format: one JSON object per line with `problem` and `answer` fields.
 ```
 
+## 字段名兼容性（已确认无问题）
+
+用户从 HuggingFace 下载的数据字段名（`problem`）与本地 JSONL（AIME 用 `question`）不一致，但代码中**已有 3 层防护机制**，无需额外处理：
+
+### 第 1 层：`dataset2key` 显式映射
+
+`run_math.py` 和 `rkv_sharded_eval.py` 中定义了每个数据集的字段名：
+```python
+dataset2key = {
+    "aime24": ["question", "answer"],
+    "aime25": ["question", "answer"],
+    "math": ["problem", "answer"],
+    "math500": ["problem", "answer"],
+}
+```
+代码读取对应字段后统一存为 `example["question"]`。
+
+### 第 2 层：`extract_question_from_record()` fallback
+
+`weian_development/speckv/prompt_utils.py` 中按 `["question", "problem"]` 顺序尝试，任一字段存在即可。
+
+### 第 3 层：eval 代码 fallback
+
+`eval_math_multi.py` 中：
+```python
+if "question" not in sample and "problem" in sample:
+    sample["question"] = sample["problem"]
+```
+
+### 结论
+
+用户从 HuggingFace 下载数据（字段名 `problem`），代码自动 fallback，**无需用户做任何字段名转换**。Release 时保留现有机制即可。
+
 ## 不 release 的数据集相关内容
 
 - BruMO 2025 — 实验脚本中未实际使用，不需要提供
