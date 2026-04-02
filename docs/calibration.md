@@ -18,5 +18,5 @@ The calibration script runs a forward pass on plain text input, captures query s
 | Model | Stats Path |
 |-------|-----------|
 | Qwen3-8B | `calibration/qwen3_8b_stats.pt` |
-| DeepSeek-R1-Distill-Llama-8B | `calibration/ds_llama_8b_stats.pt` |
-| DeepSeek-R1-Distill-Qwen-7B | `calibration/ds_qwen_7b_stats.pt` |
+| DeepSeek-R1-Distill-Llama-8B | `calibration/dsllama_8b_stats.pt` |
+| DeepSeek-R1-Distill-Qwen-7B | `calibration/dsqwen_7b_stats.pt` |

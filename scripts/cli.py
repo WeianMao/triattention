@@ -30,7 +30,6 @@ STATS_DIR = EXP_ROOT / "stats"
 
 MODEL_SPECS: Dict[str, str] = {
     "DeepSeek-R1-Distill-Qwen-7B": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-    "DeepSeek-R1-Distill-Qwen-14B": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
     "DeepSeek-R1-Distill-Llama-8B": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
     "Qwen3-8B": "Qwen/Qwen3-8B",
 }
@@ -541,76 +540,62 @@ def normalize_selection(
 
 def build_stats(
     dry_run: bool,
-    datasets: List[str] | None = None,
     models: List[str] | None = None,
+    input_file: str | None = None,
+    output_dir: str | None = None,
+    max_length: int = 32768,
     job_parallel: int = 1,
 ) -> None:
     if job_parallel < 1:
         raise ValueError("job_parallel must be >= 1")
 
-    defaults = load_runner_defaults()
-    runner_defaults = defaults.get("runner_args", {})
-    dataset_list = normalize_selection(datasets, DATASETS, "dataset")
+    if input_file is None:
+        raise SystemExit(
+            "build-stats requires --input pointing to a plain text calibration file.\n"
+            "Example: python scripts/cli.py build-stats --input calibration_text.txt"
+        )
+    input_path = Path(input_file)
+    if not input_path.exists():
+        raise SystemExit(f"Input file not found: {input_path}")
+
+    out_dir = Path(output_dir) if output_dir else RKV_ROOT / "calibration"
     model_list = normalize_selection(models, list(MODEL_SPECS.keys()), "model")
 
-    budgets = load_budgets()
-    missing_fullkv: List[Tuple[str, str, Path]] = []
     commands: List[Dict[str, object]] = []
 
-    for dataset in dataset_list:
-        num_samples = resolve_num_samples(runner_defaults, dataset)
-        sample_dir = sample_tag(num_samples)
-        num_traces = 30  # Use 30 traces for stats building
-        for model_name in model_list:
-            fullkv_root = OUTPUTS_DIR / dataset / model_name / sample_dir / "fullkv" / "full"
-            if not fullkv_root.exists() or not has_trace_data(fullkv_root):
-                missing_fullkv.append((dataset, model_name, fullkv_root))
-                continue
-
-            model_path = validate_model_exists(model_name, dry_run)
-            for budget in budgets:
-                stats_path = stats_path_for(dataset, model_name, budget)
-                if stats_path.exists():
-                    continue
-                stats_path.parent.mkdir(parents=True, exist_ok=True)
-                cmd = [
-                    sys.executable,
-                    str(RKV_ROOT / "scripts" / "calibrate.py"),
-                    "--trace-root",
-                    str(fullkv_root),
-                    "--model-path",
-                    str(model_path),
-                    "--output-path",
-                    str(stats_path),
-                    "--num-traces",
-                    str(num_traces),
-                    "--attn-implementation",
-                    "flash_attention_2",
-                    "--dtype",
-                    "bfloat16",
-                    "--kv-budget",
-                    str(budget),
-                ]
-                env = os.environ.copy()
-            
-                env["PYTHONPATH"] = f"{RKV_ROOT}:{env.get('PYTHONPATH', '')}".strip(":")
-                commands.append(
-                    {
-                        "cmd": cmd,
-                        "cwd": str(RKV_ROOT),
-                        "env": env,
-                        "label": f"{dataset}/{model_name}/budget_{budget}",
-                    }
-                )
-
-    if missing_fullkv:
-        for dataset, model_name, path in missing_fullkv:
-            print(
-                f"[error] Missing fullkv outputs for {dataset}/{model_name}: {path}",
-                file=sys.stderr,
-            )
-        if not dry_run:
-            raise SystemExit("FullKV outputs missing. Run scripts/run_all_default_v2.sh first.")
+    for model_name in model_list:
+        model_path = validate_model_exists(model_name, dry_run)
+        stats_path = out_dir / f"{model_name.lower().replace('-', '_')}_stats.pt"
+        if stats_path.exists():
+            print(f"[skip] Stats already exist: {stats_path}")
+            continue
+        stats_path.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            sys.executable,
+            str(RKV_ROOT / "scripts" / "calibrate.py"),
+            "--model",
+            str(model_path),
+            "--input",
+            str(input_path),
+            "--output",
+            str(stats_path),
+            "--max-length",
+            str(max_length),
+            "--device",
+            "cuda",
+            "--attn-implementation",
+            "flash_attention_2",
+        ]
+        env = os.environ.copy()
+        env["PYTHONPATH"] = f"{RKV_ROOT}:{env.get('PYTHONPATH', '')}".strip(":")
+        commands.append(
+            {
+                "cmd": cmd,
+                "cwd": str(RKV_ROOT),
+                "env": env,
+                "label": model_name,
+            }
+        )
 
     if not commands:
         print("[info] No pending stats jobs for requested targets.")
@@ -690,19 +675,29 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser("run-default", help="Run all default-budget experiments.")
     subparsers.add_parser("run-sweep", help="Run all budget sweep experiments.")
     build_stats_parser = subparsers.add_parser(
-        "build-stats", help="Build TriAttention stats for all datasets/models."
+        "build-stats", help="Calibrate TriAttention stats from plain text input."
     )
     build_stats_parser.add_argument(
-        "--dataset",
-        action="append",
-        choices=DATASETS,
-        help="Datasets to include (repeatable). Defaults to all.",
+        "--input",
+        required=True,
+        help="Plain text file for calibration input.",
     )
     build_stats_parser.add_argument(
         "--model",
         action="append",
         choices=list(MODEL_SPECS.keys()),
         help="Models to include (repeatable). Defaults to all.",
+    )
+    build_stats_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Output directory for stats files (default: calibration/).",
+    )
+    build_stats_parser.add_argument(
+        "--max-length",
+        type=int,
+        default=32768,
+        help="Maximum token length for calibration (default: 32768).",
     )
     build_stats_parser.add_argument(
         "--job-parallel",
@@ -750,8 +745,10 @@ def main() -> None:
     if args.command == "build-stats":
         build_stats(
             args.dry_run,
-            datasets=args.dataset,
             models=args.model,
+            input_file=args.input,
+            output_dir=args.output_dir,
+            max_length=args.max_length,
             job_parallel=args.job_parallel,
         )
         return
