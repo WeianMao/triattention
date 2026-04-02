@@ -34,5 +34,8 @@ logs/
 *.bin
 *.ckpt
 
+# Exception: pre-computed calibration stats are tracked
+!calibration/*.pt
+
 # Workflow
 .workflow/
