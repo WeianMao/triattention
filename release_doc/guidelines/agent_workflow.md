@@ -1,13 +1,26 @@
 # Agent 执行任务的工作流程规范
 
+## 必读文档
+
+**开始任何 release 相关工作前，必须先读以下文件：**
+
+1. `release_doc/CURRENT_STATUS.md` — 当前进展、断点恢复
+2. `release_doc/plan/execution_plan.md` — 完整执行计划（阶段、步骤、依赖、检查点）
+3. `release_doc/plan/dev_standards.md` — 开发规范（命名、commit、敏感词、中断恢复、角色职责）
+4. `release_doc/plan/checkpoint_protocol.md` — 检查点协议（检查内容、通过标准、失败处理）
+5. `release_doc/plan/execution_log.md` — 执行日志（了解已完成的工作和已知问题）
+
+**然后读与当前步骤相关的具体文档**（scope/code_cleanup/components 下）。
+
 ## 阶段执行模式
 
 每个 release 阶段由一个 agent 独立执行。Agent 执行任务时遵循以下流程：
 
-### 1. 读取阶段文件
+### 1. 读取计划和相关文档
 
-- 先读 `stages/` 下对应的阶段文件，了解前置条件、具体步骤、验证标准
+- 先读 `plan/execution_plan.md` 中对应步骤，了解 scope、input、output、验证标准
 - 再读相关的 scope/code_cleanup/components 文档，了解决策细节
+- **必须读相关的实际代码**，理解具体情况（计划是蓝图，代码是现实）
 
 ### 2. 检查前置条件
 

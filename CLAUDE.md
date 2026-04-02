@@ -82,12 +82,16 @@ Do not modify existing algorithm core logic without explicit authorization. New 
 **任何与 release 相关的任务，开始前必须先读以下文档：**
 
 1. `release_doc/CURRENT_STATUS.md` — 当前进展、断点恢复信息
-2. `release_doc/guidelines/agent_workflow.md` — agent 工作流程、断点恢复机制、调度策略
-3. `release_doc/guidelines/confirmation_protocol.md` — 与用户确认决策的标准流程
-4. `release_doc/guidelines/documentation_standard.md` — 文档记录标准
+2. `release_doc/plan/execution_plan.md` — **完整执行计划**（阶段、步骤、依赖、检查点）
+3. `release_doc/plan/dev_standards.md` — **开发规范**（命名、commit、角色职责、中断恢复、纠偏机制）
+4. `release_doc/plan/checkpoint_protocol.md` — **检查点协议**（检查内容、通过标准、失败处理）
+5. `release_doc/plan/execution_log.md` — **执行日志**（已完成工作、已知问题）
+6. `release_doc/guidelines/agent_workflow.md` — agent 工作流程
+7. `release_doc/guidelines/confirmation_protocol.md` — 与用户确认决策的标准流程
 
 **关键规则**：
+- 计划是蓝图，不是教条——必须读相关代码理解实际情况，根据实际情况执行
+- Controller agent 有权启动调查 agent、发起计划外检查、执行重规划
+- 所有 agent 必须维护 `plan/execution_log.md`，确保中断后下一个 agent 能接手
 - 每 2-3 轮对话必须更新 `CURRENT_STATUS.md` 并 commit
-- 完成重要决策后立即更新并 commit
-- 所有决策记录到 `release_doc/tracking/14_open_items.md`
-- 详情见上述 guidelines 文档
+- 详情见上述文档
