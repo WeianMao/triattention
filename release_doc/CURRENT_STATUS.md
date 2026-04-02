@@ -5,17 +5,65 @@
 ## 最后更新
 
 - **时间**：2026-04-01
-- **更新者**：Claude Opus agent（第 2 个接手的 agent）
-- **对话状态**：进行中
+- **更新者**：Claude Opus agent（第 3 个接手的 agent，负责交接整理）
+- **对话状态**：交接完成，等待用户下一步指令
 
 ## 当前所处阶段
 
-**阶段 1: Open Items 确认** — 进行中
+**阶段 1: Open Items 确认** — 接近完成，剩余 1 个阻塞项（GPT-OSS 环境依赖）+ 2 个未讨论项
+
+## 5 个 Gap 状态总览
+
+| # | Gap | 状态 | 下一步 |
+|---|-----|------|--------|
+| 1 | GPT-OSS-20B 合并 | ⚠️ **阻塞中** — 需要协作者提供环境信息 | 见下方"GPT-OSS 待确认清单" |
+| 2 | 校准 Stats 文件 | ✅ **已确认** — 方案 C + 隐藏 AIME 来源 | 执行阶段实施 |
+| 3 | DFS benchmark | ✅ 代码审查通过，5 个修复项可直接执行 | 执行阶段实施 |
+| 4 | 双 rkv 包统一 | ✅ 方案已定（kv_compress + triattention） | 执行阶段实施 |
+| 5 | sys.path 清理 | ✅ **已确认** — 完善 setup.py + 删除 hack | 执行阶段实施 |
+
+## ⚠️ GPT-OSS 阻塞项详情
+
+### 已知信息（代码层面推断）
+
+- gptoss 分支与 main 差异 586 文件，核心改动不多：
+  - `modeling.py` — 新增 ~450 行：GPTOSSAttention
+  - `monkeypatch.py` — 新增 ~20 行：replace_gptoss()
+  - `speckv_experiments/scripts/gptoss/` — 实验脚本 ~1149 行
+- 代码用 try-except 导入，不影响 Llama/Qwen
+- 需要 transformers 4.57+（代码 `from transformers.models.gpt_oss` 要求）
+
+### 关键风险（用户指出）
+
+gptoss 分支把 `attn_implementation` 改成了 `eager`，但这**不是**说它在用低效 attention。实际情况是：
+1. 协作者升级了 transformers 版本
+2. 用上了 **FlashAttention-3**（不是 FA2）
+3. H100 上 FA3 通过新版 transformers 内部 dispatch，所以配置虽写 eager 但实际是高效的
+4. 这意味着环境依赖比纯代码 cherry-pick 复杂得多
+
+### 看不到的信息（无法从代码推断）
+
+- 协作者实际使用的 conda 环境配置
+- flash-attn 精确版本（2.x 还是 3.x？hopper 专用版？）
+- transformers 精确版本
+- CUDA 版本和编译配置
+- FA3 的启用方式（transformers 自动 dispatch？还是手动安装 flash-attn 3.x？）
+
+### 需要向协作者确认的问题清单
+
+1. **flash-attn 版本**：用的是 flash-attn 2.x 还是 3.x（hopper 版）？`pip show flash-attn` 输出是什么？
+2. **transformers 版本**：精确版本号？`pip show transformers` 输出？
+3. **CUDA 版本**：`nvcc --version` 和 `nvidia-smi` 输出？
+4. **FA3 启用方式**：是 transformers 自动检测 H100 dispatch 的，还是需要额外安装/配置？
+5. **attn_implementation=eager 的原因**：为什么配置写 eager？是 transformers 新版 GPT-OSS 模型类不支持 flash_attention_2 关键字？还是 FA3 走了不同的 code path？
+6. **能否导出环境**：`conda list` 或 `pip freeze` 输出，方便我们复现环境？
+
+**用户决策**：拿到以上信息后，才能评估 GPT-OSS 合并的真实复杂度和方案选择。
 
 ## 已完成的工作
 
 - [x] 文档系统搭建（release_doc/ 目录结构、guidelines）
-- [x] Open Items 确认（大部分已完成）：
+- [x] 所有 Open Items 确认（除 GPT-OSS 环境和下方 2 个未讨论项外）：
   - R-KV 包重命名 → 双包策略（kv_compress + triattention）
   - 硬编码路径替换策略 → HF hub 名 / 相对路径 / 环境变量
   - 数据集 → 不放进 repo，代码中自动从 HuggingFace 下载
@@ -27,35 +75,26 @@
   - GPT-OSS 确认是 20B
   - Figure 5 flag 差异 → 不存在差异
   - DFS benchmark 代码审查 → 通过，有 5 个待修问题
+  - 校准 Stats → 方案 C（预生成 + 脚本），隐藏 AIME 来源，公布无模板纯文本输入
+  - sys.path 清理 → 完善 setup.py + 删除 hack
 - [x] Agent 模型策略变更：全程 Opus（不再用 Sonnet+Opus 混合）
 - [x] 测试/发布流程拆分：单元测试 → 内部公布 → 头对头对比 → 正式公布
+- [x] PD-L1 GPU 占座进程 → 已记录到 execution/12_environment.md
 
-## 当前未完成的工作
+## 未讨论的项目
 
-### 优先级 1：阻塞后续阶段的待确认项
-
-1. **实验框架选择** — 方向已定（speckv_experiments 为主，weian_script 为辅），但具体整合方案未确认
-2. **第一阶段执行顺序** — 还没开始讨论
-
-### 优先级 2：需要 agent 调查后让用户确认的 gap
-
-3. **GPT-OSS-20B 处理方案** — 用户提出当作 1.5 阶段，需要 agent 调查 gptoss 分支代码差异和合并方案（对话中断前未执行）
-4. **sys.path hack 清理** — 需要 agent 调查具体涉及哪些文件
-5. **校准 stats 文件流程** — 需要文档化用户如何生成 stats（跑 fullkv → build-stats）
-
-### 优先级 3：已有方案，可在执行阶段直接做
-
-6. **DFS benchmark 5 个修复项** — 已列在 execution/15_checklist.md
-7. **双 rkv 包统一** — 已有方案（重组为 kv_compress + triattention）
-8. **KV cache 状态重置 bug 排查** — 已列在 flag_cleanup.md
+1. **实验框架选择**：speckv_experiments vs weian_script 具体整合方案（方向已定：speckv_experiments 为主，weian_script 为辅，但整合细节未确认）
+2. **第一阶段执行顺序**：具体步骤排序还没开始讨论
 
 ## 下一步行动
 
 接手的 agent 应该按以下顺序推进：
 
-1. 先处理优先级 2 中的 gap 调查（启动 agent 调查，给用户方案选择）
-2. 确认剩余的优先级 1 项（实验框架具体整合、执行顺序）
-3. 所有 open items 确认后，进入阶段 2（代码清理）
+1. **GPT-OSS**：等用户拿到协作者的环境信息后，评估合并方案并让用户确认
+2. **确认剩余 2 项**：实验框架具体整合、执行顺序
+3. **进入阶段 2（代码清理）**：所有 open items 确认后开始执行
+
+如果用户决定 GPT-OSS 不阻塞（Phase 1.5 独立处理），可以直接跳到第 2 步。
 
 ## 关键文档指引
 
@@ -64,7 +103,10 @@
 | 项目全貌和发布策略 | scope/01_overview.md |
 | 目标 repo 结构 | code_cleanup/05_repo_structure.md |
 | 所有已确认/待确认决策 | tracking/14_open_items.md |
+| 校准 Stats 完整方案 | tracking/14_open_items.md §校准 Stats 处理方案 |
+| sys.path 清理方案 | tracking/14_open_items.md §sys.path 清理方案 |
 | 执行阶段和流程 | stages/README.md |
 | 工作规范 | guidelines/ 目录下所有文件 |
 | Release 前待办清单 | execution/15_checklist.md |
 | 实验 setting 矩阵 | scope/experiment_settings.md |
+| 环境信息和 PD-L1 | execution/12_environment.md |
