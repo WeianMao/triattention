@@ -24,7 +24,45 @@ Executor agent 至少需要读 1-5 + 与自己步骤相关的具体文档。
 
 ---
 
-## 1. Working Directory Rules
+## 1. Ambiguity 处理与未确认决策
+
+### 风险分级处理
+
+| 风险等级 | 判断标准 | 处理方式 |
+|---------|---------|---------|
+| **低** | 纯代码风格（缩进、注释措辞等） | 直接按代码库现有风格处理，不记录 |
+| **中** | 有多种合理方案，但不影响功能正确性（如函数名选择） | 选最符合已有决策风格的方案执行，**记录到未确认决策日志** |
+| **高** | 可能影响功能正确性、学术合规性、或用户体验 | **停止该项**，记录为 BLOCKING，继续做其他不受影响的工作 |
+
+### 未确认决策日志
+
+文件：`release_doc/plan/unconfirmed_decisions.md`
+
+Agent 遇到中/高风险 ambiguity 时，必须记录到此文件。用户事后可让 agent 批量审查。
+
+### 决策风格参考
+
+Agent 做判断时应参考的用户已有决策风格：
+- **信息最小化** — 不暴露不必要的内部信息
+- **用户体验优先** — 开箱即用 > 灵活配置
+- **保守安全** — 宁可多删不该有的，不可漏掉敏感信息
+- **命名统一** — TriAttention 体系，不混用内部名
+- **不过度工程** — 简单直接，不搞花哨抽象
+
+### 常见 Edge Cases
+
+| Case | 处理方式 |
+|------|---------|
+| 文件在 release 范围但 release_doc 中没提到 | 检查内容，明显属于已确认类别就按规则处理，否则记录为中风险 UD |
+| 代码改名后发现有隐式依赖没文档化 | 追踪依赖链修复，记录为 UD |
+| Flag 在删除清单但有代码路径还在用 | 删除 flag + 对应代码路径。不确定范围则记录为高风险 UD 并暂停 |
+| Stats .pt 文件内容和文档描述不一致 | 以实际文件为准，更新文档，记录为 UD |
+| 需要判断某段代码是社区还是原创 | 保守处理：加 attribution，记录为低风险 UD |
+| Config 中发现未知参数 | 保留原值不动，记录为中风险 UD |
+
+---
+
+## 2. Working Directory Rules (原 dc1/ 不动)
 
 ### Sacred Rule: Never Modify `dc1/`
 
@@ -40,7 +78,7 @@ All code changes happen in `dc1-release/` (the worktree on `release/public` bran
 
 ---
 
-## 2. Commit Conventions
+## 3. Commit Conventions
 
 ### Commit Message Format
 
@@ -93,7 +131,7 @@ Removed all sys.path.insert() hacks.
 
 ---
 
-## 3. Naming Conventions During Rename
+## 4. Naming Conventions During Rename
 
 ### Reference Document
 
@@ -136,7 +174,7 @@ When renaming Python identifiers:
 
 ---
 
-## 4. Import Restructuring Conventions
+## 5. Import Restructuring Conventions
 
 ### Before (Internal)
 
@@ -164,7 +202,7 @@ from kv_compress.r1_kv import R1KVCompressor
 
 ---
 
-## 5. Handling Files Not Released But Not Deleted
+## 6. Handling Files Not Released But Not Deleted
 
 ### Principle
 
@@ -183,7 +221,7 @@ When restructuring (`kv_compress/__init__.py`), verify it does NOT import `speck
 
 ---
 
-## 6. Edge Case Handling
+## 7. Edge Case Handling
 
 ### When You Discover Something Not in the Docs
 
@@ -209,7 +247,7 @@ When restructuring (`kv_compress/__init__.py`), verify it does NOT import `speck
 
 ---
 
-## 7. Sensitive Content Rules
+## 8. Sensitive Content Rules
 
 ### Zero-Tolerance Keywords
 
@@ -245,7 +283,7 @@ Every `.pt` file must be verified to not contain:
 
 ---
 
-## 8. Testing Standards
+## 9. Testing Standards
 
 ### Every Code Change Must Compile
 
@@ -275,7 +313,7 @@ This is non-negotiable. Do not commit code that fails compilation.
 
 ---
 
-## 9. Agent 角色与中断恢复
+## 10. Agent 角色与中断恢复
 
 ### 两种角色
 
@@ -339,7 +377,7 @@ Controller 不是机械执行计划的调度器。它有以下权力：
 
 ---
 
-## 10. Documentation During Execution
+## 11. Documentation During Execution
 
 ### What to Update
 
@@ -357,7 +395,7 @@ Controller 不是机械执行计划的调度器。它有以下权力：
 
 ---
 
-## 10. Recovery Procedures
+## 12. Recovery Procedures
 
 ### If a Step Fails
 
