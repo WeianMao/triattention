@@ -28,6 +28,7 @@ Before Phase 1 begins, confirm:
 ### Step 1.1: Create Worktree and Branch
 
 - **Scope**: Git operations only
+- **Read these files**: `execution/11_implementation.md`
 - **Input**: Clean `main` branch
 - **Actions**:
   1. `git checkout main && git pull`
@@ -42,6 +43,7 @@ Before Phase 1 begins, confirm:
 ### Step 1.2: Create `triattention` Conda Environment
 
 - **Scope**: Conda/pip operations (no code changes)
+- **Read these files**: `execution/12_environment.md`
 - **Input**: Access to conda, pip, CUDA toolkit
 - **Actions**:
   1. `conda create -n triattention python=3.10 -y`
@@ -82,6 +84,7 @@ See `checkpoint_protocol.md` -- Checkpoint C1.
 > **重要**：此步骤必须在任何删除操作之前执行。从现有目录中提取需要的文件到新结构中。
 
 - **Scope**: 创建目标目录结构，从旧目录中移动/复制需要的文件
+- **Read these files**: `code_cleanup/05_repo_structure.md`, `scope/02_scope_include.md`
 - **Input**: `dc1-release/` with full source tree
 - **Actions** (all paths relative to `dc1-release/`):
   1. Create target directory structure:
@@ -149,6 +152,7 @@ See `checkpoint_protocol.md` -- Checkpoint C1.
 ### Step 2.2: DFS Integration + Delete Old Directories
 
 - **Scope**: DFS 代码集成 + 删除已提取完毕的旧目录
+- **Read these files**: `scope/03_scope_exclude.md`, `execution/15_checklist.md` (DFS section)
 - **Input**: `dc1-release/` after Step 2.1 (new structure already in place)
 - **Actions**:
   1. **DFS benchmark integration**: From `linxi-dev` branch, manually copy DFS benchmark files:
@@ -193,6 +197,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
 ### Step 2.3: Systematic Import Rewrite
 
 - **Scope**: Python import statements across all files in `dc1-release/`
+- **Read these files**: `plan/dev_standards.md` (section 5: import conventions)
 - **Input**: `dc1-release/` after Step 2.2 (new directory structure, old dirs deleted)
 - **Actions**:
   1. Rewrite all `weian_development.*` imports (15+ files identified in checklist):
@@ -227,6 +232,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
 ### Step 2.4: Naming Unification (speckv -> triattention)
 
 - **Scope**: String replacements across all files in `dc1-release/`
+- **Read these files**: `code_cleanup/04_naming.md`, `code_cleanup/flag_cleanup.md`, `components/08_launcher.md` (CLI cleanup)
 - **Input**: `dc1-release/` after Step 2.3
 - **Actions** (reference: `code_cleanup/04_naming.md`):
   1. **Class/function renames**:
@@ -272,6 +278,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
 ### Step 2.5: Flag Cleanup (Delete Experimental Flags)
 
 - **Scope**: Python argparse definitions + all code paths referencing deleted flags
+- **Read these files**: `code_cleanup/flag_cleanup.md`
 - **Input**: `dc1-release/` after Step 2.4
 - **Actions** (reference: `code_cleanup/flag_cleanup.md`):
   1. Delete 14 flags and ALL associated code paths:
@@ -313,6 +320,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
 ### Step 2.6: Path Cleanup + Sensitive Content Removal
 
 - **Scope**: All hardcoded paths, sensitive strings, and metadata
+- **Read these files**: `code_cleanup/06_path_cleanup.md`, `scope/03_scope_exclude.md`, `components/07_evaluation.md` (attribution)
 - **Input**: `dc1-release/` after Step 2.5
 - **Actions** (reference: `code_cleanup/06_path_cleanup.md`):
   1. **Model paths** -> HuggingFace hub names:
@@ -376,7 +384,8 @@ See `checkpoint_protocol.md` -- Checkpoint C3. This is the most critical checkpo
 ### Step 3.1: Write Calibration Script (NEW)
 
 - **Scope**: Create `scripts/calibrate.py` (new file, not a copy of internal scripts)
-- **Input**: Understanding of calibration flow from `tracking/14_open_items.md` "Calibration Stats" section
+- **Read these files**: `components/calibration_stats.md`
+- **Input**: Understanding of calibration flow from the calibration stats decision doc
 - **Actions**:
   1. Write a new calibration script that:
      - Takes raw text input (no dataset template, no AIME format)
@@ -398,6 +407,7 @@ See `checkpoint_protocol.md` -- Checkpoint C3. This is the most critical checkpo
 ### Step 3.2: Pre-generate Calibration Stats Files
 
 - **Scope**: Generate `.pt` files for 3 non-GPT-OSS models (GPU required)
+- **Read these files**: `components/calibration_stats.md`
 - **Input**: Working calibration pipeline (internal tools, NOT the new script); model weights
 - **Actions**:
   1. For each model (DS-Qwen-7B, DS-Llama-8B, Qwen3-8B):
@@ -429,6 +439,7 @@ See `checkpoint_protocol.md` -- Checkpoint C3. This is the most critical checkpo
 ### Step 3.3: Write setup.py / pyproject.toml
 
 - **Scope**: Package configuration files
+- **Read these files**: `execution/12_environment.md` (dependency versions)
 - **Input**: Target repo structure from Step 2.3; dependency list from `execution/12_environment.md`
 - **Actions**:
   1. Write `setup.py` (or `pyproject.toml`) with:
@@ -451,6 +462,7 @@ See `checkpoint_protocol.md` -- Checkpoint C3. This is the most critical checkpo
 ### Step 3.4: Write Data Loader with Auto-Download
 
 - **Scope**: `evaluation/data_loader.py` or `scripts/data_loader.py`
+- **Read these files**: `scope/datasets.md`
 - **Input**: Dataset info from `scope/datasets.md`
 - **Actions**:
   1. Implement auto-download from HuggingFace:
@@ -467,6 +479,7 @@ See `checkpoint_protocol.md` -- Checkpoint C3. This is the most critical checkpo
 ### Step 3.5: Write README and Docs
 
 - **Scope**: `README.md`, `LICENSE`
+- **Read these files**: `components/readme_outline.md`, `scope/experiment_settings.md`
 - **Input**: README outline from `components/readme_outline.md`; all experiment settings from `scope/experiment_settings.md`
 - **Actions**:
   1. Write `README.md` following the outline (15 sections)
@@ -495,6 +508,7 @@ See `checkpoint_protocol.md` -- Checkpoint C4.
 ### Step 4.1: Level 1 Unit Tests (No GPU, ~1 second)
 
 - **Scope**: Write and run `tests/test_triattention.py`
+- **Read these files**: `execution/15_checklist.md` (test section), `execution/10_technical_notes.md`
 - **Input**: Working `dc1-release/` with `pip install -e .`
 - **Actions**:
   1. Write pure scoring function equivalence test:
@@ -513,6 +527,7 @@ See `checkpoint_protocol.md` -- Checkpoint C4.
 ### Step 4.2: Level 2 Unit Tests (Minimal GPU, ~5 seconds)
 
 - **Scope**: Write and run `tests/test_pruner_equivalence.py`
+- **Read these files**: `execution/15_checklist.md` (test section), `execution/10_technical_notes.md`
 - **Input**: Working `dc1-release/` with calibration stats
 - **Actions**:
   1. Write pruner equivalence test:
@@ -552,6 +567,7 @@ See `checkpoint_protocol.md` -- Checkpoint C4.
 ### Step 4.4: Final Sensitive Content Scan
 
 - **Scope**: Read-only scan of entire `dc1-release/`
+- **Read these files**: `scope/03_scope_exclude.md`, `plan/dev_standards.md` (section 8: sensitive content rules)
 - **Input**: Complete `dc1-release/`
 - **Actions**:
   1. Run exhaustive keyword scan (expanded list):
@@ -593,6 +609,7 @@ See `checkpoint_protocol.md` -- Checkpoint C5. **This is the go/no-go decision p
 ### Step 5.1: End-to-End Smoke Test
 
 - **Scope**: Fresh-environment test of the complete user experience
+- **Read these files**: `execution/11_implementation.md`
 - **Input**: Complete, verified `dc1-release/`
 - **Actions**:
   1. In a fresh terminal with the `triattention` conda env:
@@ -613,6 +630,7 @@ See `checkpoint_protocol.md` -- Checkpoint C5. **This is the go/no-go decision p
 ### Step 5.2: Clean-Room Repository Creation
 
 - **Scope**: Create the final public repo (no git history)
+- **Read these files**: `execution/11_implementation.md`
 - **Input**: Verified `dc1-release/`
 - **Actions**:
   1. Create clean directory:
@@ -642,6 +660,7 @@ See `checkpoint_protocol.md` -- Checkpoint C5. **This is the go/no-go decision p
 ### Step 5.3: Internal Team Review
 
 - **Scope**: Share with team members for review (before public push)
+- **Read these files**: `execution/11_implementation.md`
 - **Input**: `~/triattention-public/`
 - **Actions**:
   1. Push to a private GitHub repo for team review
@@ -658,6 +677,7 @@ See `checkpoint_protocol.md` -- Checkpoint C5. **This is the go/no-go decision p
 ### Step 5.4: GPU Head-to-Head Comparison (Level 3)
 
 - **Scope**: Full model inference comparison (requires ~16GB GPU, ~60 seconds per model)
+- **Read these files**: `execution/11_implementation.md`
 - **Input**: Both `dc1/` (original) and `triattention-public/` (release)
 - **Actions**:
   1. For each of 3 models (DS-Qwen-7B, DS-Llama-8B, Qwen3-8B):
@@ -673,6 +693,7 @@ See `checkpoint_protocol.md` -- Checkpoint C5. **This is the go/no-go decision p
 ### Step 5.5: Public Release
 
 - **Scope**: Push to public GitHub
+- **Read these files**: `execution/11_implementation.md`
 - **Input**: Team-reviewed `triattention-public/`
 - **Actions**:
   1. Create public GitHub repo `TriAttention`
@@ -686,6 +707,7 @@ See `checkpoint_protocol.md` -- Checkpoint C5. **This is the go/no-go decision p
 ### Step 5.6: Cleanup
 
 - **Scope**: Remove temporary workspaces
+- **Read these files**: `execution/11_implementation.md`
 - **Actions**:
   1. `git worktree remove ../dc1-release`
   2. Optionally delete `release/public` branch if no longer needed

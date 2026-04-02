@@ -31,6 +31,7 @@
 | [code_cleanup/05_repo_structure.md](code_cleanup/05_repo_structure.md) | 目标 repo 目录结构 |
 | [code_cleanup/06_path_cleanup.md](code_cleanup/06_path_cleanup.md) | 硬编码路径替换方案（含完整调查结果） |
 | [code_cleanup/flag_cleanup.md](code_cleanup/flag_cleanup.md) | Flag 清理：删除/保留/改名清单 + KV cache bug 排查 |
+| [code_cleanup/syspath_cleanup.md](code_cleanup/syspath_cleanup.md) | sys.path 清理方案（已确认决策） |
 
 ### components/ -- 各组件详情
 
@@ -40,6 +41,7 @@
 | [components/08_launcher.md](components/08_launcher.md) | 分布式启动器：文件清单、功能、命名清理 |
 | [components/09_reference_script.md](components/09_reference_script.md) | 起点脚本、关键 flag 组合、参数基准 |
 | [components/readme_outline.md](components/readme_outline.md) | README 大纲（精致版，含占位符清单） |
+| [components/calibration_stats.md](components/calibration_stats.md) | 校准 Stats 处理方案（已确认决策） |
 
 ### execution/ -- 执行相关
 
@@ -63,16 +65,6 @@
 - **执行 release**：按 [execution/11_implementation.md](execution/11_implementation.md) 步骤操作，配合 [execution/15_checklist.md](execution/15_checklist.md) 逐项确认
 - **接手项目**：先看 [execution/12_environment.md](execution/12_environment.md) 了解环境，再看 [tracking/14_open_items.md](tracking/14_open_items.md) 了解待办
 
-### stages/ -- 执行阶段
-
-整个 release 工作被拆分为多个独立阶段，每个阶段可由一个 agent 独立执行。
-
-| 文件 | 内容 |
-|------|------|
-| [stages/README.md](stages/README.md) | 阶段总览、依赖关系、状态追踪 |
-
-阶段详情见 [stages/README.md](stages/README.md)，每个阶段的具体步骤文件会在 Open Items 全部确认后逐步填充。
-
 ### guidelines/ -- 工作规范
 
 适用于所有参与 release 工作的 agent 和接手同事。
@@ -83,6 +75,3 @@
 | [guidelines/confirmation_protocol.md](guidelines/confirmation_protocol.md) | 与用户确认决策的标准流程 |
 | [guidelines/documentation_standard.md](guidelines/documentation_standard.md) | 文档记录标准 |
 
-## 历史归档
-
-旧版单文件 release plan 保留在 [RELEASE_PLAN.md](RELEASE_PLAN.md)，仅供参考。
