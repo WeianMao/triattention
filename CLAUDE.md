@@ -76,3 +76,18 @@ Long-running jobs should use `PD-L1_binder` process name prefix (via wrapper scr
 ## Code Isolation Policy
 
 Do not modify existing algorithm core logic without explicit authorization. New algorithms/variants should be developed in isolated scripts/subclasses, reusing existing API interfaces.
+
+## Release 工作规范（必读）
+
+**任何与 release 相关的任务，开始前必须先读以下文档：**
+
+1. `release_doc/CURRENT_STATUS.md` — 当前进展、断点恢复信息
+2. `release_doc/guidelines/agent_workflow.md` — agent 工作流程、断点恢复机制、调度策略
+3. `release_doc/guidelines/confirmation_protocol.md` — 与用户确认决策的标准流程
+4. `release_doc/guidelines/documentation_standard.md` — 文档记录标准
+
+**关键规则**：
+- 每 2-3 轮对话必须更新 `CURRENT_STATUS.md` 并 commit
+- 完成重要决策后立即更新并 commit
+- 所有决策记录到 `release_doc/tracking/14_open_items.md`
+- 详情见上述 guidelines 文档
