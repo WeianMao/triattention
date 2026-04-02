@@ -73,134 +73,102 @@ See `checkpoint_protocol.md` -- Checkpoint C1.
 
 **Goal**: Transform internal codebase into release-ready code. All work happens in `dc1-release/`.
 
-**Critical rule**: Every step in Phase 2 operates on `dc1-release/`. The original `dc1/` is never modified.
+**Critical rules**:
+- Every step in Phase 2 operates on `dc1-release/`. The original `dc1/` is **never modified**（只读参考）。
+- `dc1-release/` 是从 main 分支创建的 worktree，初始内容和 main 完全一致。agent 从中提取需要的文件，重组目录，修改代码。main 分支不受影响。
 
-### Step 2.1: Delete Excluded Content
+### Step 2.1: Directory Restructure + File Extraction
 
-- **Scope**: File/directory deletion only -- no content editing
+> **重要**：此步骤必须在任何删除操作之前执行。从现有目录中提取需要的文件到新结构中。
+
+- **Scope**: 创建目标目录结构，从旧目录中移动/复制需要的文件
 - **Input**: `dc1-release/` with full source tree
 - **Actions** (all paths relative to `dc1-release/`):
-  1. Delete excluded directories:
-     - `weian_development/` (personal dev tools)
-     - `paper_visualizations/` (not released)
-     - `experiments/` (not Phase 1)
-     - `scripts/gpu_occupier.py`, `scripts/test_gpu_occupier.py`, `scripts/test_gpu_workload.py`
-     - `.claude/`, `.workflow/`
-     - `deepconf/` (historical, unrelated)
-     - `TriAttention/` (empty directory)
-     - `R-KV/logs/`, `R-KV/outputs/`, `R-KV/vLLM/`, `R-KV/SGLang/` (symlinks to runtime artifacts)
-     - `repository_archive/`, `R-KV-backup-*`
-     - `release_doc/` (meta-docs, not part of release)
-     - `docs/` (if present, internal docs)
-  2. Delete excluded files within retained directories:
-     - `R-KV/HuggingFace/rkv/compression/speckv.py` (generate-wrapper path, not released -- but see note below)
-     - `evaluation/length_eval.py`
-     - `evaluation/CHANGELOG_weian.md`
-     - `R-KV/weian_development/` (if nested refs remain)
-     - All `__pycache__/`, `.DS_Store`, `*.pyc`
-  3. Delete process masking files:
-     - `rkv_sharded_runner.py` (entire file)
-     - Any `PD-L1_binder` related scripts
-  4. Delete internal development logs:
-     - Any `PROGRESS_SUMMARY.md` files
-  5. Delete calibration scripts (not released -- new one will be written):
-     - `rkv_sparse_round_calibrate.py`
-     - `capture_qk_distributed.py`
-  6. Delete obsolete implementations:
-     - `sparse_round_pruner_prefill_keep.py`
-     - `rkv_speckv_generate.py`
-     - `analysiskv.py`
-- **Output**: Slimmed directory tree with only releasable content
-- **Verification**:
-  ```bash
-  # These must return zero results:
-  find ../dc1-release -name "*.pyc" -o -name "__pycache__" -o -name ".DS_Store" | wc -l
-  grep -rl "gpu_occupier" ../dc1-release/ | wc -l
-  grep -rl "PD-L1_binder" ../dc1-release/ | wc -l
-  test ! -d ../dc1-release/weian_development
-  test ! -d ../dc1-release/paper_visualizations
-  ```
-- **Estimated workload**: Small
-- **Note on `speckv.py`**: Do NOT delete from `dc1/` source. Only ensure it is absent from `dc1-release/`.
-
-### Step 2.2: DFS Benchmark Code Integration
-
-- **Scope**: Copy files from `linxi-dev` branch + apply 5 fixes
-- **Input**: `dc1-release/` after Step 2.1; access to `linxi-dev` branch
-- **Actions**:
-  1. From `linxi-dev` branch, manually copy DFS benchmark files to `dc1-release/`:
-     - `R-KV/linxi_development/AQA-Bench/dfs_state_query/` contents
-     - Place in appropriate location under `dc1-release/` (e.g., `benchmarks/dfs/`)
-  2. Apply 5 fixes (per `execution/15_checklist.md`):
-     - Replace hardcoded `/home/linxi/...` paths (3 files) with relative paths or HF hub names
-     - Deduplicate `build_prompt` function
-     - Change bare `except:` to `except Exception:`
-     - Translate or delete Chinese documentation
-     - Delete `PROGRESS_SUMMARY.md`
-- **Output**: DFS benchmark code integrated and cleaned
-- **Verification**:
-  ```bash
-  grep -r "/home/linxi" ../dc1-release/benchmarks/dfs/ | wc -l  # must be 0
-  grep -rn "except:" ../dc1-release/benchmarks/dfs/ | grep -v "except " | wc -l  # must be 0
-  python -m py_compile ../dc1-release/benchmarks/dfs/*.py  # all must compile
-  ```
-- **Estimated workload**: Small-Medium
-
-### Step 2.3: Directory Restructure + Package Reorganization
-
-- **Scope**: Move and rename directories/files to match target repo structure (see `code_cleanup/05_repo_structure.md`)
-- **Input**: `dc1-release/` after Steps 2.1 and 2.2
-- **Actions**:
   1. Create target directory structure:
      ```
-     triattention/       (our method -- from R-KV/weian_development/speckv/ core files)
+     triattention/       (our method -- from weian_development/speckv/ core files)
      kv_compress/        (baselines -- from R-KV/HuggingFace/rkv/)
      integration/        (HF integration -- from R-KV/HuggingFace/rkv/modeling.py etc.)
      evaluation/         (eval pipeline -- from existing evaluation/)
-     scripts/            (entry points -- from speckv_experiments/)
+     scripts/            (entry points -- from weian_development/ + speckv_experiments/)
      configs/            (YAML configs -- from speckv_experiments/configs/)
-     calibration/        (stats .pt files -- to be populated)
+     calibration/        (stats .pt files -- to be populated later)
      data/               (auto-download, initially empty)
-     tests/              (unit tests -- to be written)
+     tests/              (unit tests -- to be written later)
      benchmarks/dfs/     (DFS benchmark -- from Step 2.2)
      ```
   2. Move files according to the mapping:
-     - `R-KV/weian_development/speckv/speckv_rkv_style.py` -> `triattention/triattention.py`
-     - `R-KV/weian_development/speckv/round_pruning_utils.py` -> `triattention/pruning_utils.py`
-     - `R-KV/weian_development/speckv/prompt_utils.py` -> `triattention/prompt_utils.py`
+     - `weian_development/speckv/speckv_rkv_style.py` -> `triattention/triattention.py`
+     - `weian_development/speckv/round_pruning_utils.py` -> `triattention/pruning_utils.py`
+     - `weian_development/speckv/prompt_utils.py` -> `triattention/prompt_utils.py`
+     - `weian_development/speckv/stats_utils.py` -> `triattention/stats_utils.py`
      - `R-KV/HuggingFace/rkv/compression/r1_kv.py` -> `kv_compress/r1_kv.py`
      - `R-KV/HuggingFace/rkv/compression/snapkv.py` -> `kv_compress/snapkv.py`
      - `R-KV/HuggingFace/rkv/compression/h2o.py` -> `kv_compress/h2o.py`
      - `R-KV/HuggingFace/rkv/compression/streamingllm.py` -> `kv_compress/streamingllm.py`
      - `R-KV/HuggingFace/rkv/modeling.py` -> `integration/modeling.py`
      - `R-KV/HuggingFace/rkv/monkeypatch.py` -> `integration/monkeypatch.py`
-     - Eval files -> `evaluation/`
-     - `speckv_experiments/run_math.py` -> `scripts/run_math.py`
-     - `speckv_experiments/rkv_sharded_dispatch.py` -> `scripts/dispatch.py`
-     - `speckv_experiments/rkv_sharded_eval.py` -> `scripts/worker.py`
-     - `speckv_experiments/merge_rkv_shards.py` -> `scripts/merge_shards.py`
-     - `speckv_experiments/speckv_experiments_cli_v2.py` -> `scripts/cli.py`
-     - `speckv_experiments/process_utils.py` -> `scripts/process_utils.py`
-     - `speckv_experiments/rkv_cache_utils.py` -> `scripts/cache_utils.py`
+     - Eval files -> `evaluation/` (keep existing structure)
+     - `weian_development/speckv_experiments_cli_v2.py` -> `scripts/cli.py`（注意：此文件在 weian_development/ 下，不在 speckv_experiments/）
+     - `weian_development/rkv_sharded_dispatch.py` -> `scripts/dispatch.py`
+     - `weian_development/rkv_sharded_eval.py` -> `scripts/worker.py`
+     - `weian_development/merge_rkv_shards.py` -> `scripts/merge_shards.py`
+     - `weian_development/process_utils.py` -> `scripts/process_utils.py`
+     - `weian_development/rkv_cache_utils.py` -> `scripts/cache_utils.py`
+     - `R-KV/HuggingFace/run_math.py` -> `scripts/run_math.py`
+     - `R-KV/speckv_experiments/configs/` -> `configs/`
+     - `R-KV/speckv_experiments/scripts/` -> `scripts/experiments/`（shell 脚本）
   3. Create `__init__.py` for all packages: `triattention/`, `kv_compress/`, `integration/`, `evaluation/`
   4. Create stub `setup.py` / `pyproject.toml` with `find_packages()` for editable install
-  5. Delete the now-empty original directories (`R-KV/`, `speckv_experiments/` etc.)
-- **Output**: Clean repo structure matching `code_cleanup/05_repo_structure.md`
+- **Output**: New directory structure with all needed files extracted
 - **Verification**:
   ```bash
-  # Target dirs exist
   for d in triattention kv_compress integration evaluation scripts configs calibration data tests; do
     test -d ../dc1-release/$d || echo "MISSING: $d"
   done
-  # Old dirs gone
-  test ! -d ../dc1-release/R-KV
-  test ! -d ../dc1-release/speckv_experiments
-  # Python packages importable (basic check)
-  cd ../dc1-release && python -c "import triattention; import kv_compress; import integration"
+  test -f ../dc1-release/triattention/triattention.py
+  test -f ../dc1-release/kv_compress/r1_kv.py
+  test -f ../dc1-release/scripts/cli.py
   ```
 - **Estimated workload**: Large (most complex step in the plan)
 
-> Steps 2.1 and 2.2 can run in **parallel**. Step 2.3 depends on both.
+### Step 2.2: DFS Integration + Delete Old Directories
+
+- **Scope**: DFS 代码集成 + 删除已提取完毕的旧目录
+- **Input**: `dc1-release/` after Step 2.1 (new structure already in place)
+- **Actions**:
+  1. **DFS benchmark integration**: From `linxi-dev` branch, manually copy DFS benchmark files:
+     - `R-KV/linxi_development/AQA-Bench/dfs_state_query/` contents -> `benchmarks/dfs/`
+     - Apply 5 fixes (per `execution/15_checklist.md`):
+       - Replace hardcoded `/home/linxi/...` paths (3 files)
+       - Deduplicate `build_prompt` function
+       - Change bare `except:` to `except Exception:`
+       - Translate or delete Chinese documentation
+       - Delete `PROGRESS_SUMMARY.md`
+  2. **Delete old directories** (all needed files already extracted in Step 2.1):
+     - `weian_development/`, `R-KV/`, `paper_visualizations/`, `experiments/`
+     - `deepconf/`, `TriAttention/`, `.claude/`, `.workflow/`
+     - `repository_archive/`, `R-KV-backup-*`, `release_doc/`, `docs/`
+     - `scripts/gpu_occupier.py` 等 GPU 占座工具
+  3. **Delete excluded files within new structure**:
+     - `kv_compress/speckv.py` (generate-wrapper, not released)
+     - `evaluation/length_eval.py`, `evaluation/CHANGELOG_weian.md`
+     - `rkv_sharded_runner.py` (process masking wrapper)
+     - All `__pycache__/`, `.DS_Store`, `*.pyc`
+     - Obsolete files: `sparse_round_pruner_prefill_keep.py`, `rkv_speckv_generate.py`, `analysiskv.py`
+- **Output**: Clean repo with only new structure + DFS benchmark
+- **Verification**:
+  ```bash
+  test ! -d ../dc1-release/weian_development
+  test ! -d ../dc1-release/R-KV
+  test -d ../dc1-release/benchmarks/dfs
+  grep -r "/home/linxi" ../dc1-release/benchmarks/dfs/ | wc -l  # must be 0
+  find ../dc1-release -name "*.pyc" -o -name "__pycache__" -o -name ".DS_Store" | wc -l  # must be 0
+  grep -rl "PD-L1_binder" ../dc1-release/ | wc -l  # must be 0
+  ```
+- **Estimated workload**: Small-Medium
+
+> Step 2.1 must complete before Step 2.2 (2.2 deletes old dirs that 2.1 extracts from).
 
 ### CHECKPOINT 2: Structure Verify
 
@@ -208,7 +176,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
 
 ---
 
-### Step 2.4: Systematic Import Rewrite
+### Step 2.3: Systematic Import Rewrite
 
 - **Scope**: Python import statements across all files in `dc1-release/`
 - **Input**: `dc1-release/` after Step 2.3 (new directory structure)
@@ -242,7 +210,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
   ```
 - **Estimated workload**: Large
 
-### Step 2.5: Naming Unification (speckv -> triattention)
+### Step 2.4: Naming Unification (speckv -> triattention)
 
 - **Scope**: String replacements across all files in `dc1-release/`
 - **Input**: `dc1-release/` after Step 2.4
@@ -287,7 +255,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
   ```
 - **Estimated workload**: Large
 
-### Step 2.6: Flag Cleanup (Delete Experimental Flags)
+### Step 2.5: Flag Cleanup (Delete Experimental Flags)
 
 - **Scope**: Python argparse definitions + all code paths referencing deleted flags
 - **Input**: `dc1-release/` after Step 2.5
@@ -328,13 +296,13 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
   ```
 - **Estimated workload**: Medium
 
-### Step 2.7: Path Cleanup + Sensitive Content Removal
+### Step 2.6: Path Cleanup + Sensitive Content Removal
 
 - **Scope**: All hardcoded paths, sensitive strings, and metadata
 - **Input**: `dc1-release/` after Step 2.6
 - **Actions** (reference: `code_cleanup/06_path_cleanup.md`):
   1. **Model paths** -> HuggingFace hub names:
-     - All YAML configs: `/data/rbg/.../DeepSeek-R1-0528-Qwen3-8B` -> `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B`
+     - All YAML configs: local model paths -> HF hub names (e.g. `Qwen/Qwen3-8B`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`)
      - Shell scripts: same pattern
      - Python files: same pattern
   2. **Dataset paths** -> relative paths:
@@ -379,8 +347,8 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
   ```
 - **Estimated workload**: Large
 
-> Steps 2.4, 2.5, 2.6 must be **sequential** (each modifies code the next depends on).
-> Step 2.7 depends on 2.6.
+> Steps 2.3, 2.4, 2.5 must be **sequential** (each modifies code the next depends on).
+> Step 2.6 depends on 2.5.
 
 ### CHECKPOINT 3: Code Cleanup Verify
 
@@ -723,25 +691,16 @@ Phase 1: Foundation
                     ├── C1 (checkpoint)
                     v
 Phase 2: Code Cleanup
-  2.1 (delete) ────┐
-  2.2 (DFS)    ────┤
-                    ├── 2.3 (restructure)
-                    │     │
-                    │     v
-                    │   2.4 (imports)
-                    │     │
-                    │     v
-                    │   2.5 (naming)
-                    │     │
-                    │     v
-                    │   2.6 (flags)
-                    │     │
-                    │     v
-                    │   2.7 (paths + sensitive)
-                    │     │
-                    ├─────┤
-                    v     v
-                   C2    C3 (checkpoints)
+  2.1 (restructure + extract files)
+    │
+    v
+  2.2 (DFS + delete old dirs) ──> C2 (structure checkpoint)
+    │
+    v
+  2.3 (imports) ──> 2.4 (naming) ──> 2.5 (flags) ──> 2.6 (paths + sensitive)
+                                                        │
+                                                        v
+                                                       C3 (cleanup checkpoint)
                           │
                           v
 Phase 3: Content Creation
@@ -776,8 +735,8 @@ Phase 5: Release
 | Phase | Steps | Parallelizable | Est. Agent Sessions |
 |-------|-------|----------------|---------------------|
 | Phase 1: Foundation | 2 | Yes (both parallel) | 1 session |
-| Phase 2: Code Cleanup | 7 | Partially (2.1||2.2, then sequential) | 4-5 sessions |
+| Phase 2: Code Cleanup | 6 | 2.1→2.2 sequential, then 2.3→2.4→2.5→2.6 sequential | 4-5 sessions |
 | Phase 3: Content Creation | 5 | Mostly parallel | 2-3 sessions |
 | Phase 4: Testing | 4 | Mostly parallel | 1-2 sessions |
 | Phase 5: Release | 6 | Sequential | 2-3 sessions |
-| **Total** | **24 steps + 5 checkpoints** | | **~12-15 agent sessions** |
+| **Total** | **23 steps + 5 checkpoints** | | **~12-15 agent sessions** |

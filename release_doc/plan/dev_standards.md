@@ -3,6 +3,25 @@
 > **Audience**: Every agent working on any step of the execution plan.
 > **Authority**: This document is binding. Deviations require explicit user approval.
 
+## 0. Controller 上岗必读（硬性要求）
+
+**Controller agent 在开始调度任何任务之前，必须先通读以下全部文档**，了解项目全貌：
+
+1. `release_doc/CURRENT_STATUS.md` — 当前状态
+2. `release_doc/plan/execution_plan.md` — 完整执行计划
+3. `release_doc/plan/dev_standards.md` — 本文件（开发规范）
+4. `release_doc/plan/checkpoint_protocol.md` — 检查点协议
+5. `release_doc/plan/execution_log.md` — 执行日志（了解已完成的工作）
+6. `release_doc/tracking/14_open_items.md` — 所有决策记录
+7. `release_doc/execution/15_checklist.md` — 完整待办清单
+8. `release_doc/scope/01_overview.md` — 项目概览
+9. `release_doc/code_cleanup/05_repo_structure.md` — 目标 repo 结构
+10. `release_doc/execution/12_environment.md` — 环境信息
+
+**不读完这些文档就开始调度 = 盲人指路。** 这不是建议，是硬性要求。
+
+Executor agent 至少需要读 1-5 + 与自己步骤相关的具体文档。
+
 ---
 
 ## 1. Working Directory Rules

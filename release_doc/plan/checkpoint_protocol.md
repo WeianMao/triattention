@@ -79,7 +79,7 @@ Every checkpoint report follows this format:
 
 ## Checkpoint C2: Structure Verify
 
-**When**: After Steps 2.1 + 2.2 + 2.3 (directory restructure complete)
+**When**: After Steps 2.1 + 2.2 (directory restructure + old dir cleanup complete)
 **Purpose**: Confirm the repo structure matches the target before beginning content modifications.
 
 ### Checks
@@ -101,17 +101,17 @@ Every checkpoint report follows this format:
 
 | Failed Check | Action |
 |-------------|--------|
-| 1-5, 10 | Re-run Step 2.3 |
-| 2-3 | Re-run Step 2.1 |
-| 6 | Re-run Step 2.2 |
+| 1-5, 10 | Re-run Step 2.1 |
+| 2-3 | Re-run Step 2.2 |
+| 6 | Re-run Step 2.2 (DFS sub-step) |
 | 7 | Quick fix: `find ../dc1-release -name "__pycache__" -exec rm -rf {} +` then re-verify |
-| 8-9 | Re-run Step 2.1 (deletion was incomplete) |
+| 8-9 | Re-run Step 2.2 (deletion was incomplete) |
 
 ---
 
 ## Checkpoint C3: Code Cleanup Verify
 
-**When**: After Steps 2.4 + 2.5 + 2.6 + 2.7 (all code cleanup complete)
+**When**: After Steps 2.3 + 2.4 + 2.5 + 2.6 (all code cleanup complete)
 **Purpose**: This is the most critical checkpoint. Verify that ALL naming, imports, flags, paths, and sensitive content are correctly handled.
 
 ### Checks
@@ -151,12 +151,12 @@ Every checkpoint report follows this format:
 | Failed Check | Action |
 |-------------|--------|
 | 1 | Critical -- identify which file(s) fail, trace to the step that broke them |
-| 2-4 | Re-run Step 2.4 |
-| 5 | Check __init__.py exports, re-run Step 2.3 if packages missing |
-| 6-9 | Re-run Step 2.5 |
-| 10-12 | Re-run Step 2.6 |
-| 13-17 | Re-run Step 2.7 |
-| 18-19 | Re-run Step 2.7 (attribution sub-step) |
+| 2-4 | Re-run Step 2.3 |
+| 5 | Check __init__.py exports, re-run Step 2.1 if packages missing |
+| 6-9 | Re-run Step 2.4 |
+| 10-12 | Re-run Step 2.5 |
+| 13-17 | Re-run Step 2.6 |
+| 18-19 | Re-run Step 2.6 (attribution sub-step) |
 | 20 | Investigate carefully -- may need manual fix to avoid breaking stats validation |
 
 ### Critical Note on Check 17
@@ -252,8 +252,8 @@ For any failure, trace back to the specific step that should have caught it:
 
 ```
 Phase 1 ──> C1 (foundation)
-Phase 2 (2.1-2.3) ──> C2 (structure)
-Phase 2 (2.4-2.7) ──> C3 (cleanup) *** MOST CRITICAL ***
+Phase 2 (2.1-2.2) ──> C2 (structure)
+Phase 2 (2.3-2.6) ──> C3 (cleanup) *** MOST CRITICAL ***
 Phase 3 ──> C4 (content)
 Phase 4 ──> C5 (pre-release gate) *** GO/NO-GO ***
 ```
