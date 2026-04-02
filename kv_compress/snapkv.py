@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from . import compute_attention_scores
+from .utils import compute_attention_scores
 
 
 class SnapKV:

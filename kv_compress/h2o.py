@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from . import compute_attention_scores
+from .utils import compute_attention_scores
 
 
 class H2O:

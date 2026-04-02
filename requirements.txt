@@ -1,0 +1,30 @@
+# PyTorch - install separately based on your CUDA version
+# See https://pytorch.org/get-started/locally/
+# Example: pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch>=2.3.1
+
+# Core
+flash-attn>=2.5.8
+transformers>=4.48.1
+datasets>=4.0
+huggingface-hub>=0.35
+accelerate
+
+# Numerical
+numpy>=1.26
+scipy
+einops
+sentencepiece
+
+# Utilities
+pyyaml>=6.0
+tqdm
+matplotlib
+regex
+
+# Evaluation pipeline
+pebble>=5.0
+sympy>=1.13
+latex2sympy2
+word2number
+antlr4-python3-runtime==4.7.2

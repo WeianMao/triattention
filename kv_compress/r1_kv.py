@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from . import cal_similarity, compute_attention_scores
+from .utils import cal_similarity, compute_attention_scores
 
 
 class R1KV:
