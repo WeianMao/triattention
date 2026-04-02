@@ -1,4 +1,0 @@
-bash R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_norm_aligned.sh
-bash R-KV/weian_script/aime_sampled8/speckv/aime24/run_speckv_aime24_qwen_rank_aligned.sh
-bash R-KV/weian_script/aime_sampled8/speckv/aime25/run_speckv_aime25_qwen_norm_aligned.sh
-bash R-KV/weian_script/aime_sampled8/speckv/aime25/run_speckv_aime25_qwen_rank_aligned.sh

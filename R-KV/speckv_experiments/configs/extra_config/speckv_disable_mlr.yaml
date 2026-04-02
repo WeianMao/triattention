@@ -1,3 +1,0 @@
-disable_mlr: true
-per_head_pruning: true
-per_layer_perhead_pruning: false
