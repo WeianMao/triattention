@@ -115,7 +115,7 @@ python -c "import transformers; print(transformers.__version__)"
 |------|---------|-------------------|
 | DS-Qwen-7B | `../datasets/DeepSeek-R1-Distill-Qwen-7B` | `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` |
 | DS-Llama-8B | `../datasets/DeepSeek-R1-Distill-Llama-8B` | `deepseek-ai/DeepSeek-R1-Distill-Llama-8B` |
-| Qwen3-8B | `../datasets/DeepSeek-R1-0528-Qwen3-8B` | `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B` |
+| Qwen3-8B | `../datasets/Qwen3-8B` | `Qwen/Qwen3-8B`（用户确认是普通 Qwen3，非 DS 蒸馏版） |
 | GPT-OSS-20B | `../datasets/gpt-oss-20b` | `openai/gpt-oss-20b`（Phase 1 搁置） |
 
 ## GPU 占座进程（PD-L1）

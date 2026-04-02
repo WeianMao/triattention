@@ -95,8 +95,10 @@ GPT-OSS-20B 模型与其他模型有显著差异：
 **公布的代码和 stats 中绝对不能暴露"使用 AIME 数据做校准"这个信息。** 原因：AIME 同时是评估数据集，暴露会引发学术合规性质疑。
 
 具体要求：
-- **stats 文件名**：不能包含 aime 字样（如 `stats_budget_2048.pt`，不要 `aime25_stats_budget_2048.pt`）
-- **stats 文件 metadata**：不能包含 `trace_root`、`dataset` 等暴露校准数据来源的字段
+- **stats 文件名**：不能包含 aime 字样，也不需要包含 budget（stats 只和模型+数据集相关，与 budget 无关）。命名格式：`{model_short_name}_stats.pt`（如 `qwen3_8b_stats.pt`）
+- **stats 文件放在 repo 内固定位置**：`calibration/` 目录下，脚本直接写死路径引用
+- **stats 文件 metadata**：不能包含 `trace_root`、`dataset`、`model_path` 等暴露校准数据来源或内部路径的字段
+- **不需要自动路由逻辑**：每个实验脚本直接指定对应的 stats 文件路径即可
 - **校准脚本的输入格式**：改为无模板纯文本输入（一段 raw text 直接送进模型），不带任何数据集特征（没有 AIME 的 question/answer 模板）
 
 ### 公布的校准流程
