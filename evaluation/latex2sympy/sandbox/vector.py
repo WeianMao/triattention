@@ -1,7 +1,5 @@
 import numpy as np
 from sympy import *
-import sys
-sys.path.append("..")
 
 # row column matrix = vector
 v = [1, 2, 3]

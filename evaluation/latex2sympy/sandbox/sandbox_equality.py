@@ -1,5 +1,5 @@
 from sympy import *
-from latex2sympy import process_sympy
+from evaluation.latex2sympy import process_sympy
 
 
 #

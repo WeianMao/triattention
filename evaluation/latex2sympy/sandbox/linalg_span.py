@@ -1,6 +1,4 @@
-from latex2sympy import process_sympy
-import sys
-sys.path.append("..")
+from evaluation.latex2sympy import process_sympy
 
 latex = "\\begin{pmatrix}1\\\\2\\\\3\\end{pmatrix}"
 math = process_sympy(latex)

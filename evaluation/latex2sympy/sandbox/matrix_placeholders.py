@@ -1,10 +1,7 @@
-from latex2sympy import process_sympy
+from evaluation.latex2sympy import process_sympy
 from sympy import *
-import sys
 import hashlib
 import time
-
-sys.path.append("..")
 
 
 M = Matrix([[1, 2], [3, 4]])

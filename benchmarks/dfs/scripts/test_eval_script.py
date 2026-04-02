@@ -10,10 +10,7 @@ import json
 import sys
 from pathlib import Path
 
-# Add parent dir to path
-sys.path.insert(0, str(Path(__file__).parent))
-
-from eval_dfs_state_query import (
+from benchmarks.dfs.scripts.eval_dfs_state_query import (
     build_prompt,
     parse_json_response,
     evaluate_prediction

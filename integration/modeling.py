@@ -20,18 +20,15 @@ from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 
-try:
-    from weian_development.rkv_debug.qk_capture import maybe_capture_qk
-except Exception:  # pragma: no cover - fail open
-    def maybe_capture_qk(*args, **kwargs):
-        return
+# Debug capture stub (qk_capture module not included in release)
+def maybe_capture_qk(*args, **kwargs):
+    return
 
-from .compression import (
+from kv_compress import (
     R1KV,
     SnapKV,
     StreamingLLM,
     H2O,
-    AnalysisKV
 )
 
 KV_COMPRESSION_MAP = {
@@ -39,7 +36,6 @@ KV_COMPRESSION_MAP = {
     "snapkv": SnapKV,
     "streamingllm": StreamingLLM,
     "h2o": H2O,
-    "analysiskv": AnalysisKV
 }
 
 logger = logging.get_logger(__name__)

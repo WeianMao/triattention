@@ -108,13 +108,13 @@ def dataset_max_length(dataset: str, defaults: dict) -> int:
 def resolve_dataset_path(dataset: str) -> Path:
     candidates = [
         PROJECT_ROOT / f"{dataset}.jsonl",
-        RKV_ROOT / "HuggingFace" / "data" / f"{dataset}.jsonl",
+        RKV_ROOT / "data" / f"{dataset}.jsonl",
     ]
     if dataset == "math500":
         candidates.extend(
             [
                 PROJECT_ROOT / "math.jsonl",
-                RKV_ROOT / "HuggingFace" / "data" / "math.jsonl",
+                RKV_ROOT / "data" / "math.jsonl",
             ]
         )
     for candidate in candidates:
@@ -343,7 +343,7 @@ def dispatch_run(config_path: Path, dataset: str, log_dir: Path, dry_run: bool) 
 
     cmd = [
         sys.executable,
-        str(RKV_ROOT / "weian_development" / "rkv_sharded_dispatch.py"),
+        str(RKV_ROOT / "scripts" / "dispatch.py"),
         "--config",
         str(config_path),
         "--dataset",
@@ -576,7 +576,7 @@ def build_stats(
                 stats_path.parent.mkdir(parents=True, exist_ok=True)
                 cmd = [
                     sys.executable,
-                    str(RKV_ROOT / "weian_development" / "rkv_sparse_round_calibrate.py"),
+                    str(RKV_ROOT / "scripts" / "calibrate.py"),
                     "--trace-root",
                     str(fullkv_root),
                     "--model-path",

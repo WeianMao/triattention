@@ -1,6 +1,4 @@
 from sympy import *
-import sys
-sys.path.append("..")
 
 # # x^2\cdot \left(3\cdot \tan \left([!a!]\cdot x+[!c!]\right)+[!a!]\cdot x\left(\sec \left([!a!]\cdot x+[!c!]\right)\right)^2\right)
 # latex1 = "x^2\\cdot \\left(3\\cdot \\tan \\left(2\\cdot x+5\\right)+2\\cdot x\\left(\\sec \\left(2\\cdot x+5\\right)\\right)^2\\right)"

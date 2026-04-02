@@ -14,16 +14,14 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, TextIO
 
 RKV_ROOT = Path(__file__).resolve().parents[1]
-if str(RKV_ROOT) not in sys.path:
-    sys.path.insert(0, str(RKV_ROOT))
 
 import yaml
 
-from weian_development.process_utils import mask_process_command
+from scripts.process_utils import mask_process_command
 
-DEFAULT_CONFIG = RKV_ROOT / "weian_script" / "configs" / "rkv_aime24_sharded.yaml"
-MERGE_SCRIPT = RKV_ROOT / "weian_development" / "merge_rkv_shards.py"
-MULTI_EVAL_SCRIPT = RKV_ROOT / "HuggingFace" / "evaluation" / "eval_math_multi.py"
+DEFAULT_CONFIG = RKV_ROOT / "configs" / "rkv_aime24_sharded.yaml"
+MERGE_SCRIPT = RKV_ROOT / "scripts" / "merge_shards.py"
+MULTI_EVAL_SCRIPT = RKV_ROOT / "evaluation" / "eval_math_multi.py"
 PATH_ARG_KEYS = {"output_dir", "dataset_path", "model_path", "tokenizer_path"}
 RUNNER_EXCLUDE_KEYS = {"num_samples_by_dataset"}
 
@@ -683,9 +681,9 @@ def main() -> None:
     runner_path = resolve_path(experiment["runner_path"])
     total_shards = args.num_shards or experiment.get("num_shards", 1)
     gpus = determine_gpus(args, experiment)
-    log_dir = resolve_path(args.log_dir or experiment.get("log_dir", "R-KV/logs/rkv_aime24_sharded"))
+    log_dir = resolve_path(args.log_dir or experiment.get("log_dir", "logs/dispatch"))
     log_stamp = time.strftime("%Y%m%d_%H%M%S")
-    method_output_dir = resolve_path(args.method_output_dir or experiment.get("method_output_dir", "R-KV/outputs/rkv_aime24_sharded"))
+    method_output_dir = resolve_path(args.method_output_dir or experiment.get("method_output_dir", "outputs/dispatch"))
     merged_dir_name = experiment.get("merged_dir_name", "merged")
     eval_output_dir = resolve_path(args.eval_output_dir) if args.eval_output_dir else None
 

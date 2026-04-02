@@ -17,7 +17,7 @@ from transformers import AutoConfig
 from transformers.cache_utils import Cache, DynamicCache
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from weian_development.speckv.round_pruning_utils import (
+from .pruning_utils import (
     HeadFrequencyStats,
     build_geometric_offsets,
     build_rotary,
@@ -29,7 +29,7 @@ from weian_development.speckv.round_pruning_utils import (
     score_keys_for_round,
     verify_rotary_alignment,
 )
-from weian_development.speckv.stats_utils import validate_stats_metadata
+from .stats_utils import validate_stats_metadata
 
 
 @dataclass

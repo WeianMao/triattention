@@ -1,6 +1,6 @@
 experiment:
   conda_env: rkv
-  runner_path: R-KV/weian_development/rkv_sharded_runner.py
+  runner_path: scripts/worker.py
   merged_dir_name: merged
   gpus: auto
   auto_gpu_fallback:

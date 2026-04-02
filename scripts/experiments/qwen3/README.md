@@ -12,7 +12,7 @@ This folder mirrors the standard `speckv_experiments/scripts` helpers, but is pr
 2. **FullKV traces** – `JOB_PARALLEL=2 bash scripts/qwen3/run_fullkv.sh`  
    Generates baseline traces for `{aime24,aime25,math500}`; required for stats building.
 3. **SpeckV stats** – `bash scripts/qwen3/build_all_stats.sh`  
-   Invokes `weian_development/speckv_experiments_cli_v2.py build-stats` with `--model Qwen3-8B` and all datasets. The CLI now surfaces batches in dry runs and only launches calibrations when stats files are missing.
+   Invokes `scripts/cli.py build-stats` with `--model Qwen3-8B` and all datasets. The CLI now surfaces batches in dry runs and only launches calibrations when stats files are missing.
 4. **Compression sweeps** – run whichever method scripts you need:
    - `budget512/run_rkv.sh`, `budget1024/run_rkv.sh`, ..., `budget4096/run_rkv.sh` for fixed-budget R-KV runs (each wrapper forwards `--budget` to `run_rkv.sh`).
    - Matching `budgetXX/run_speckv_per_head.sh` wrappers to sweep SpeckV per-head pruning at the same budgets.

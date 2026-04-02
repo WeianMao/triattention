@@ -15,41 +15,31 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 RKV_ROOT = Path(__file__).resolve().parents[1]
-HF_RKV_ROOT = RKV_ROOT / "HuggingFace"
-for path in (HF_RKV_ROOT, RKV_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
-from weian_development.process_utils import mask_process_command
-from weian_development.rkv_cache_utils import reset_model_cache
-from rkv.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
-from rkv.compression.speckv import apply_speckv_generate_patch
-from weian_development.speckv.prompt_utils import (
+from scripts.process_utils import mask_process_command
+from scripts.cache_utils import reset_model_cache
+from integration.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
+from triattention.prompt_utils import (
     DEFAULT_SYSTEM_PROMPT,
     PROMPT_TEMPLATE,
     build_prompt,
     extract_question_from_record,
 )
-from weian_development.speckv.stats_utils import normalize_dtype_name
-try:
-    from weian_development.rkv_debug.qk_capture import (
-        activate_capture,
-        deactivate_capture,
-        capture_requested_for_sample,
-        patch_llama_attention_for_capture,
-    )
-except Exception:  # pragma: no cover - fail open
-    def activate_capture(*args, **kwargs):
-        return
+from triattention.stats_utils import normalize_dtype_name
 
-    def deactivate_capture():
-        return
 
-    def capture_requested_for_sample(*args, **kwargs):
-        return False
+# Debug capture stubs (qk_capture module not included in release)
+def activate_capture(*args, **kwargs):
+    return
 
-    def patch_llama_attention_for_capture():
-        return False
+def deactivate_capture():
+    return
+
+def capture_requested_for_sample(*args, **kwargs):
+    return False
+
+def patch_llama_attention_for_capture():
+    return False
 
 dataset2key = {
     "gsm8k": ["question", "answer"],
@@ -659,10 +649,7 @@ def main(args: argparse.Namespace) -> None:
         if not patched:
             sys.stderr.write("[qk_capture] failed to patch LlamaAttention for capture; proceeding without QK dumps.\n")
 
-    # Apply position offset patch for fullkv if enabled (simulates Bug 896cbca6 attention position effect)
-    if method_lower == "fullkv" and args.simulate_attention_position_offset > 0:
-        from weian_development.position_offset_patch import apply_position_offset_patch
-        apply_position_offset_patch(model)
+    # position offset patch removed (debug-only feature not included in release)
 
     if method_name and method_name not in {"fullkv", "speckv"}:
         model.newline_token_ids = [
@@ -693,7 +680,7 @@ def main(args: argparse.Namespace) -> None:
         }
         if args.rkv_style_compression:
             # Use R-KV style attention-layer compression
-            from weian_development.speckv.speckv_rkv_style import apply_speckv_rkv_style_patch
+            from triattention.triattention import apply_speckv_rkv_style_patch
             apply_speckv_rkv_style_patch(
                 model,
                 stats_path=stats_path,
