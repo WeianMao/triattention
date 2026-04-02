@@ -242,7 +242,7 @@ The word "aime" will appear in dataset names (e.g., `"aime24"` in `DATASET_SOURC
 
 For any failure, trace back to the specific step that should have caught it:
 - Test failures -> Phase 4 steps
-- Sensitive content -> Step 2.7
+- Sensitive content -> Step 2.6
 - Missing files -> Step 2.3 or Phase 3
 - Compilation failures -> trace the broken import/reference chain
 

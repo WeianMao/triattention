@@ -79,7 +79,9 @@ Do not modify existing algorithm core logic without explicit authorization. New 
 
 ## Release 工作规范（必读）
 
-**任何与 release 相关的任务，开始前必须先读以下文档：**
+**如果你是新启动的 Controller Agent，请先读 `release_doc/CONTROLLER_START_HERE.md`。**
+
+任何与 release 相关的任务，开始前必须先读以下文档：
 
 1. `release_doc/CURRENT_STATUS.md` — 当前进展、断点恢复信息
 2. `release_doc/plan/execution_plan.md` — **完整执行计划**（阶段、步骤、依赖、检查点）
