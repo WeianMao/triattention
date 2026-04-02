@@ -24,7 +24,11 @@
   4. 中文文档需翻译或删除
   5. 内部开发日志 `PROGRESS_SUMMARY.md` 需删除
 - [x] **实验框架选择**：已确认 — 以 `speckv_experiments/` 为 release 基础。覆盖论文全部主实验（Table 1/2, Figure 5 A-C）+ 消融（Table 3），含 math500 和 budget sweep。`weian_script/` 不公布，仅作内部参考。GPT-OSS（Phase 1.5）和 DFS（linxi-dev）两个缺口与框架选择无关，需从其他分支提取
-- [ ] **第一阶段执行顺序**：具体步骤排序
+- [ ] **第一阶段执行顺序**：具体步骤排序（待 agent 规划）
+- [x] **GPT-OSS 处理**：已确认 — Phase 1 不含 GPT-OSS，暂时搁置，不阻塞 release
+- [x] **验证策略**：已确认 — 开发阶段只做单元测试，不做 GPU 推理测试。全部就绪后先内部发布，再做 GPU 头对头对比测试
+- [x] **校准 stats 预生成**：已确认 — 3 个非 GPT-OSS 模型全部用现有 AIME 语料按现有流程跑一次校准，生成 stats .pt 文件
+- [x] **DFS 代码合并方式**：已确认 — 手动从 linxi-dev 拷贝文件 + 就地修复，不用 cherry-pick
 - [x] **启动器文件命名方案**：已确认 — 详见 [../components/08_launcher.md](../components/08_launcher.md)
 - [x] **Flag 清理**：已确认 — 14 个 flag 删除，其余保留并改名。详见 [../code_cleanup/flag_cleanup.md](../code_cleanup/flag_cleanup.md)。额外排查项：KV cache 状态重置 bug
 
