@@ -69,13 +69,14 @@
 - [ ] **内部命名残留**：`speckv`、`weian`、`linxi` 等内部开发名出现在公布代码中
 - [ ] **stats .pt 文件内部字段**：`trace_root`、`dataset` 等 metadata 字段是否暴露校准数据来源
 
-## 依赖管理
+## 环境与依赖
 
-- [ ] 生成 `requirements.txt`（以实际跑实验的 conda 环境为准，待确认具体环境）
+- [ ] **新建 `triattention` conda 环境**（Python 3.10，cover DS-Qwen-7B / DS-Llama-8B / Qwen3-8B）
+- [ ] 生成 `requirements.txt` 与 `triattention` 环境对齐
 - [ ] `torch` 放入 requirements.txt（注释说明不同 CUDA 版本的安装方式）
-- [ ] `flash-attn>=2.5.8`
-- [ ] `transformers>=4.48.1`
-- [ ] 评估管线额外依赖：`pebble`, `latex2sympy2`, `word2number`, `antlr4-python3-runtime==4.7.2`
+- [ ] 核心依赖：`flash-attn>=2.5.8`, `transformers>=4.48.1`, `datasets`, `huggingface-hub`, `pyyaml`, `numpy`, `tqdm`
+- [ ] 评估管线依赖：`pebble`, `latex2sympy2`, `word2number`, `antlr4-python3-runtime==4.7.2`, `sympy`
+- [ ] 验证：`triattention` 环境下能跑通 Level 1+2 单元测试
 - [ ] 版本号 `0.1.0` 不变
 
 ## 文档
