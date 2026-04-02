@@ -2,12 +2,55 @@
 # and DeepSeek-Math (https://github.com/deepseek-ai/DeepSeek-Math)
 # Licensed under MIT License
 
+import json
 import os
 from utils import load_jsonl, lower_keys
 from datasets import load_dataset, Dataset, concatenate_datasets
 
 
+# HuggingFace dataset sources for auto-download
+HF_DATASET_SOURCES = {
+    "aime24": {
+        "hf_path": "HuggingFaceH4/aime_2024",
+        "field_map": {"problem": "question"},
+    },
+    "aime25": {
+        "hf_path": "MathArena/aime_2025",
+        "field_map": {"problem": "question"},
+    },
+    "math500": {
+        "hf_path": "HuggingFaceH4/MATH-500",
+        "field_map": {},
+    },
+}
+
+
+def _auto_download(data_name, save_path):
+    """Download dataset from HuggingFace and save as JSONL."""
+    if data_name not in HF_DATASET_SOURCES:
+        return False
+    source = HF_DATASET_SOURCES[data_name]
+    print(f"Dataset '{data_name}' not found locally. Downloading from {source['hf_path']}...")
+    dataset = load_dataset(source["hf_path"], split="test")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    field_map = source["field_map"]
+    with open(save_path, "w") as f:
+        for example in dataset:
+            row = dict(example)
+            for old_key, new_key in field_map.items():
+                if old_key in row:
+                    row[new_key] = row.pop(old_key)
+            f.write(json.dumps(row) + "\n")
+    print(f"Saved {len(dataset)} examples to {save_path}")
+    return True
+
+
 def load_data_vanilla(path):
+    if not os.path.exists(path):
+        # Try auto-download based on filename
+        basename = os.path.splitext(os.path.basename(path))[0]
+        if not _auto_download(basename, path):
+            raise FileNotFoundError(f"Dataset not found: {path}")
     examples = list(load_jsonl(path))
     if "idx" not in examples[0]:
         examples = [{"idx": i, **example} for i, example in enumerate(examples)]
@@ -16,6 +59,9 @@ def load_data_vanilla(path):
 
 def load_data(data_name, split, data_dir="./data"):
     data_file = f"{data_dir}/{data_name}/{split}.jsonl"
+    if not os.path.exists(data_file):
+        # Try auto-download from HuggingFace for known datasets
+        _auto_download(data_name, data_file)
     if os.path.exists(data_file):
         examples = list(load_jsonl(data_file))
     else:
