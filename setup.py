@@ -1,11 +1,8 @@
-import setuptools
+from setuptools import setup, find_packages
 
-if __name__ == '__main__':
-    setuptools.setup(
-        name='deepconf',
-        version='0.1.0',
-        description='Enhanced LLM wrapper with DeepConf capabilities',
-        author='Yichao',
-        author_email='fuyichao2000@gmail.com',
-        packages=['deepconf']
-    )
+setup(
+    name="triattention",
+    version="0.1.0",
+    packages=find_packages(),
+    python_requires=">=3.10",
+)
