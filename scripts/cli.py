@@ -307,7 +307,6 @@ def build_config(
         runner_args.setdefault("round_window", 32)
         runner_args.setdefault("triattention_frequency_window", 65536)
         runner_args.setdefault("triattention_score_aggregation", "mean")
-        runner_args.setdefault("head_limit", -1)
         runner_args.setdefault("pruning_seed", 0)
 
     return {"experiment": {**experiment, "runner_args": runner_args}}

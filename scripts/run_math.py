@@ -14,7 +14,6 @@ from integration.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
 RKV_ROOT = Path(__file__).resolve().parents[1]
 
 from scripts.process_utils import mask_process_command
-from scripts.cache_utils import reset_model_cache
 
 dataset2key = {
     "gsm8k": ["question", "answer"],
@@ -94,9 +93,6 @@ def main(args):
         prefill_length = int(tokenized_prompts["attention_mask"].sum().item())
 
         for draw_idx in range(args.num_samples):
-            if args.reset_cache_each_batch:
-                reset_model_cache(model)
-
             output = model.generate(
                 **tokenized_prompts,
                 max_length=args.max_length,
@@ -159,7 +155,6 @@ def parse_arguments():
     parser.add_argument("--retain_ratio", type=float, default=0.2)
     parser.add_argument("--update_kv", type=str2bool, default=True)
     parser.add_argument("--fp32_topk", type=str2bool, default=False)
-    parser.add_argument("--reset_cache_each_batch", type=str2bool, default=False)
     parser.add_argument(
         "--retain_direction", type=str, default="last", choices=["last", "first"]
     )

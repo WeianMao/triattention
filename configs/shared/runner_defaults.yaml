@@ -20,7 +20,6 @@ runner_args:
   seed: 888
   attn_implementation: flash_attention_2
   load_dtype: bfloat16
-  reset_cache_each_batch: false
   fp32_topk: false
   num_samples: 64
   num_samples_by_dataset: 

@@ -17,7 +17,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 RKV_ROOT = Path(__file__).resolve().parents[1]
 
 from scripts.process_utils import mask_process_command
-from scripts.cache_utils import reset_model_cache
 from integration.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
 from triattention.prompt_utils import (
     DEFAULT_SYSTEM_PROMPT,
@@ -266,13 +265,6 @@ def parse_arguments() -> argparse.Namespace:
              "When True, prefill tokens are always preserved; when False, all tokens compete for budget (default R-KV behavior).",
     )
     parser.add_argument(
-        "--reset_cache_each_batch",
-        "--reset-cache-each-batch",
-        dest="reset_cache_each_batch",
-        type=str2bool,
-        default=False,
-    )
-    parser.add_argument(
         "--retain_direction", type=str, default="last", choices=["last", "first"]
     )
     parser.add_argument(
@@ -293,7 +285,6 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument("--shard_id", type=int, required=True)
     parser.add_argument("--num_shards", type=int, required=True)
-    parser.add_argument("--output_name", type=str, default=None)
     parser.add_argument("--num_samples", type=int, default=64)
     parser.add_argument("--temperature", type=float, default=0.6)
     parser.add_argument("--top_p", type=float, default=0.95)
@@ -325,24 +316,6 @@ def parse_arguments() -> argparse.Namespace:
         help="Maximum offset length for sparse pruning frequency scoring.",
     )
     parser.add_argument(
-        "--disable_top_n_high_freq",
-        type=int,
-        default=0,
-        help="Disable top-n high-frequency components in position-dependent scoring (0=disabled).",
-    )
-    parser.add_argument(
-        "--simulate_bug_phase_offset",
-        type=int,
-        default=0,
-        help="Simulate bug 896cbca6 phase offset: subtract N×ω from phase (0=disabled, typical Δ≈156).",
-    )
-    parser.add_argument(
-        "--simulate_attention_position_offset",
-        type=int,
-        default=0,
-        help="Simulate bug 896cbca6 attention position offset: add offset to RoPE position_ids (0=disabled, typical Δ≈156).",
-    )
-    parser.add_argument(
         "--triattention_score_aggregation",
         type=str,
         default="mean",
@@ -356,40 +329,10 @@ def parse_arguments() -> argparse.Namespace:
         help="Normalize per-head sparse scores before aggregation.",
     )
     parser.add_argument(
-        "--use_rank_aggregation",
-        type=str2bool,
-        default=False,
-        help="Use rank-based aggregation (min-pooling) instead of z-score + max-pooling.",
-    )
-    parser.add_argument(
-        "--sparse_use_similarity",
-        type=str2bool,
-        default=False,
-        help="Enable Similarity Deduplication (combines frequency with similarity scoring).",
-    )
-    parser.add_argument(
-        "--sparse_similarity_mix_lambda",
-        type=float,
-        default=0.1,
-        help="Mix lambda for similarity scoring: final = freq * lambda - sim * (1-lambda). Needs search: 0.1, 0.3, 0.5, 0.7, 0.9.",
-    )
-    parser.add_argument(
-        "--use_rank_similarity_combination",
-        type=str2bool,
-        default=False,
-        help="Enable rank+similarity combination with normalized inverted rank direction.",
-    )
-    parser.add_argument(
         "--pruning_seed",
         type=int,
         default=0,
         help="Seed used by sparse pruner for noise / head shuffling.",
-    )
-    parser.add_argument(
-        "--head_limit",
-        type=int,
-        default=None,
-        help="Optional head limit for sparse stats (None keeps all sampled heads).",
     )
     parser.add_argument(
         "--per_head_pruning",
@@ -409,19 +352,6 @@ def parse_arguments() -> argparse.Namespace:
         choices=["max", "mean"],
         default="max",
         help="Aggregation method for per-layer-perhead pruning: max (default) or mean.",
-    )
-    parser.add_argument(
-        "--per_layer_pruning",
-        type=str2bool,
-        default=False,
-        help="Enable per-layer independent pruning (all KV heads in same layer share tokens). Default: False",
-    )
-    parser.add_argument(
-        "--per_layer_aggregation",
-        type=str,
-        choices=["max", "mean", "pure_mean"],
-        default="max",
-        help="Aggregation method for per-layer pruning: max (default) or mean (max per kv_head then mean).",
     )
     parser.add_argument(
         "--use_chat_template",
@@ -465,14 +395,6 @@ def parse_arguments() -> argparse.Namespace:
         type=str2bool,
         default=False,
         help="Trigger pruning at budget + divide_length (like generate wrapper).",
-    )
-    parser.add_argument(
-        "--rkv_aligned_budget",
-        "--rkv-aligned-budget",
-        dest="rkv_aligned_budget",
-        type=str2bool,
-        default=False,
-        help="Align budget calculation with R-KV: compress to exact budget instead of budget - round_window.",
     )
     parser.add_argument(
         "--allow_prefill_compression",
@@ -568,15 +490,9 @@ def main(args: argparse.Namespace) -> None:
             "triattention_stats_file": args.triattention_stats_file,
             "round_window": args.round_window or args.window_size,
             "triattention_frequency_window": args.triattention_frequency_window,
-            "disable_top_n_high_freq": args.disable_top_n_high_freq,
             "triattention_score_aggregation": args.triattention_score_aggregation,
-            "head_limit": args.head_limit,
             "pruning_seed": args.pruning_seed,
             "triattention_normalize_scores": args.triattention_normalize_scores,
-            "use_rank_aggregation": args.use_rank_aggregation,
-            "sparse_use_similarity": args.sparse_use_similarity,
-            "sparse_similarity_mix_lambda": args.sparse_similarity_mix_lambda,
-            "use_rank_similarity_combination": args.use_rank_similarity_combination,
         }
 
     method_config = {"budget": args.kv_budget, "window_size": args.window_size}
@@ -649,8 +565,6 @@ def main(args: argparse.Namespace) -> None:
         if not patched:
             sys.stderr.write("[qk_capture] failed to patch LlamaAttention for capture; proceeding without QK dumps.\n")
 
-    # position offset patch removed (debug-only feature not included in release)
-
     if method_name and method_name not in {"fullkv", "triattention"}:
         model.newline_token_ids = [
             tokenizer.encode("\n")[-1],
@@ -669,7 +583,6 @@ def main(args: argparse.Namespace) -> None:
         stats_path = resolve_under_rkv(args.triattention_stats_file)
         if not stats_path.exists():
             raise FileNotFoundError(f"TriAttention stats file not found: {stats_path}")
-        round_window = args.round_window if args.round_window and args.round_window > 0 else args.window_size
         metadata_expectations = {
             "prompt_template": PROMPT_TEMPLATE,
             "use_chat_template": prompt_use_chat,
@@ -678,63 +591,27 @@ def main(args: argparse.Namespace) -> None:
             "dtype": normalize_dtype_name(dtype),
             "kv_budget": int(args.kv_budget),
         }
-        if args.attention_layer_compression:
-            # Use attention-layer compression
-            from triattention.triattention import apply_triattention_patch
-            apply_triattention_patch(
-                model,
-                stats_path=stats_path,
-                model_path=Path(args.model_path),
-                kv_budget=int(args.kv_budget),
-                offset_max_length=args.triattention_frequency_window,
-                score_aggregation=args.triattention_score_aggregation,
-                pruning_seed=args.pruning_seed,
-                head_limit=args.head_limit,
-                metadata_expectations=metadata_expectations,
-                normalize_scores=args.triattention_normalize_scores,
-                use_rank_aggregation=args.use_rank_aggregation,
-                count_prompt_tokens=args.count_prompt_tokens,
-                allow_prefill_compression=args.allow_prefill_compression,
-                divide_length=args.divide_length,
-                use_slack_trigger=args.slack_budget_trigger,
-                per_head_pruning=args.per_head_pruning,
-                per_layer_perhead_pruning=args.per_layer_perhead_pruning,
-                layer_perhead_aggregation=args.layer_perhead_aggregation,
-                per_layer_pruning=args.per_layer_pruning,
-                per_layer_aggregation=args.per_layer_aggregation,
-                disable_top_n_high_freq=args.disable_top_n_high_freq,
-                disable_mlr=args.disable_mlr,
-                disable_trig=args.disable_trig,
-            )
-        else:
-            # Use original generate wrapper implementation
-            apply_triattention_generate_patch(
-                model,
-                stats_path=stats_path,
-                model_path=Path(args.model_path),
-                kv_budget=int(args.kv_budget),
-                round_window=round_window,
-                offset_max_length=args.triattention_frequency_window,
-                score_aggregation=args.triattention_score_aggregation,
-                pruning_seed=args.pruning_seed,
-                head_limit=args.head_limit,
-                metadata_expectations=metadata_expectations,
-                normalize_scores=args.triattention_normalize_scores,
-                use_rank_aggregation=args.use_rank_aggregation,
-                sparse_use_similarity=args.sparse_use_similarity,
-                sparse_similarity_mix_lambda=args.sparse_similarity_mix_lambda,
-                use_rank_similarity_combination=args.use_rank_similarity_combination,
-                count_prompt_tokens=args.count_prompt_tokens,
-                per_head_pruning=args.per_head_pruning,
-                rkv_aligned_budget=args.rkv_aligned_budget,
-                divide_length=args.divide_length,
-                allow_prefill_compression=args.allow_prefill_compression,
-                disable_top_n_high_freq=args.disable_top_n_high_freq,
-                disable_mlr=args.disable_mlr,
-                disable_trig=args.disable_trig,
-                simulate_bug_phase_offset=args.simulate_bug_phase_offset,
-                simulate_attention_position_offset=args.simulate_attention_position_offset,
-            )
+        from triattention.triattention import apply_triattention_patch
+        apply_triattention_patch(
+            model,
+            stats_path=stats_path,
+            model_path=Path(args.model_path),
+            kv_budget=int(args.kv_budget),
+            offset_max_length=args.triattention_frequency_window,
+            score_aggregation=args.triattention_score_aggregation,
+            pruning_seed=args.pruning_seed,
+            metadata_expectations=metadata_expectations,
+            normalize_scores=args.triattention_normalize_scores,
+            count_prompt_tokens=args.count_prompt_tokens,
+            allow_prefill_compression=args.allow_prefill_compression,
+            divide_length=args.divide_length,
+            use_slack_trigger=args.slack_budget_trigger,
+            per_head_pruning=args.per_head_pruning,
+            per_layer_perhead_pruning=args.per_layer_perhead_pruning,
+            layer_perhead_aggregation=args.layer_perhead_aggregation,
+            disable_mlr=args.disable_mlr,
+            disable_trig=args.disable_trig,
+        )
 
     for run_id in run_ids:
         artifacts = run_artifacts(output_root, args.shard_id, run_id)
@@ -778,9 +655,6 @@ def main(args: argparse.Namespace) -> None:
                 record_id = int(local_data[local_idx].get("id", sample_idx))
                 seed_value = args.seed + run_id * RUN_SEED_STRIDE + sample_idx
                 set_seed(seed_value)
-
-                if args.reset_cache_each_batch:
-                    reset_model_cache(model)
 
                 if capture_root_path and capture_requested_for_sample(record_id):
                     activate_capture(

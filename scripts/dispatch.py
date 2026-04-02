@@ -76,51 +76,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.set_defaults(triattention_normalize_scores=None)
     parser.add_argument(
-        "--use-rank-aggregation",
-        dest="use_rank_aggregation",
-        action="store_true",
-        help="Override runner arg: enable rank-based aggregation (min-pooling) instead of z-score + max-pooling.",
-    )
-    parser.add_argument(
-        "--no-use-rank-aggregation",
-        dest="use_rank_aggregation",
-        action="store_false",
-        help="Override runner arg: disable rank-based aggregation.",
-    )
-    parser.set_defaults(use_rank_aggregation=None)
-    parser.add_argument(
-        "--sparse-use-similarity",
-        dest="sparse_use_similarity",
-        action="store_true",
-        help="Override runner arg: enable Similarity Deduplication in TriAttention.",
-    )
-    parser.add_argument(
-        "--no-sparse-use-similarity",
-        dest="sparse_use_similarity",
-        action="store_false",
-        help="Override runner arg: disable Similarity Deduplication in TriAttention.",
-    )
-    parser.set_defaults(sparse_use_similarity=None)
-    parser.add_argument(
-        "--sparse-similarity-mix-lambda",
-        type=float,
-        default=None,
-        help="Override runner arg: frequency score weight for similarity scoring (e.g., 0.1, 0.3, 0.5, 0.7, 0.9).",
-    )
-    parser.add_argument(
-        "--use-rank-similarity-combination",
-        dest="use_rank_similarity_combination",
-        action="store_true",
-        help="Override runner arg: enable rank+similarity combination with normalized inverted rank.",
-    )
-    parser.add_argument(
-        "--no-use-rank-similarity-combination",
-        dest="use_rank_similarity_combination",
-        action="store_false",
-        help="Override runner arg: disable rank+similarity combination.",
-    )
-    parser.set_defaults(use_rank_similarity_combination=None)
-    parser.add_argument(
         "--count-prompt-tokens",
         dest="count_prompt_tokens",
         action="store_true",
@@ -160,19 +115,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.set_defaults(slack_budget_trigger=None)
     parser.add_argument(
-        "--rkv-aligned-budget",
-        dest="rkv_aligned_budget",
-        action="store_true",
-        help="Override runner arg: align budget calculation with R-KV (compress to exact budget).",
-    )
-    parser.add_argument(
-        "--no-rkv-aligned-budget",
-        dest="rkv_aligned_budget",
-        action="store_false",
-        help="Override runner arg: use original budget calculation (compress to budget - round_window).",
-    )
-    parser.set_defaults(rkv_aligned_budget=None)
-    parser.add_argument(
         "--divide-length",
         dest="divide_length",
         type=int,
@@ -187,33 +129,12 @@ def parse_args() -> argparse.Namespace:
         help="Override runner arg: maximum offset length for sparse pruning frequency scoring.",
     )
     parser.add_argument(
-        "--disable-top-n-high-freq",
-        dest="disable_top_n_high_freq",
-        type=int,
-        default=None,
-        help="Override runner arg: disable top-n high-frequency components in position-dependent scoring.",
-    )
-    parser.add_argument(
         "--attn-implementation",
         dest="attn_implementation",
         type=str,
         default=None,
         choices=["eager", "flash_attention_2", "sdpa"],
         help="Override runner arg: attention implementation (eager for V100, flash_attention_2 for A100/H100).",
-    )
-    parser.add_argument(
-        "--simulate-bug-phase-offset",
-        dest="simulate_bug_phase_offset",
-        type=int,
-        default=None,
-        help="Override runner arg: simulate bug 896cbca6 phase offset by subtracting N×ω from phase (typical Δ≈156).",
-    )
-    parser.add_argument(
-        "--simulate-attention-position-offset",
-        dest="simulate_attention_position_offset",
-        type=int,
-        default=None,
-        help="Override runner arg: simulate bug 896cbca6 attention position offset by adding offset to RoPE position_ids (typical Δ≈156).",
     )
     parser.add_argument(
         "--allow-prefill-compression",
@@ -275,27 +196,6 @@ def parse_args() -> argparse.Namespace:
         choices=["max", "mean"],
         default="max",
         help="Aggregation method for per-layer-perhead pruning: max (default) or mean.",
-    )
-    layer_group = parser.add_mutually_exclusive_group()
-    layer_group.add_argument(
-        "--per-layer-pruning",
-        dest="per_layer_pruning",
-        action="store_true",
-        help="Enable per-layer independent pruning (all KV heads in same layer share tokens).",
-    )
-    layer_group.add_argument(
-        "--no-per-layer-pruning",
-        dest="per_layer_pruning",
-        action="store_false",
-        help="Disable per-layer independent pruning.",
-    )
-    parser.set_defaults(per_layer_pruning=None)
-    parser.add_argument(
-        "--per-layer-aggregation",
-        type=str,
-        choices=["max", "mean", "pure_mean"],
-        default="max",
-        help="Aggregation method for per-layer pruning: max (default) or mean (max per kv_head then mean).",
     )
     parser.add_argument(
         "--disable-mlr",
@@ -691,48 +591,28 @@ def main() -> None:
         runner_args["output_dir"] = args.output_dir
     if args.triattention_normalize_scores is not None:
         runner_args["triattention_normalize_scores"] = args.triattention_normalize_scores
-    if args.use_rank_aggregation is not None:
-        runner_args["use_rank_aggregation"] = args.use_rank_aggregation
-    if args.sparse_use_similarity is not None:
-        runner_args["sparse_use_similarity"] = args.sparse_use_similarity
-    if args.sparse_similarity_mix_lambda is not None:
-        runner_args["sparse_similarity_mix_lambda"] = args.sparse_similarity_mix_lambda
-    if args.use_rank_similarity_combination is not None:
-        runner_args["use_rank_similarity_combination"] = args.use_rank_similarity_combination
     if args.count_prompt_tokens is not None:
         runner_args["count_prompt_tokens"] = args.count_prompt_tokens
     if args.attention_layer_compression is not None:
         runner_args["attention_layer_compression"] = args.attention_layer_compression
     if args.slack_budget_trigger is not None:
         runner_args["slack_budget_trigger"] = args.slack_budget_trigger
-    if args.rkv_aligned_budget is not None:
-        runner_args["rkv_aligned_budget"] = args.rkv_aligned_budget
     if args.divide_length is not None:
         runner_args["divide_length"] = args.divide_length
     if args.triattention_frequency_window is not None:
         runner_args["triattention_frequency_window"] = args.triattention_frequency_window
-    if args.disable_top_n_high_freq is not None:
-        runner_args["disable_top_n_high_freq"] = args.disable_top_n_high_freq
     if args.disable_mlr is not None:
         runner_args["disable_mlr"] = args.disable_mlr
     if args.disable_trig is not None:
         runner_args["disable_trig"] = args.disable_trig
     if args.attn_implementation is not None:
         runner_args["attn_implementation"] = args.attn_implementation
-    if args.simulate_bug_phase_offset is not None:
-        runner_args["simulate_bug_phase_offset"] = args.simulate_bug_phase_offset
-    if args.simulate_attention_position_offset is not None:
-        runner_args["simulate_attention_position_offset"] = args.simulate_attention_position_offset
     if args.per_head_pruning is not None:
         runner_args["per_head_pruning"] = args.per_head_pruning
     if args.per_layer_perhead_pruning is not None:
         runner_args["per_layer_perhead_pruning"] = args.per_layer_perhead_pruning
     if args.layer_perhead_aggregation:
         runner_args["layer_perhead_aggregation"] = args.layer_perhead_aggregation
-    if args.per_layer_pruning is not None:
-        runner_args["per_layer_pruning"] = args.per_layer_pruning
-    if args.per_layer_aggregation:
-        runner_args["per_layer_aggregation"] = args.per_layer_aggregation
     if args.allow_prefill_compression is not None:
         runner_args["allow_prefill_compression"] = args.allow_prefill_compression
     if args.protect_prefill is not None:

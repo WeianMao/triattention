@@ -43,10 +43,8 @@ class TriAttentionConfig:
     offset_max_length: int = 65536
     score_aggregation: str = "mean"
     seed: int | None = None
-    head_limit: int | None = None
     metadata_expectations: Dict[str, object] | None = None
     normalize_scores: bool = False
-    use_rank_aggregation: bool = False
     count_prompt_tokens: bool = False
     allow_prefill_compression: bool = False
     divide_length: int = 128  # Compress every N steps (like R-KV's divide_length)
@@ -54,9 +52,6 @@ class TriAttentionConfig:
     per_head_pruning: bool = False  # If True, each KV head selects tokens independently
     per_layer_perhead_pruning: bool = False  # If True, each (layer, KV head) selects tokens independently
     layer_perhead_aggregation: str = "max"  # Aggregation method for per_layer_perhead_pruning: "max" or "mean"
-    per_layer_pruning: bool = False  # If True, each layer selects same tokens for all KV heads
-    per_layer_aggregation: str = "max"  # Aggregation method for per_layer_pruning: "max" or "mean"
-    disable_top_n_high_freq: int = 0  # Mask top-n high-frequency components in position-dependent scoring
     disable_mlr: bool = False  # If True, use q_abs_mean directly for extra term
     disable_trig: bool = False  # If True, drop position-dependent term (base_scores)
 
@@ -110,8 +105,6 @@ class TriAttention:
             raise ValueError("Stats file does not contain any sampled heads")
         layer_count = int(getattr(model_config, "num_hidden_layers", len(sampled_heads)))
         filtered_heads = [head for head in sampled_heads if 0 <= head[0] < layer_count]
-        if config.head_limit is not None and config.head_limit > 0:
-            filtered_heads = filtered_heads[:config.head_limit]
         if not filtered_heads:
             raise ValueError(f"No valid heads remain after filtering with layer_count={layer_count}")
         self.sampled_heads: List[Tuple[int, int]] = filtered_heads
@@ -151,21 +144,14 @@ class TriAttention:
         # each (layer, KV head) has independent token positions.
         # Dict[(layer_idx, kv_head_idx)] -> List[int] - None until first compression
         self.cache_positions_per_layer_perhead: Optional[Dict[Tuple[int, int], List[int]]] = None
-        # Per-layer positions: when per_layer_pruning is active,
-        # each layer has independent token positions (all KV heads in same layer share).
-        # Dict[layer_idx] -> List[int] - None until first per-layer compression
-        self.cache_positions_per_layer: Optional[Dict[int, List[int]]] = None
         self.absolute_position: int = 0
         self.prefix_length: int = 0
         self.divide_length = config.divide_length
         self.score_aggregation = config.score_aggregation
         self.normalize_scores = config.normalize_scores
-        self.use_rank_aggregation = config.use_rank_aggregation
         self.use_slack_trigger = config.use_slack_trigger
         self.per_head_pruning = config.per_head_pruning
         self.per_layer_perhead_pruning = config.per_layer_perhead_pruning
-        self.per_layer_pruning = config.per_layer_pruning
-        self.disable_top_n_high_freq = config.disable_top_n_high_freq
         self.disable_mlr = config.disable_mlr
         self.disable_trig = config.disable_trig
         self.allow_prefill_compression = config.allow_prefill_compression
@@ -270,10 +256,7 @@ class TriAttention:
         head_matrix = torch.cat(all_head_scores, dim=0)
 
         # Apply normalization (only on decode tokens, aligned with SparseRoundPruner)
-        if self.use_rank_aggregation:
-            ranks = torch.argsort(torch.argsort(head_matrix, dim=1, descending=True), dim=1)
-            head_matrix = ranks.float()
-        elif self.normalize_scores and head_matrix.numel() > 0:
+        if self.normalize_scores and head_matrix.numel() > 0:
             mean = head_matrix.mean(dim=1, keepdim=True)
             std = head_matrix.std(dim=1, unbiased=False, keepdim=True).clamp_min(1e-6)
             head_matrix = (head_matrix - mean) / std
@@ -296,15 +279,6 @@ class TriAttention:
                 pkv_tuple, keep_count, decode_start, decode_positions
             )
 
-        # Per-layer independent pruning mode: each layer selects same tokens for all KV heads
-        # Returns 2D tensor [num_layers, budget]
-        # Does NOT reuse head_matrix - computes scores per-layer with correct positions
-        if self.per_layer_pruning:
-            keep_count = min(decode_budget, decode_count)
-            return self._select_per_layer_independent(
-                pkv_tuple, keep_count, decode_start, decode_positions
-            )
-
         # Per-head independent pruning mode: each KV head selects tokens independently
         # Returns 2D tensor [num_kv_heads, budget] instead of 1D [budget]
         # Matches sparse_round_pruner_prefill_keep.py:432-458
@@ -315,10 +289,7 @@ class TriAttention:
             )
 
         # Compute combined scores for union-based selection
-        if self.use_rank_aggregation:
-            combined = -head_matrix.min(dim=0).values  # Negate for topk
-        else:
-            combined = head_matrix.max(dim=0).values
+        combined = head_matrix.max(dim=0).values
 
         # Union-based selection (aligned with SparseRoundPruner)
         keep_count = min(decode_budget, decode_count)
@@ -592,127 +563,6 @@ class TriAttention:
 
         return keep_indices
 
-    def _select_per_layer_independent(
-        self,
-        pkv_tuple: Tuple[Tuple[torch.Tensor, torch.Tensor], ...],
-        keep_count: int,
-        decode_start: int,
-        decode_positions: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Per-layer independent token selection.
-
-        Each layer independently selects top-k tokens based on aggregated scores
-        from sampled attention heads in that layer. All KV heads within a layer
-        share the same token indices.
-
-        Key design: Does NOT reuse head_matrix. Instead, computes scores for each
-        layer independently using that layer's specific positions (critical for
-        correct RoPE inversion after first compression).
-
-        Args:
-            pkv_tuple: Tuple of (key, value) for each layer
-            keep_count: Number of decode tokens to keep per layer
-            decode_start: Index where decode tokens start (for prefill expansion)
-            decode_positions: Absolute positions of decode tokens (used for first compression)
-
-        Returns:
-            keep_indices: 2D tensor [num_layers, decode_start + keep_count]
-        """
-        num_layers = len(pkv_tuple)
-        all_layer_indices: List[torch.Tensor] = []
-
-        for layer_idx, (key_states, _) in enumerate(pkv_tuple):
-            # Get this layer's positions (different layers have different positions after compression)
-            if self.cache_positions_per_layer is not None:
-                layer_positions = torch.tensor(
-                    self.cache_positions_per_layer[layer_idx][decode_start:],
-                    device=self.config.device,
-                    dtype=torch.long
-                )
-            else:
-                layer_positions = decode_positions
-
-            # Compute scores for this layer's sampled heads
-            # Note: per_layer mode shares tokens across all KV heads in same layer
-            # so we don't need positions_per_kv_head, use shared layer_positions
-            layer_scores = self._compute_layer_head_scores(
-                key_states, layer_positions, layer_idx, start_index=decode_start,
-                positions_per_kv_head=None  # Same layer shares positions
-            )
-
-            if layer_scores is None or layer_scores.numel() == 0:
-                # Fallback: no sampled heads for this layer, use uniform selection
-                layer_keep = torch.arange(keep_count, device=self.config.device, dtype=torch.long)
-            else:
-                # Normalize scores (per head)
-                if self.normalize_scores and layer_scores.numel() > 0:
-                    mean = layer_scores.mean(dim=1, keepdim=True)
-                    std = layer_scores.std(dim=1, unbiased=False, keepdim=True).clamp_min(1e-6)
-                    layer_scores = (layer_scores - mean) / std
-
-                # Add noise for tie-breaking
-                if self.generator is not None and layer_scores.numel() > 0:
-                    noise = torch.rand(
-                        layer_scores.shape,
-                        device=layer_scores.device,
-                        generator=self.generator,
-                    ) * 1e-6
-                    layer_scores = layer_scores + noise
-
-                # Aggregate scores based on aggregation method
-                if self.config.per_layer_aggregation == "mean":
-                    # Mean of per-kv-head max: group by kv_head, max within group, then mean
-                    layer_heads = [(l, h) for l, h in self.sampled_heads if l == layer_idx]
-                    kv_head_groups: Dict[int, List[int]] = {}
-                    for i, (_, attn_head) in enumerate(layer_heads):
-                        kv_head = attn_head // max(1, self.num_key_value_groups)
-                        if kv_head not in kv_head_groups:
-                            kv_head_groups[kv_head] = []
-                        kv_head_groups[kv_head].append(i)
-
-                    kv_head_max_scores: List[torch.Tensor] = []
-                    for kv_head_idx in range(self.num_key_value_heads):
-                        if kv_head_idx in kv_head_groups:
-                            indices = kv_head_groups[kv_head_idx]
-                            group_scores = layer_scores[indices]  # [~n heads, seq_len]
-                            kv_max = group_scores.max(dim=0).values  # [seq_len]
-                            kv_head_max_scores.append(kv_max)
-
-                    if kv_head_max_scores:
-                        stacked = torch.stack(kv_head_max_scores, dim=0)  # [num_kv_heads_with_samples, seq_len]
-                        aggregated = stacked.mean(dim=0)  # [seq_len]
-                    else:
-                        aggregated = layer_scores.mean(dim=0)  # fallback
-                elif self.config.per_layer_aggregation == "pure_mean":
-                    # Pure mean: directly average all sampled heads without max
-                    aggregated = layer_scores.mean(dim=0)  # [seq_len]
-                else:
-                    # Default: max over all sampled heads in this layer
-                    aggregated = layer_scores.max(dim=0).values  # [seq_len]
-
-                # Top-k selection for this layer
-                actual_keep = min(keep_count, aggregated.numel())
-                if actual_keep > 0:
-                    layer_keep = aggregated.topk(actual_keep, largest=True).indices
-                else:
-                    layer_keep = torch.empty(0, device=self.config.device, dtype=torch.long)
-
-            all_layer_indices.append(layer_keep)
-
-        # Stack all layers: [num_layers, keep_count]
-        decode_keep_indices = torch.stack(all_layer_indices, dim=0)
-
-        # Expand prefill indices to 2D: [num_layers, decode_start]
-        prefill_indices = torch.arange(decode_start, device=self.config.device, dtype=torch.long)
-        prefill_broadcast = prefill_indices.unsqueeze(0).expand(num_layers, -1)
-
-        # Convert decode indices to absolute and concatenate with prefill
-        decode_keep_absolute = decode_keep_indices + decode_start
-        keep_indices = torch.cat([prefill_broadcast, decode_keep_absolute], dim=1)
-
-        return keep_indices
-
     def _compute_layer_head_scores(
         self,
         key_states: torch.Tensor,
@@ -807,7 +657,6 @@ class TriAttention:
                 offsets=self.offsets,
                 aggregation=self.score_aggregation,
                 freq_scale_sq=self.freq_scale_sq,
-                disable_top_n_high_freq=self.disable_top_n_high_freq,
                 disable_trig=self.disable_trig,
             )
             per_head_scores.append(head_scores)
@@ -822,7 +671,6 @@ class TriAttention:
         self.cache_positions = []
         self.cache_positions_per_head = None
         self.cache_positions_per_layer_perhead = None
-        self.cache_positions_per_layer = None
         self.absolute_position = 0
         self.prefix_length = 0
         # Reset generator to initial seed (aligned with original generate wrapper
@@ -845,10 +693,8 @@ def apply_triattention_patch(
     offset_max_length: int = 65536,
     score_aggregation: str = "mean",
     pruning_seed: int = 0,
-    head_limit: Optional[int] = None,
     metadata_expectations: Dict[str, object] | None = None,
     normalize_scores: bool = False,
-    use_rank_aggregation: bool = False,
     count_prompt_tokens: bool = False,
     allow_prefill_compression: bool = False,
     divide_length: int = 128,
@@ -856,9 +702,6 @@ def apply_triattention_patch(
     per_head_pruning: bool = False,
     per_layer_perhead_pruning: bool = False,
     layer_perhead_aggregation: str = "max",
-    per_layer_pruning: bool = False,
-    per_layer_aggregation: str = "max",
-    disable_top_n_high_freq: int = 0,
     disable_mlr: bool = False,
     disable_trig: bool = False,
 ) -> None:
@@ -880,10 +723,8 @@ def apply_triattention_patch(
         offset_max_length=offset_max_length,
         score_aggregation=score_aggregation,
         seed=pruning_seed,
-        head_limit=head_limit,
         metadata_expectations=metadata_expectations,
         normalize_scores=normalize_scores,
-        use_rank_aggregation=use_rank_aggregation,
         count_prompt_tokens=count_prompt_tokens,
         allow_prefill_compression=allow_prefill_compression,
         divide_length=divide_length,
@@ -891,9 +732,6 @@ def apply_triattention_patch(
         per_head_pruning=per_head_pruning,
         per_layer_perhead_pruning=per_layer_perhead_pruning,
         layer_perhead_aggregation=layer_perhead_aggregation,
-        per_layer_pruning=per_layer_pruning,
-        per_layer_aggregation=per_layer_aggregation,
-        disable_top_n_high_freq=disable_top_n_high_freq,
         disable_mlr=disable_mlr,
         disable_trig=disable_trig,
     )
@@ -1056,10 +894,6 @@ def apply_triattention_patch(
             if comp.cache_positions_per_layer_perhead is not None:
                 for key in comp.cache_positions_per_layer_perhead:
                     comp.cache_positions_per_layer_perhead[key].extend(new_positions)
-            # Also extend per-layer positions if active
-            if comp.cache_positions_per_layer is not None:
-                for layer_idx in comp.cache_positions_per_layer:
-                    comp.cache_positions_per_layer[layer_idx].extend(new_positions)
             comp.absolute_position += added
 
         # Apply compression based on trigger mode
@@ -1134,50 +968,6 @@ def apply_triattention_patch(
                 # Keep cache_positions as (layer 0, head 0)'s for compatibility (used for length tracking)
                 comp.cache_positions = comp.cache_positions_per_layer_perhead[(0, 0)].copy()
 
-            elif keep_indices.dim() == 2 and comp.per_layer_pruning:
-                # Per-layer mode: keep_indices shape [num_layers, budget]
-                # All KV heads in each layer share the same token indices
-                # sys.stderr.write(f"[TriAttention] Per-layer compressed size: {keep_indices.shape}\n")
-                num_layers = keep_indices.size(0)
-                budget = keep_indices.size(1)
-
-                new_pkv = []
-                for layer_idx, (k, v) in enumerate(pkv_tuple):
-                    batch_size = k.size(0)
-                    num_kv_heads = k.size(1)
-                    head_dim = k.size(3)
-                    layer_indices = keep_indices[layer_idx]  # [budget]
-
-                    # Broadcast to all KV heads: [batch, num_kv_heads, budget, head_dim]
-                    expanded_indices = layer_indices.unsqueeze(0).unsqueeze(0).unsqueeze(-1).expand(
-                        batch_size, num_kv_heads, budget, head_dim
-                    )
-
-                    # Gather along sequence dimension (dim=2)
-                    k_new = k.gather(dim=2, index=expanded_indices)
-                    v_new = v.gather(dim=2, index=expanded_indices)
-                    new_pkv.append((k_new.contiguous(), v_new.contiguous()))
-                pkv_tuple = tuple(new_pkv)
-
-                # Update cache_positions_per_layer: each layer has its own position list
-                if comp.cache_positions_per_layer is None:
-                    # First per-layer compression: initialize from shared cache_positions
-                    comp.cache_positions_per_layer = {
-                        layer_idx: [comp.cache_positions[idx] for idx in keep_indices[layer_idx].tolist()]
-                        for layer_idx in range(num_layers)
-                    }
-                else:
-                    # Subsequent compression: update each layer's positions
-                    comp.cache_positions_per_layer = {
-                        layer_idx: [
-                            comp.cache_positions_per_layer[layer_idx][idx]
-                            for idx in keep_indices[layer_idx].tolist()
-                        ]
-                        for layer_idx in range(num_layers)
-                    }
-                # Keep cache_positions as layer 0's for compatibility (used for length tracking)
-                comp.cache_positions = comp.cache_positions_per_layer[0].copy()
-
             elif keep_indices.dim() == 2:
                 # Per-head mode: keep_indices shape [num_kv_heads, budget]
                 # Use gather-based slicing for per-head independent compression
@@ -1247,9 +1037,7 @@ def apply_triattention_patch(
 
     model.forward = MethodType(triattention_forward, model)
 
-    print(f"[TriAttention] Applied R-KV style compression (budget={kv_budget}, "
+    print(f"[TriAttention] Applied compression (budget={kv_budget}, "
           f"divide_length={divide_length}, normalize_scores={normalize_scores}, "
-          f"use_rank_aggregation={use_rank_aggregation}, "
-          f"per_layer_pruning={per_layer_pruning}, "
-          f"per_layer_perhead_pruning={per_layer_perhead_pruning}, "
-          f"disable_top_n_high_freq={disable_top_n_high_freq})")
+          f"per_head_pruning={per_head_pruning}, "
+          f"per_layer_perhead_pruning={per_layer_perhead_pruning})")
