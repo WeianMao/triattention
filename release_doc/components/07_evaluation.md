@@ -37,3 +37,36 @@
 - `run_math.py` 中 `import weian_development.*` 需重构
 - `rm_maj_eval.py` 中 `__main__` 硬编码路径需清理
 - `model_utils.py` L448 中的 `../models/codellama_7b/v1-16k` 相对路径需清理
+
+## 第三方代码归属（Attribution）
+
+Release 为 Apache 2.0，所有上游许可证均兼容。需按 `grader.py` 格式在文件头添加来源声明。
+
+### 需要添加 attribution header 的文件
+
+| 文件 | 来源 | 上游许可证 |
+|------|------|-----------|
+| `parser.py` | ToRA + DeepSeek-Math | MIT |
+| `examples.py` | ToRA + DeepSeek-Math | MIT |
+| `python_executor.py` | ToRA (`microsoft/ToRA/blob/main/src/eval/python_executor.py`) | MIT |
+| `data_loader.py` | ToRA + DeepSeek-Math | MIT |
+| `utils.py` | ToRA + DeepSeek-Math | MIT |
+| `evaluate.py` | ToRA + DeepSeek-Math | MIT |
+
+### 已有 attribution 但需补全
+
+| 文件 | 来源 | 现状 | 需补充 |
+|------|------|------|--------|
+| `model_utils.py` | allenai/open-instruct | 仅有 URL（L2） | 补充许可证声明（Apache 2.0） |
+| `grader.py` | ToRA + DeepSeek-Math + Hendrycks MATH + CRITIC + PRM800K | ✅ 完整 | 无需修改（作为格式参考） |
+
+### 原创文件（无需 attribution）
+
+`math_utils.py`, `trajectory.py`, `rm_maj_eval.py`, `eval_math.py`, `eval_math_multi.py`
+
+### 上游项目参考 URL
+
+- ToRA: `https://github.com/microsoft/ToRA` (MIT)
+- DeepSeek-Math: `https://github.com/deepseek-ai/DeepSeek-Math` (MIT)
+- open-instruct: `https://github.com/allenai/open-instruct` (Apache 2.0)
+- latex2sympy: MIT（已内含许可证）
