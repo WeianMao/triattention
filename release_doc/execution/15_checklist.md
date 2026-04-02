@@ -18,10 +18,28 @@
 
 ## 测试
 
+### 开发阶段（单元测试，轻量 GPU）
+
+- [ ] **Level 1：纯评分函数等价性测试**（无需模型，~1秒）
+  - 合成张量构造 K_unrot / K_rot
+  - 原始 `score_keys_for_round()` vs release `compute_scores_pytorch()`
+  - tolerance: `atol=1e-5`
+  - 注意：原始对 K_unrot 算分，release 对 K_rot 算分，需正确对齐输入
+- [ ] **Level 2：完整 pruner + 真实 stats 等价性测试**（不加载模型权重，~5秒，<100MB GPU）
+  - 加载现有 stats .pt + 模型 config.json（仅读 RoPE 参数）
+  - `SparseRoundPruner`（原始）vs `TriAttentionCompressor`（release）
+  - 比较 per-head 分数 + keep/evict 索引
+  - normalize_scores 和 per-head 采样范围两边必须对齐
 - [ ] 单元测试：验证 RKV 和 TriAttention rkv-style 在相同 budget + divide_length 配置下峰值 KV cache 一致
-- [ ] 确保清理后代码行为不变（AB 对比测试）
 - [ ] 排查 KV cache 状态重置 bug：多问题单进程推理时状态变量是否正确重置（详见 ../code_cleanup/flag_cleanup.md）
 - [ ] 全局扫描敏感信息（完整关键词清单见 [../scope/03_scope_exclude.md](../scope/03_scope_exclude.md)）
+
+### 内部发布后（GPU 推理测试）
+
+- [ ] **Level 3：真实模型端到端对比**（~16GB GPU，~60秒）
+  - 加载完整模型跑 decode，在压缩触发点对比 keep/evict 结果
+  - 原始代码 vs release 代码必须数值一致
+- [ ] 确保清理后代码行为不变（完整 AB 头对头对比测试，主要模型×主要 setting）
 
 ## DFS Benchmark 代码修复（审查已通过）
 
