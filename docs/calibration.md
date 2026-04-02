@@ -6,17 +6,17 @@ TriAttention uses pre-computed statistics (Q/K centers and norms) for each model
 
 ```bash
 python scripts/calibrate.py \
-    --model <your-model-id> \
-    --calibration-data <your-data.jsonl> \
-    --output-dir stats/
+    --model <your-model-id-or-path> \
+    --input <calibration_text.txt> \
+    --output calibration/model_stats.pt
 ```
 
-The calibration script computes Q/K distribution centers and Mean Resultant Length (R) values across all attention heads. These statistics are used at inference time to score keys via the trigonometric series.
+The calibration script runs a forward pass on plain text input, captures query states from every attention layer, inverts RoPE, and computes per-head frequency statistics. The resulting `.pt` file is loaded at inference time to score keys via the trigonometric series.
 
 ## Pre-computed Stats
 
 | Model | Stats Path |
 |-------|-----------|
-| Qwen3-8B | `calibration/qwen3-8b/` |
-| DeepSeek-R1-Distill-Llama-8B | `calibration/ds-llama-8b/` |
-| DeepSeek-R1-Distill-Qwen-7B | `calibration/ds-qwen-7b/` |
+| Qwen3-8B | `calibration/qwen3_8b_stats.pt` |
+| DeepSeek-R1-Distill-Llama-8B | `calibration/ds_llama_8b_stats.pt` |
+| DeepSeek-R1-Distill-Qwen-7B | `calibration/ds_qwen_7b_stats.pt` |

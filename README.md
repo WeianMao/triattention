@@ -51,11 +51,11 @@ pip install flash-attn --no-build-isolation  # recommended
 ## Quick Start
 
 ```bash
-python scripts/cli.py \
-    --model Qwen/Qwen3-8B \
+python scripts/cli.py run-one \
+    --model Qwen3-8B \
     --dataset aime24 \
     --method triattention \
-    --kv-budget 2048
+    --budget 2048
 ```
 
 ## Supported Models

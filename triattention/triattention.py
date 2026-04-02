@@ -2,7 +2,7 @@
 
 This module provides a TriAttention implementation that triggers compression
 inside the attention forward pass instead of in the generate() wrapper.
-The frequency-based scoring logic is identical to SparseRoundPruner.
+The frequency-based scoring logic implements the core pruning algorithm.
 """
 from __future__ import annotations
 
@@ -171,7 +171,7 @@ class TriAttention:
         prefix_length: int = 0,
     ) -> torch.Tensor:
         """
-        Compute keep_indices using union-based selection (aligned with SparseRoundPruner).
+        Compute keep_indices using union-based selection.
 
         Algorithm:
         1. Compute scores only for decode tokens (not prefill)
@@ -216,7 +216,7 @@ class TriAttention:
             # Budget exhausted by prefill
             return torch.arange(min(self.budget, decode_start), device=self.config.device)
 
-        # Get positions for decode tokens only (aligned with SparseRoundPruner)
+        # Get positions for decode tokens only
         decode_positions = torch.tensor(
             self.cache_positions[decode_start:kv_cache_len],
             device=self.config.device,
@@ -255,13 +255,13 @@ class TriAttention:
         # Stack all head scores: [total_sampled_heads, decode_seq_len]
         head_matrix = torch.cat(all_head_scores, dim=0)
 
-        # Apply normalization (only on decode tokens, aligned with SparseRoundPruner)
+        # Apply normalization (only on decode tokens)
         if self.normalize_scores and head_matrix.numel() > 0:
             mean = head_matrix.mean(dim=1, keepdim=True)
             std = head_matrix.std(dim=1, unbiased=False, keepdim=True).clamp_min(1e-6)
             head_matrix = (head_matrix - mean) / std
 
-        # Add noise for tie-breaking (aligned with SparseRoundPruner)
+        # Add noise for tie-breaking
         if self.generator is not None and head_matrix.numel() > 0:
             noise = torch.rand(
                 head_matrix.shape,
@@ -281,7 +281,7 @@ class TriAttention:
 
         # Per-head independent pruning mode: each KV head selects tokens independently
         # Returns 2D tensor [num_kv_heads, budget] instead of 1D [budget]
-        # Matches sparse_round_pruner_prefill_keep.py:432-458
+        # Per-head independent pruning: each KV head selects tokens independently
         if self.per_head_pruning:
             keep_count = min(decode_budget, decode_count)
             return self._select_per_head_independent(
@@ -291,7 +291,7 @@ class TriAttention:
         # Compute combined scores for union-based selection
         combined = head_matrix.max(dim=0).values
 
-        # Union-based selection (aligned with SparseRoundPruner)
+        # Union-based selection
         keep_count = min(decode_budget, decode_count)
         decode_keep_indices = self._select_union_based(head_matrix, combined, keep_count)
 
@@ -310,7 +310,7 @@ class TriAttention:
         keep_count: int,
     ) -> torch.Tensor:
         """
-        Union-based token selection (aligned with SparseRoundPruner).
+        Union-based token selection.
 
         Algorithm:
         1. Each head independently selects top-k tokens
@@ -622,7 +622,7 @@ class TriAttention:
             if self.num_key_value_heads and self.num_attention_heads:
                 kv_head = min(key_states.shape[1] - 1, head // max(1, self.num_key_value_groups))
 
-            # Gather keys at specified indices (aligned with SparseRoundPruner)
+            # Gather keys at specified indices
             k_values = key_states[0, kv_head].index_select(0, gather_indices)
             k_values = k_values.to(device=self.config.device, dtype=self.config.dtype)
 
@@ -667,14 +667,14 @@ class TriAttention:
         return torch.stack(per_head_scores, dim=0)  # [num_heads, seq_len]
 
     def reset_compression_state(self) -> None:
-        """Reset state for new generation (aligned with SparseRoundPruner recreation)."""
+        """Reset state for new generation."""
         self.cache_positions = []
         self.cache_positions_per_head = None
         self.cache_positions_per_layer_perhead = None
         self.absolute_position = 0
         self.prefix_length = 0
         # Reset generator to initial seed (aligned with original generate wrapper
-        # which recreates the entire SparseRoundPruner for each generation)
+        # which recreates the compression module for each generation)
         if self.config.seed is not None:
             if self.generator is None:
                 if self.config.device.type == "cuda":
