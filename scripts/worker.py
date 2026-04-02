@@ -16,7 +16,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 RKV_ROOT = Path(__file__).resolve().parents[1]
 
-from scripts.process_utils import mask_process_command
+
 from integration.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
 from triattention.prompt_utils import (
     DEFAULT_SYSTEM_PROMPT,
@@ -429,7 +429,6 @@ def configure_tokenizer(tokenizer: AutoTokenizer) -> AutoTokenizer:
 
 
 def main(args: argparse.Namespace) -> None:
-    mask_process_command("PD-L1_binder")
     args.dataset_name = Path(args.dataset_path).name.split(".")[0]
     if (not args.max_length) or args.max_length <= 0:
         if args.dataset_name in dataset2max_length:

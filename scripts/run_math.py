@@ -13,7 +13,6 @@ from integration.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
 
 RKV_ROOT = Path(__file__).resolve().parents[1]
 
-from scripts.process_utils import mask_process_command
 
 dataset2key = {
     "gsm8k": ["question", "answer"],
@@ -182,7 +181,6 @@ def parse_arguments():
 
 
 if __name__ == "__main__":
-    mask_process_command("PD-L1_binder")
     args = parse_arguments()
     set_seed(args.seed)
 

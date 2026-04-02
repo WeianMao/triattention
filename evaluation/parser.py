@@ -1,3 +1,7 @@
+# Adapted from ToRA (https://github.com/microsoft/ToRA)
+# and DeepSeek-Math (https://github.com/deepseek-ai/DeepSeek-Math)
+# Licensed under MIT License
+
 import re
 import regex
 from latex2sympy2 import latex2sympy

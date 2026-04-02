@@ -1,6 +1,5 @@
-"""
-https://github.com/allenai/open-instruct
-"""
+# Adapted from open-instruct (https://github.com/allenai/open-instruct)
+# Licensed under Apache License 2.0
 
 import torch
 import tqdm
@@ -445,7 +444,7 @@ def load_hf_lm_and_tokenizer(
 
 
 def _test_generate_completions():
-    model_name_or_path = "../models/codellama_7b/v1-16k"
+    model_name_or_path = "codellama/CodeLlama-7b-hf"
     llm, tokenizer = load_hf_lm_and_tokenizer(
         model_name_or_path=model_name_or_path,
         load_in_half=True,

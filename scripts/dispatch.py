@@ -17,7 +17,6 @@ RKV_ROOT = Path(__file__).resolve().parents[1]
 
 import yaml
 
-from scripts.process_utils import mask_process_command
 
 DEFAULT_CONFIG = RKV_ROOT / "configs" / "dispatch_default.yaml"
 MERGE_SCRIPT = RKV_ROOT / "scripts" / "merge_shards.py"

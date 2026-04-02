@@ -1,53 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Data
+data/*.jsonl
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache
+.cache/
+
+# Outputs and logs
 outputs/
-brumo_2025.jsonl
-aime25.jsonl
-.claude/
-__pycache__
-deepconf_old
-tmp_eval
-logs
-outputs
-vllm
-kvpress
-/R-KV-backup-*
-/tmp/rkv_test_shard/
-/data/rbg/users/weian/project/rl/dc/R-KV/outputs/
-/data/rbg/users/weian/project/rl/dc/R-KV/logs/
-/data/rbg/users/weian/project/rl/dc/R-KV/outputs/*
-/data/rbg/users/weian/project/rl/dc/R-KV/logs/*
-
-# R-KV HuggingFace run artifacts
-R-KV/HuggingFace/outputs*/
-R-KV/HuggingFace/output*.jsonl
-R-KV/HuggingFace/evaluation/*_math_eval*.json*
-R-KV/HuggingFace/evaluation/*/default-*_math_eval*.jsonl
-R-KV/HuggingFace/evaluation/*/*/default-*_math_eval*.jsonl
-R-KV/HuggingFace/evaluation/*/default-*_metrics.json
-R-KV/HuggingFace/evaluation/*/*/default-*_metrics.json
-R-KV/HuggingFace/evaluation/rkv_sdpa_single/
-R-KV/HuggingFace/evaluation/evaluation_*/
-R-KV/HuggingFace/evaluation/aime24/
-R-KV/HuggingFace/evaluation/all_results.csv
-R-KV/HuggingFace/all_results.csv
-R-KV/HuggingFace/rkv.egg-info/
-
-# R-KV sharded outputs/logs
-R-KV/outputs/
-R-KV/logs/
-
-# Workflow session data
-.workflow/
-post_rope_nms_viz/
-
-R-KV/speckv_experiments/configs/generated/
-R-KV/speckv_experiments/models/
-prompt.txt
-
-# Paper visualization outputs (images)
-paper_visualizations/outputs/
-
-# Paper visualization materials (data files, large files)
-paper_visualizations/Materials/
+logs/
 
 # Large file types
 *.zip
@@ -57,62 +33,6 @@ paper_visualizations/Materials/
 *.safetensors
 *.bin
 *.ckpt
-*.jar
-.DS_Store
 
-# TriAttention_vLLM evaluation artifacts
-TriAttention_vLLM/evaluation/results/
-TriAttention_vLLM/evaluation/outputs/
-TriAttention_vLLM/evaluation/**/default-*_math_eval*.jsonl
-TriAttention_vLLM/evaluation/**/default-*_metrics.json
-TriAttention_vLLM/evaluation/*.log
-
-# Build artifacts
-*.egg-info/
-.deps/
-
-# R-KV/vLLM local build/runtime artifacts (do not commit)
-R-KV/vLLM/.pytest_cache/
-R-KV/vLLM/.deps/
-R-KV/vLLM/vllm.egg-info/
-R-KV/vLLM/build/
-R-KV/vLLM/dist/
-R-KV/vLLM/logs/
-R-KV/vLLM/outputs/
-
-# R-KV/vLLM equivalence test artifacts
-R-KV/vLLM/weian_script/tests/equivalence/comparison_output/*.log
-R-KV/vLLM/weian_script/tests/equivalence/comparison_output/*.jsonl
-R-KV/vLLM/weian_script/tests/equivalence/comparison_output/hf_shards/
-R-KV/vLLM/weian_script/tests/equivalence/comparison_output/logs/
-R-KV/vLLM/weian_script/tests/equivalence/comparison_output/outputs/
-
-# R-KV/vLLM local experiment leftovers (legacy; do not commit)
-R-KV/vLLM/COMPRESSION_FIX_REPORT.md
-R-KV/vLLM/SPECKV_COMPARISON.md
-R-KV/vLLM/SPECKV_PER_LAYER_FIX.md
-R-KV/vLLM/SPECKV_STATELESS_REWRITE.md
-R-KV/vLLM/SPECKV_USAGE.md
-R-KV/vLLM/data/
-R-KV/vLLM/docs/weian_development/
-R-KV/vLLM/weian_script/
-
-# Keep demo handoff assets tracked.
-!demo/
-!demo/prompt.txt
-!demo/vllm/
-!demo/vllm/**
-
-# demo runtime local artifacts
-demo/vllm/logs/
-demo/vllm/__pycache__/
-
-# Local debug / temporary investigation artifacts
-debug/
-output_multi/
-comparison_report.txt
-weian_development/demo_debug/artifacts/
-weian_development/demo_debug/runtime_debug_check/
-weian_development/triattention_v2_aime24_hf_*_probe.yaml
-weian_development/triattention_v2_launch_full_strict.py
-weian_development/triattention_v2_unattended_guard.py
+# Workflow
+.workflow/

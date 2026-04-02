@@ -1,5 +1,5 @@
 common:
-  model: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B
+  model: deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
   tensor_parallel_size: 1
   model_type: deepseek
   max_tokens: 64000
@@ -16,19 +16,19 @@ common:
     trust_remote_code: true
 
 online:
-  dataset: /data/rbg/users/weian/project/rl/deepconf/brumo_2025.jsonl
+  dataset: ./data/brumo_2025.jsonl
   output_dir: outputs/deepseek_r1_qwen3_8b/online
 
 baseline:
-  dataset: /data/rbg/users/weian/project/rl/deepconf/brumo_2025.jsonl
+  dataset: ./data/brumo_2025.jsonl
   output_dir: outputs/deepseek_r1_qwen3_8b/baseline_64trace
   budget: 64
 
 offline:
-  model: /data/rbg/users/weian/project/rl/datasets/DeepSeek-R1-0528-Qwen3-8B
+  model: deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
   model_type: deepseek
   tensor_parallel_size: 1
-  dataset: /data/rbg/users/weian/project/rl/deepconf/aime25.jsonl
+  dataset: ./data/aime25.jsonl
   output_dir: outputs/deepseek_r1_qwen3_8b/offline_64trace
   budget: 64
   reasoning_effort: high

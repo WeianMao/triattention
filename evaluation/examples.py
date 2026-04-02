@@ -1,3 +1,8 @@
+# Adapted from ToRA (https://github.com/microsoft/ToRA)
+# and DeepSeek-Math (https://github.com/deepseek-ai/DeepSeek-Math)
+# Licensed under MIT License
+
+
 def get_examples():
     examples = {}
     examples["gsm8k"] = [

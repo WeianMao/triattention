@@ -1,3 +1,7 @@
+# Adapted from ToRA (https://github.com/microsoft/ToRA)
+# and DeepSeek-Math (https://github.com/deepseek-ai/DeepSeek-Math)
+# Licensed under MIT License
+
 import os
 from utils import load_jsonl, lower_keys
 from datasets import load_dataset, Dataset, concatenate_datasets
