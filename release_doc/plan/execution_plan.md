@@ -97,27 +97,41 @@ See `checkpoint_protocol.md` -- Checkpoint C1.
      tests/              (unit tests -- to be written later)
      benchmarks/dfs/     (DFS benchmark -- from Step 2.2)
      ```
-  2. Move files according to the mapping:
-     - `weian_development/speckv/speckv_rkv_style.py` -> `triattention/triattention.py`
-     - `weian_development/speckv/round_pruning_utils.py` -> `triattention/pruning_utils.py`
-     - `weian_development/speckv/prompt_utils.py` -> `triattention/prompt_utils.py`
-     - `weian_development/speckv/stats_utils.py` -> `triattention/stats_utils.py`
+  2. Move files according to the mapping (所有源路径相对于 `dc1-release/`):
+
+     **triattention/ — 我们的方法**:
+     - `R-KV/weian_development/speckv/speckv_rkv_style.py` -> `triattention/triattention.py`
+     - `R-KV/weian_development/speckv/round_pruning_utils.py` -> `triattention/pruning_utils.py`
+     - `R-KV/weian_development/speckv/prompt_utils.py` -> `triattention/prompt_utils.py`
+     - `R-KV/weian_development/speckv/stats_utils.py` -> `triattention/stats_utils.py`
+
+     **kv_compress/ — baseline 方法**:
      - `R-KV/HuggingFace/rkv/compression/r1_kv.py` -> `kv_compress/r1_kv.py`
      - `R-KV/HuggingFace/rkv/compression/snapkv.py` -> `kv_compress/snapkv.py`
      - `R-KV/HuggingFace/rkv/compression/h2o.py` -> `kv_compress/h2o.py`
      - `R-KV/HuggingFace/rkv/compression/streamingllm.py` -> `kv_compress/streamingllm.py`
+     - `R-KV/HuggingFace/rkv/utils.py` -> `kv_compress/utils.py`（**关键**：含 cal_similarity, compute_attention_scores，baseline 方法依赖此文件）
+
+     **integration/ — HuggingFace 集成**:
      - `R-KV/HuggingFace/rkv/modeling.py` -> `integration/modeling.py`
      - `R-KV/HuggingFace/rkv/monkeypatch.py` -> `integration/monkeypatch.py`
-     - Eval files -> `evaluation/` (keep existing structure)
-     - `weian_development/speckv_experiments_cli_v2.py` -> `scripts/cli.py`（注意：此文件在 weian_development/ 下，不在 speckv_experiments/）
-     - `weian_development/rkv_sharded_dispatch.py` -> `scripts/dispatch.py`
-     - `weian_development/rkv_sharded_eval.py` -> `scripts/worker.py`
-     - `weian_development/merge_rkv_shards.py` -> `scripts/merge_shards.py`
-     - `weian_development/process_utils.py` -> `scripts/process_utils.py`
-     - `weian_development/rkv_cache_utils.py` -> `scripts/cache_utils.py`
+
+     **evaluation/ — 评估管线**:
+     - `R-KV/HuggingFace/evaluation/*.py` -> `evaluation/`（所有 .py 文件）
+     - `R-KV/HuggingFace/evaluation/latex2sympy/` -> `evaluation/latex2sympy/`（整个子树，使用此副本而非其他 2 个副本）
+
+     **scripts/ — 入口脚本**:
+     - `R-KV/weian_development/speckv_experiments_cli_v2.py` -> `scripts/cli.py`
+     - `R-KV/weian_development/rkv_sharded_dispatch.py` -> `scripts/dispatch.py`
+     - `R-KV/weian_development/rkv_sharded_eval.py` -> `scripts/worker.py`
+     - `R-KV/weian_development/merge_rkv_shards.py` -> `scripts/merge_shards.py`
+     - `R-KV/weian_development/process_utils.py` -> `scripts/process_utils.py`
+     - `R-KV/weian_development/rkv_cache_utils.py` -> `scripts/cache_utils.py`
      - `R-KV/HuggingFace/run_math.py` -> `scripts/run_math.py`
+
+     **configs/ + 实验脚本**:
      - `R-KV/speckv_experiments/configs/` -> `configs/`
-     - `R-KV/speckv_experiments/scripts/` -> `scripts/experiments/`（shell 脚本）
+     - `R-KV/speckv_experiments/scripts/` -> `scripts/experiments/`（递归复制，含 per-model 和 per-budget 子目录）
   3. Create `__init__.py` for all packages: `triattention/`, `kv_compress/`, `integration/`, `evaluation/`
   4. Create stub `setup.py` / `pyproject.toml` with `find_packages()` for editable install
 - **Output**: New directory structure with all needed files extracted
@@ -323,8 +337,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
      - `run_math.py`: rewrite `import weian_development.*` (should be done in 2.4, verify here)
      - `rm_maj_eval.py`: clean `__main__` hardcoded paths
      - `model_utils.py` L448: clean `../models/codellama_7b/v1-16k` reference
-  8. **Rewrite `.gitignore`**: fresh file with relative paths only
-  9. **Sensitive keyword full scan** (keywords from `scope/03_scope_exclude.md`):
+  8. **Sensitive keyword full scan** (keywords from `scope/03_scope_exclude.md`):
      - `aime` (calibration refs only -- dataset name in user-facing code is OK)
      - `weian`
      - `/data/rbg`
