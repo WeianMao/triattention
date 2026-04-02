@@ -7,7 +7,7 @@
 - [ ] **stats .pt metadata 含内部路径**：`rkv_sparse_round_calibrate.py` L337-341 的 `trace_root`, `model_path` 字段暴露 `/data/rbg/...`。预生成 stats 时必须 strip
 - [ ] **`validate_stats_metadata()` 检查 prompt_template**：stats 中的 template 字符串必须和推理时 byte-identical，rename 时不能改动 template 内容
 - [ ] **15+ 文件有 `weian_development.*` import**：不只是 CLI，整条链（worker、pruner、calibrate、rkv/compression）都有，需系统性重写 import
-- [ ] **`rkv/compression/speckv.py` 删除**：只是 re-export generate-wrapper 路径，论文不用，release 不需要。删除后确认 `rkv.compression` 的 `__init__.py` 不 crash
+- [ ] **`rkv/compression/speckv.py` 不纳入 release**：generate-wrapper 路径，论文不用。源文件保留不动，release repo 不包含此文件。确认 release 版 `kv_compress/` 的 `__init__.py` 不引用它
 - [ ] **`capture_qk_distributed.py` 处理**：校准脚本依赖此文件。如公布校准脚本（raw text 版），需一并清理
 - [ ] **`position_offset_patch.py` 条件 import**：flag 已在删除清单，但 worker 中 L664 的 import 也要一起删
 - [ ] **`rkv_cache_utils.py` / `reset_model_cache`**：确认是否和被删 flag `reset_cache_each_batch` 绑定，如是则一起删
