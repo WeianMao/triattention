@@ -87,8 +87,8 @@ Do not modify existing algorithm core logic without explicit authorization. New 
 4. `release_doc/plan/checkpoint_protocol.md` — **检查点协议**（检查内容、通过标准、失败处理）
 5. `release_doc/plan/execution_log.md` — **执行日志**（已完成工作、已知问题）
 6. `release_doc/plan/unconfirmed_decisions.md` — **未确认决策日志**（agent 自主判断的记录，供用户事后审查）
-6. `release_doc/guidelines/agent_workflow.md` — agent 工作流程
-7. `release_doc/guidelines/confirmation_protocol.md` — 与用户确认决策的标准流程
+7. `release_doc/guidelines/agent_workflow.md` — agent 工作流程
+8. `release_doc/guidelines/confirmation_protocol.md` — 与用户确认决策的标准流程
 
 **关键规则**：
 - 计划是蓝图，不是教条——必须读相关代码理解实际情况，根据实际情况执行

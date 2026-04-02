@@ -193,7 +193,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
 ### Step 2.3: Systematic Import Rewrite
 
 - **Scope**: Python import statements across all files in `dc1-release/`
-- **Input**: `dc1-release/` after Step 2.3 (new directory structure)
+- **Input**: `dc1-release/` after Step 2.2 (new directory structure, old dirs deleted)
 - **Actions**:
   1. Rewrite all `weian_development.*` imports (15+ files identified in checklist):
      - Map each old import to new package path
@@ -227,7 +227,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
 ### Step 2.4: Naming Unification (speckv -> triattention)
 
 - **Scope**: String replacements across all files in `dc1-release/`
-- **Input**: `dc1-release/` after Step 2.4
+- **Input**: `dc1-release/` after Step 2.3
 - **Actions** (reference: `code_cleanup/04_naming.md`):
   1. **Class/function renames**:
      - `SpeckVRKVStyle` -> `TriAttention`
@@ -272,7 +272,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
 ### Step 2.5: Flag Cleanup (Delete Experimental Flags)
 
 - **Scope**: Python argparse definitions + all code paths referencing deleted flags
-- **Input**: `dc1-release/` after Step 2.5
+- **Input**: `dc1-release/` after Step 2.4
 - **Actions** (reference: `code_cleanup/flag_cleanup.md`):
   1. Delete 14 flags and ALL associated code paths:
      - `--simulate-bug-phase-offset`
@@ -313,7 +313,7 @@ See `checkpoint_protocol.md` -- Checkpoint C2.
 ### Step 2.6: Path Cleanup + Sensitive Content Removal
 
 - **Scope**: All hardcoded paths, sensitive strings, and metadata
-- **Input**: `dc1-release/` after Step 2.6
+- **Input**: `dc1-release/` after Step 2.5
 - **Actions** (reference: `code_cleanup/06_path_cleanup.md`):
   1. **Model paths** -> HuggingFace hub names:
      - All YAML configs: local model paths -> HF hub names (e.g. `Qwen/Qwen3-8B`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`)
