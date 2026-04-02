@@ -3,7 +3,7 @@ set -euo pipefail
 
 DATASET="aime24"
 MODEL="Qwen3-8B"
-METHOD="rkv"
+METHOD="r1kv"
 BUDGET=""
 DRY_RUN="0"
 JOB_PARALLEL="${JOB_PARALLEL:-1}"
@@ -21,10 +21,10 @@ RKV_ROOT="$(cd "${EXP_ROOT}/.." && pwd)"
 
 usage() {
   cat <<USAGE
-Usage: bash scripts/qwen3/run_one.sh [--dataset name] [--model name] [--method fullkv|rkv|speckv] [--budget N] [--dry-run]
+Usage: bash scripts/qwen3/run_one.sh [--dataset name] [--model name] [--method fullkv|r1kv|triattention] [--budget N] [--dry-run]
 
 Dataset defaults to aime24 and model defaults to Qwen3-8B.
-If --budget is omitted for rkv/speckv, default_budget from configs/shared/defaults.yaml is used.
+If --budget is omitted for r1kv/triattention, default_budget from configs/shared/defaults.yaml is used.
 USAGE
 }
 
@@ -72,4 +72,4 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   ARGS+=("--dry-run")
 fi
 
-python "${RKV_ROOT}/weian_development/speckv_experiments_cli_v2.py" run-one "${ARGS[@]}"
+python "${RKV_ROOT}/scripts/cli.py" run-one "${ARGS[@]}"

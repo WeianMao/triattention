@@ -1,4 +1,4 @@
-"""Shared prompt utilities for SpeckV to keep calibration and inference aligned."""
+"""Shared prompt utilities to keep calibration and inference aligned."""
 from __future__ import annotations
 
 from typing import Iterable, List, Sequence

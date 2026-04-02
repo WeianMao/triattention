@@ -13,7 +13,7 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   EXTRA_ARGS+=("--dry-run")
 fi
 
-EXTRA_CONFIG="${EXTRA_CONFIG:-${EXP_ROOT}/configs/extra_config/speckv_disable_trig.yaml}"
+EXTRA_CONFIG="${EXTRA_CONFIG:-${EXP_ROOT}/configs/extra_config/triattention_disable_trig.yaml}"
 
 JOB_PARALLEL="${JOB_PARALLEL:-1}"
 if ! [[ "${JOB_PARALLEL}" =~ ^[0-9]+$ ]] || [[ "${JOB_PARALLEL}" -lt 1 ]]; then
@@ -77,10 +77,10 @@ launch_job() {
   local dataset="$1"
   local model="$2"
   (
-    python "${RKV_ROOT}/weian_development/speckv_experiments_cli_v2.py" "${EXTRA_ARGS[@]}" run-one \
+    python "${RKV_ROOT}/scripts/cli.py" "${EXTRA_ARGS[@]}" run-one \
       --dataset "$dataset" \
       --model "$model" \
-      --method speckv \
+      --method triattention \
       --extra-config "${EXTRA_CONFIG}"
   ) &
   local pid=$!

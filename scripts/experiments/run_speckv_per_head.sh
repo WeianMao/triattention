@@ -13,17 +13,17 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   EXTRA_ARGS+=("--dry-run")
 fi
 
-EXTRA_CONFIG="${EXTRA_CONFIG:-${EXP_ROOT}/configs/extra_config/speckv_per_head_pruning.yaml}"
+EXTRA_CONFIG="${EXTRA_CONFIG:-${EXP_ROOT}/configs/extra_config/triattention_per_head_pruning.yaml}"
 
 DATASETS=(aime24 aime25 math500)
 MODELS=("DeepSeek-R1-Distill-Qwen-7B" "DeepSeek-R1-Distill-Qwen-14B" "DeepSeek-R1-Distill-Llama-8B" "Qwen3-8B")
 
 for dataset in "${DATASETS[@]}"; do
   for model in "${MODELS[@]}"; do
-    python "${RKV_ROOT}/weian_development/speckv_experiments_cli_v2.py" "${EXTRA_ARGS[@]}" run-one \
+    python "${RKV_ROOT}/scripts/cli.py" "${EXTRA_ARGS[@]}" run-one \
       --dataset "$dataset" \
       --model "$model" \
-      --method speckv \
+      --method triattention \
       --extra-config "${EXTRA_CONFIG}"
   done
 done

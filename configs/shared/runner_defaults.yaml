@@ -1,5 +1,5 @@
 experiment:
-  conda_env: rkv
+  conda_env: triattention
   runner_path: scripts/worker.py
   merged_dir_name: merged
   gpus: auto

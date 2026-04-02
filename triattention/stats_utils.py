@@ -1,4 +1,4 @@
-"""Helpers for SpeckV stats metadata validation."""
+"""Helpers for TriAttention stats metadata validation."""
 from __future__ import annotations
 
 from pathlib import Path

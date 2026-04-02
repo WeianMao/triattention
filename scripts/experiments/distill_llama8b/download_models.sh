@@ -19,7 +19,7 @@ export JOB_PARALLEL
 python - <<'PY'
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from weian_development import speckv_experiments_cli_v2 as cli
+from scripts import cli
 
 try:
   from huggingface_hub import snapshot_download

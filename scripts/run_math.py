@@ -150,7 +150,7 @@ def parse_arguments():
         "--method",
         type=str,
         default=None,
-        choices=["rkv", "fullkv", "snapkv", "streamingllm", "h2o"],
+        choices=["r1kv", "fullkv", "snapkv", "streamingllm", "h2o"],
     )
     parser.add_argument("--kv_budget", type=int, default=None)
     parser.add_argument("--window_size", type=int, default=8)
@@ -199,7 +199,7 @@ if __name__ == "__main__":
 
     # ====== build compression config ======
     method_config = {"budget": args.kv_budget, "window_size": args.window_size}
-    if args.method in {"rkv", "snapkv"}:
+    if args.method in {"r1kv", "snapkv"}:
         method_config.update(
             {
                 "mix_lambda": args.mix_lambda,

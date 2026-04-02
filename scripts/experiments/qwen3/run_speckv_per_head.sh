@@ -9,10 +9,10 @@ export PYTHONPATH="${RKV_ROOT}:${PYTHONPATH:-}"
 
 usage() {
   cat <<USAGE
-Usage: bash scripts/qwen3/run_speckv_per_head.sh [--budget N]
+Usage: bash scripts/qwen3/run_triattention_per_head.sh [--budget N]
 
-Runs SpeckV per-head pruning for Qwen3-8B on aime24/aime25/math500. Passing
---budget forwards the specific budget to speckv_experiments_cli_v2.py. Omit the
+Runs TriAttention per-head pruning for Qwen3-8B on aime24/aime25/math500. Passing
+--budget forwards the specific budget to cli.py. Omit the
 flag to fall back to configs/shared/defaults.yaml.
 USAGE
 }
@@ -47,7 +47,7 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   EXTRA_ARGS+=("--dry-run")
 fi
 
-EXTRA_CONFIG="${EXTRA_CONFIG:-${EXP_ROOT}/configs/extra_config/speckv_per_head_pruning.yaml}"
+EXTRA_CONFIG="${EXTRA_CONFIG:-${EXP_ROOT}/configs/extra_config/triattention_per_head_pruning.yaml}"
 
 BUDGET_ARGS=()
 if [[ -n "${BUDGET}" ]]; then
@@ -116,10 +116,10 @@ launch_job() {
   local dataset="$1"
   local model="$2"
   (
-    python "${RKV_ROOT}/weian_development/speckv_experiments_cli_v2.py" "${EXTRA_ARGS[@]}" run-one \
+    python "${RKV_ROOT}/scripts/cli.py" "${EXTRA_ARGS[@]}" run-one \
       --dataset "$dataset" \
       --model "$model" \
-      --method speckv \
+      --method triattention \
       --extra-config "${EXTRA_CONFIG}" \
       "${BUDGET_ARGS[@]}"
   ) &

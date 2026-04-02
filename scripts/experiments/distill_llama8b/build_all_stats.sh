@@ -26,5 +26,5 @@ for dataset in "${DATASETS[@]}"; do
   SUBCOMMAND_ARGS+=("--dataset" "${dataset}")
 done
 
-python "${RKV_ROOT}/weian_development/speckv_experiments_cli_v2.py" "${GLOBAL_ARGS[@]}" \
+python "${RKV_ROOT}/scripts/cli.py" "${GLOBAL_ARGS[@]}" \
   build-stats "${SUBCOMMAND_ARGS[@]}"

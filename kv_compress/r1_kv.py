@@ -28,7 +28,7 @@ class R1KV:
         self.retain_direction = retain_direction
         self.use_fp32_topk = fp32_topk
         # Prefill protection: when True, prefill tokens are always preserved during compression
-        # (like SpecKV's default behavior); when False, all tokens compete for budget (original R-KV behavior)
+        # (like TriAttention's default behavior); when False, all tokens compete for budget (original R-KV behavior)
         self.protect_prefill = protect_prefill
         self.prefill_length = 0  # Set by attach_prefill_length() before first decode
 
@@ -214,7 +214,7 @@ class R1KV:
         R-KV compression with prefill protection: prefill tokens are always preserved,
         only decode tokens compete for the remaining budget.
 
-        This provides an ablation to compare with SpecKV's default prefill protection behavior.
+        This provides an ablation to compare with TriAttention's default prefill protection behavior.
         """
         head_dim = query_states.shape[-1]
         kv_cache_len = key_states.shape[-2]
@@ -251,7 +251,7 @@ class R1KV:
         v_window = value_states[:, :, -self.window_size:, :]
 
         # Compute attention scores on decode tokens only (excluding prefill)
-        # This ensures decode tokens compete fairly among themselves, matching SpecKV behavior
+        # This ensures decode tokens compete fairly among themselves, matching TriAttention behavior
         attn_weights = compute_attention_scores(query_states, k_decode)
 
         # Softmax over decode positions only, then take mean over query window

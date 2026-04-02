@@ -1,4 +1,4 @@
-"""Shard-aware AIME runner for R-KV HuggingFace backend (non-intrusive copy of run_math)."""
+"""Shard-aware inference worker for HuggingFace backend."""
 from __future__ import annotations
 
 import argparse
@@ -247,7 +247,7 @@ def parse_arguments() -> argparse.Namespace:
         "--method",
         type=str,
         default=None,
-        choices=["rkv", "fullkv", "snapkv", "streamingllm", "h2o", "speckv"],
+        choices=["r1kv", "fullkv", "snapkv", "streamingllm", "h2o", "triattention"],
     )
     parser.add_argument("--kv_budget", "--kv-budget", dest="kv_budget", type=int, default=None)
     parser.add_argument("--window_size", "--window-size", dest="window_size", type=int, default=8)
@@ -307,19 +307,19 @@ def parse_arguments() -> argparse.Namespace:
              "Set <=0 to disable top-k (aligns with vLLM top_k=-1).",
     )
     parser.add_argument(
-        "--sparse_stats_path",
+        "--triattention_stats_file",
         type=str,
         default=None,
-        help="Stats file for SpeckV sparse round pruning (required when method=speckv).",
+        help="Stats file for TriAttention frequency-based pruning (required when method=triattention).",
     )
     parser.add_argument(
-        "--sparse_round_window",
+        "--round_window",
         type=int,
         default=None,
         help="Round window for sparse pruning (defaults to window_size when unset).",
     )
     parser.add_argument(
-        "--sparse_offset_max_length",
+        "--triattention_frequency_window",
         type=int,
         default=65536,
         help="Maximum offset length for sparse pruning frequency scoring.",
@@ -343,14 +343,14 @@ def parse_arguments() -> argparse.Namespace:
         help="Simulate bug 896cbca6 attention position offset: add offset to RoPE position_ids (0=disabled, typical Δ≈156).",
     )
     parser.add_argument(
-        "--sparse_score_aggregation",
+        "--triattention_score_aggregation",
         type=str,
         default="mean",
         choices=["mean", "max"],
         help="Aggregation strategy for sparse round pruning scores.",
     )
     parser.add_argument(
-        "--sparse_normalize_scores",
+        "--triattention_normalize_scores",
         type=str2bool,
         default=False,
         help="Normalize per-head sparse scores before aggregation.",
@@ -365,7 +365,7 @@ def parse_arguments() -> argparse.Namespace:
         "--sparse_use_similarity",
         type=str2bool,
         default=False,
-        help="Enable Similarity Deduplication in SpecKV (combines frequency with R-KV similarity).",
+        help="Enable Similarity Deduplication (combines frequency with similarity scoring).",
     )
     parser.add_argument(
         "--sparse_similarity_mix_lambda",
@@ -380,13 +380,13 @@ def parse_arguments() -> argparse.Namespace:
         help="Enable rank+similarity combination with normalized inverted rank direction.",
     )
     parser.add_argument(
-        "--sparse_seed",
+        "--pruning_seed",
         type=int,
         default=0,
         help="Seed used by sparse pruner for noise / head shuffling.",
     )
     parser.add_argument(
-        "--sparse_head_limit",
+        "--head_limit",
         type=int,
         default=None,
         help="Optional head limit for sparse stats (None keeps all sampled heads).",
@@ -443,28 +443,28 @@ def parse_arguments() -> argparse.Namespace:
     )
     # Alignment args for fair R-KV comparison
     parser.add_argument(
-        "--include_prefill_in_budget",
-        "--include-prefill-in-budget",
-        dest="include_prefill_in_budget",
+        "--count_prompt_tokens",
+        "--count-prompt-tokens",
+        dest="count_prompt_tokens",
         type=str2bool,
         default=False,
         help="Include prefill tokens in budget calculation (aligns with R-KV behavior).",
     )
     parser.add_argument(
-        "--rkv_style_compression",
-        "--rkv-style-compression",
-        dest="rkv_style_compression",
+        "--attention_layer_compression",
+        "--attention-layer-compression",
+        dest="attention_layer_compression",
         type=str2bool,
         default=False,
-        help="Use R-KV style attention-layer compression instead of generate wrapper.",
+        help="Use attention-layer compression instead of generate wrapper.",
     )
     parser.add_argument(
-        "--rkv_style_slack_trigger",
-        "--rkv-style-slack-trigger",
-        dest="rkv_style_slack_trigger",
+        "--slack_budget_trigger",
+        "--slack-budget-trigger",
+        dest="slack_budget_trigger",
         type=str2bool,
         default=False,
-        help="For R-KV style compression, trigger pruning at budget + divide_length (like generate wrapper).",
+        help="Trigger pruning at budget + divide_length (like generate wrapper).",
     )
     parser.add_argument(
         "--rkv_aligned_budget",
@@ -480,21 +480,21 @@ def parse_arguments() -> argparse.Namespace:
         dest="allow_prefill_compression",
         type=str2bool,
         default=False,
-        help="Allow prefill tokens to be compressed (R-KV style). When False, prefill is always preserved.",
+        help="Allow prefill tokens to be compressed. When False, prefill is always preserved.",
     )
     parser.add_argument(
         "--disable_mlr",
         type=str2bool,
         default=False,
-        help="Disable MLR term in SpeckV extra computation (use q_abs_mean directly).",
+        help="Disable MLR term in TriAttention extra computation (use q_abs_mean directly).",
     )
     parser.add_argument(
         "--disable_trig",
         type=str2bool,
         default=False,
-        help="Disable position-dependent term in SpeckV scoring (use additive term only).",
+        help="Disable position-dependent term in TriAttention scoring (use additive term only).",
     )
-    # Note: --divide_length is already defined above (line 238) for R-KV, reused for SpeckV alignment
+    # Note: --divide_length is already defined above (line 238) for R-KV, reused for TriAttention alignment
     return parser.parse_args()
 
 
@@ -520,13 +520,13 @@ def main(args: argparse.Namespace) -> None:
     output_root = Path(args.output_dir)
 
     method_lower = args.method.lower() if args.method else ""
-    if method_lower == "speckv":
+    if method_lower == "triattention":
         if args.kv_budget is None:
-            raise ValueError("kv_budget must be provided for speckv.")
+            raise ValueError("kv_budget must be provided for triattention.")
         if bool(args.use_chat_template):
             import warnings
             warnings.warn(
-                "SpeckV paper/baseline uses plain prompt (no chat template). "
+                "TriAttention paper/baseline uses plain prompt (no chat template). "
                 "Enabling chat template may affect reproducibility with published results.",
                 UserWarning
             )
@@ -558,21 +558,21 @@ def main(args: argparse.Namespace) -> None:
     local_sample_indices = {item["index"] for item in local_data}
 
     method_name = method_lower if method_lower else None
-    speckv_method_config: Dict[str, object] = {}
-    if method_lower == "speckv":
+    triattention_method_config: Dict[str, object] = {}
+    if method_lower == "triattention":
         if args.kv_budget is None:
-            raise ValueError("kv_budget must be provided for speckv.")
-        speckv_method_config = {
+            raise ValueError("kv_budget must be provided for triattention.")
+        triattention_method_config = {
             "kv_budget": args.kv_budget,
             "window_size": args.window_size,
-            "sparse_stats_path": args.sparse_stats_path,
-            "sparse_round_window": args.sparse_round_window or args.window_size,
-            "sparse_offset_max_length": args.sparse_offset_max_length,
+            "triattention_stats_file": args.triattention_stats_file,
+            "round_window": args.round_window or args.window_size,
+            "triattention_frequency_window": args.triattention_frequency_window,
             "disable_top_n_high_freq": args.disable_top_n_high_freq,
-            "sparse_score_aggregation": args.sparse_score_aggregation,
-            "sparse_head_limit": args.sparse_head_limit,
-            "sparse_seed": args.sparse_seed,
-            "sparse_normalize_scores": args.sparse_normalize_scores,
+            "triattention_score_aggregation": args.triattention_score_aggregation,
+            "head_limit": args.head_limit,
+            "pruning_seed": args.pruning_seed,
+            "triattention_normalize_scores": args.triattention_normalize_scores,
             "use_rank_aggregation": args.use_rank_aggregation,
             "sparse_use_similarity": args.sparse_use_similarity,
             "sparse_similarity_mix_lambda": args.sparse_similarity_mix_lambda,
@@ -580,7 +580,7 @@ def main(args: argparse.Namespace) -> None:
         }
 
     method_config = {"budget": args.kv_budget, "window_size": args.window_size}
-    if method_name in {"rkv", "snapkv"}:
+    if method_name in {"r1kv", "snapkv"}:
         method_config.update(
             {
                 "mix_lambda": args.mix_lambda,
@@ -593,8 +593,8 @@ def main(args: argparse.Namespace) -> None:
         )
     elif method_name == "streamingllm":
         method_config.update({"first_tokens": args.first_tokens})
-    if method_lower == "speckv":
-        method_config = speckv_method_config
+    if method_lower == "triattention":
+        method_config = triattention_method_config
 
     compression_config = {
         "method": method_name,
@@ -608,7 +608,7 @@ def main(args: argparse.Namespace) -> None:
         "compression_content": args.compression_content,
     }
 
-    if method_name and method_name not in {"fullkv", "speckv"}:
+    if method_name and method_name not in {"fullkv", "triattention"}:
         if "llama" in args.model_path.lower():
             replace_llama(compression_config)
         elif "qwen3" in args.model_path.lower():
@@ -651,7 +651,7 @@ def main(args: argparse.Namespace) -> None:
 
     # position offset patch removed (debug-only feature not included in release)
 
-    if method_name and method_name not in {"fullkv", "speckv"}:
+    if method_name and method_name not in {"fullkv", "triattention"}:
         model.newline_token_ids = [
             tokenizer.encode("\n")[-1],
             tokenizer.encode(".\n")[-1],
@@ -663,13 +663,13 @@ def main(args: argparse.Namespace) -> None:
         model.after_think_token_ids = [
             tokenizer.encode("</think>")[-1],
         ]
-    elif method_lower == "speckv":
-        if args.sparse_stats_path is None:
-            raise ValueError("sparse_stats_path must be provided for speckv.")
-        stats_path = resolve_under_rkv(args.sparse_stats_path)
+    elif method_lower == "triattention":
+        if args.triattention_stats_file is None:
+            raise ValueError("triattention_stats_file must be provided for triattention.")
+        stats_path = resolve_under_rkv(args.triattention_stats_file)
         if not stats_path.exists():
-            raise FileNotFoundError(f"SpeckV stats file not found: {stats_path}")
-        round_window = args.sparse_round_window if args.sparse_round_window and args.sparse_round_window > 0 else args.window_size
+            raise FileNotFoundError(f"TriAttention stats file not found: {stats_path}")
+        round_window = args.round_window if args.round_window and args.round_window > 0 else args.window_size
         metadata_expectations = {
             "prompt_template": PROMPT_TEMPLATE,
             "use_chat_template": prompt_use_chat,
@@ -678,25 +678,25 @@ def main(args: argparse.Namespace) -> None:
             "dtype": normalize_dtype_name(dtype),
             "kv_budget": int(args.kv_budget),
         }
-        if args.rkv_style_compression:
-            # Use R-KV style attention-layer compression
-            from triattention.triattention import apply_speckv_rkv_style_patch
-            apply_speckv_rkv_style_patch(
+        if args.attention_layer_compression:
+            # Use attention-layer compression
+            from triattention.triattention import apply_triattention_patch
+            apply_triattention_patch(
                 model,
                 stats_path=stats_path,
                 model_path=Path(args.model_path),
                 kv_budget=int(args.kv_budget),
-                offset_max_length=args.sparse_offset_max_length,
-                score_aggregation=args.sparse_score_aggregation,
-                sparse_seed=args.sparse_seed,
-                head_limit=args.sparse_head_limit,
+                offset_max_length=args.triattention_frequency_window,
+                score_aggregation=args.triattention_score_aggregation,
+                pruning_seed=args.pruning_seed,
+                head_limit=args.head_limit,
                 metadata_expectations=metadata_expectations,
-                normalize_scores=args.sparse_normalize_scores,
+                normalize_scores=args.triattention_normalize_scores,
                 use_rank_aggregation=args.use_rank_aggregation,
-                include_prefill_in_budget=args.include_prefill_in_budget,
+                count_prompt_tokens=args.count_prompt_tokens,
                 allow_prefill_compression=args.allow_prefill_compression,
                 divide_length=args.divide_length,
-                use_slack_trigger=args.rkv_style_slack_trigger,
+                use_slack_trigger=args.slack_budget_trigger,
                 per_head_pruning=args.per_head_pruning,
                 per_layer_perhead_pruning=args.per_layer_perhead_pruning,
                 layer_perhead_aggregation=args.layer_perhead_aggregation,
@@ -708,23 +708,23 @@ def main(args: argparse.Namespace) -> None:
             )
         else:
             # Use original generate wrapper implementation
-            apply_speckv_generate_patch(
+            apply_triattention_generate_patch(
                 model,
                 stats_path=stats_path,
                 model_path=Path(args.model_path),
                 kv_budget=int(args.kv_budget),
                 round_window=round_window,
-                offset_max_length=args.sparse_offset_max_length,
-                score_aggregation=args.sparse_score_aggregation,
-                sparse_seed=args.sparse_seed,
-                head_limit=args.sparse_head_limit,
+                offset_max_length=args.triattention_frequency_window,
+                score_aggregation=args.triattention_score_aggregation,
+                pruning_seed=args.pruning_seed,
+                head_limit=args.head_limit,
                 metadata_expectations=metadata_expectations,
-                normalize_scores=args.sparse_normalize_scores,
+                normalize_scores=args.triattention_normalize_scores,
                 use_rank_aggregation=args.use_rank_aggregation,
                 sparse_use_similarity=args.sparse_use_similarity,
                 sparse_similarity_mix_lambda=args.sparse_similarity_mix_lambda,
                 use_rank_similarity_combination=args.use_rank_similarity_combination,
-                include_prefill_in_budget=args.include_prefill_in_budget,
+                count_prompt_tokens=args.count_prompt_tokens,
                 per_head_pruning=args.per_head_pruning,
                 rkv_aligned_budget=args.rkv_aligned_budget,
                 divide_length=args.divide_length,

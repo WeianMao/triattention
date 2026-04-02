@@ -42,7 +42,7 @@ launch_job() {
   local dataset="$1"
   local model="$2"
   (
-    python "${RKV_ROOT}/weian_development/speckv_experiments_cli_v2.py" "${EXTRA_ARGS[@]}" run-one \
+    python "${RKV_ROOT}/scripts/cli.py" "${EXTRA_ARGS[@]}" run-one \
       --dataset "$dataset" \
       --model "$model" \
       --method fullkv

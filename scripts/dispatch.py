@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sharded launcher for R-KV HuggingFace AIME runs (non-intrusive copy of LazyEviction dispatcher)."""
+"""Sharded launcher for multi-GPU inference dispatch."""
 from __future__ import annotations
 
 import argparse
@@ -19,7 +19,7 @@ import yaml
 
 from scripts.process_utils import mask_process_command
 
-DEFAULT_CONFIG = RKV_ROOT / "configs" / "rkv_aime24_sharded.yaml"
+DEFAULT_CONFIG = RKV_ROOT / "configs" / "dispatch_default.yaml"
 MERGE_SCRIPT = RKV_ROOT / "scripts" / "merge_shards.py"
 MULTI_EVAL_SCRIPT = RKV_ROOT / "evaluation" / "eval_math_multi.py"
 PATH_ARG_KEYS = {"output_dir", "dataset_path", "model_path", "tokenizer_path"}
@@ -63,18 +63,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", type=str, default="aime24", help="Dataset name for eval script")
     parser.add_argument("--dry-run", action="store_true", help="Print what would run without launching processes")
     parser.add_argument(
-        "--sparse-normalize-scores",
-        dest="sparse_normalize_scores",
+        "--triattention-normalize-scores",
+        dest="triattention_normalize_scores",
         action="store_true",
-        help="Override runner arg: enable sparse score normalization for SpeckV.",
+        help="Override runner arg: enable sparse score normalization for TriAttention.",
     )
     parser.add_argument(
-        "--no-sparse-normalize-scores",
-        dest="sparse_normalize_scores",
+        "--no-triattention-normalize-scores",
+        dest="triattention_normalize_scores",
         action="store_false",
-        help="Override runner arg: disable sparse score normalization for SpeckV.",
+        help="Override runner arg: disable sparse score normalization for TriAttention.",
     )
-    parser.set_defaults(sparse_normalize_scores=None)
+    parser.set_defaults(triattention_normalize_scores=None)
     parser.add_argument(
         "--use-rank-aggregation",
         dest="use_rank_aggregation",
@@ -92,13 +92,13 @@ def parse_args() -> argparse.Namespace:
         "--sparse-use-similarity",
         dest="sparse_use_similarity",
         action="store_true",
-        help="Override runner arg: enable Similarity Deduplication in SpecKV.",
+        help="Override runner arg: enable Similarity Deduplication in TriAttention.",
     )
     parser.add_argument(
         "--no-sparse-use-similarity",
         dest="sparse_use_similarity",
         action="store_false",
-        help="Override runner arg: disable Similarity Deduplication in SpecKV.",
+        help="Override runner arg: disable Similarity Deduplication in TriAttention.",
     )
     parser.set_defaults(sparse_use_similarity=None)
     parser.add_argument(
@@ -121,44 +121,44 @@ def parse_args() -> argparse.Namespace:
     )
     parser.set_defaults(use_rank_similarity_combination=None)
     parser.add_argument(
-        "--include-prefill-in-budget",
-        dest="include_prefill_in_budget",
+        "--count-prompt-tokens",
+        dest="count_prompt_tokens",
         action="store_true",
         help="Override runner arg: include prefill tokens in budget calculation (aligns with R-KV behavior).",
     )
     parser.add_argument(
-        "--no-include-prefill-in-budget",
-        dest="include_prefill_in_budget",
+        "--no-count-prompt-tokens",
+        dest="count_prompt_tokens",
         action="store_false",
         help="Override runner arg: exclude prefill tokens from budget calculation.",
     )
-    parser.set_defaults(include_prefill_in_budget=None)
+    parser.set_defaults(count_prompt_tokens=None)
     parser.add_argument(
-        "--rkv-style-compression",
-        dest="rkv_style_compression",
+        "--attention-layer-compression",
+        dest="attention_layer_compression",
         action="store_true",
-        help="Override runner arg: use R-KV style compression instead of SpeckV default.",
+        help="Override runner arg: use attention-layer compression.",
     )
     parser.add_argument(
-        "--no-rkv-style-compression",
-        dest="rkv_style_compression",
+        "--no-attention-layer-compression",
+        dest="attention_layer_compression",
         action="store_false",
-        help="Override runner arg: disable R-KV style compression.",
+        help="Override runner arg: disable attention-layer compression.",
     )
-    parser.set_defaults(rkv_style_compression=None)
+    parser.set_defaults(attention_layer_compression=None)
     parser.add_argument(
-        "--rkv-style-slack-trigger",
-        dest="rkv_style_slack_trigger",
+        "--slack-budget-trigger",
+        dest="slack_budget_trigger",
         action="store_true",
-        help="Override runner arg: for R-KV style, trigger at budget + divide_length before pruning.",
+        help="Override runner arg: trigger at budget + divide_length before pruning.",
     )
     parser.add_argument(
-        "--no-rkv-style-slack-trigger",
-        dest="rkv_style_slack_trigger",
+        "--no-slack-budget-trigger",
+        dest="slack_budget_trigger",
         action="store_false",
-        help="Override runner arg: for R-KV style, trigger at budget only (default).",
+        help="Override runner arg: trigger at budget only (default).",
     )
-    parser.set_defaults(rkv_style_slack_trigger=None)
+    parser.set_defaults(slack_budget_trigger=None)
     parser.add_argument(
         "--rkv-aligned-budget",
         dest="rkv_aligned_budget",
@@ -177,11 +177,11 @@ def parse_args() -> argparse.Namespace:
         dest="divide_length",
         type=int,
         default=None,
-        help="Override runner arg: compress every N decode steps (like R-KV's divide_length).",
+        help="Override runner arg: compress every N decode steps.",
     )
     parser.add_argument(
-        "--sparse-offset-max-length",
-        dest="sparse_offset_max_length",
+        "--triattention-frequency-window",
+        dest="triattention_frequency_window",
         type=int,
         default=None,
         help="Override runner arg: maximum offset length for sparse pruning frequency scoring.",
@@ -219,13 +219,13 @@ def parse_args() -> argparse.Namespace:
         "--allow-prefill-compression",
         dest="allow_prefill_compression",
         action="store_true",
-        help="Override runner arg: allow prefill tokens to be compressed (R-KV style).",
+        help="Override runner arg: allow prefill tokens to be compressed.",
     )
     parser.add_argument(
         "--no-allow-prefill-compression",
         dest="allow_prefill_compression",
         action="store_false",
-        help="Override runner arg: always preserve prefill tokens (default SpeckV behavior).",
+        help="Override runner arg: always preserve prefill tokens (default TriAttention behavior).",
     )
     parser.set_defaults(allow_prefill_compression=None)
     parser.add_argument(
@@ -301,26 +301,26 @@ def parse_args() -> argparse.Namespace:
         "--disable-mlr",
         dest="disable_mlr",
         action="store_true",
-        help="Override runner arg: disable MLR term in SpeckV extra computation.",
+        help="Override runner arg: disable MLR term in TriAttention extra computation.",
     )
     parser.add_argument(
         "--no-disable-mlr",
         dest="disable_mlr",
         action="store_false",
-        help="Override runner arg: enable MLR term in SpeckV extra computation (default).",
+        help="Override runner arg: enable MLR term in TriAttention extra computation (default).",
     )
     parser.set_defaults(disable_mlr=None)
     parser.add_argument(
         "--disable-trig",
         dest="disable_trig",
         action="store_true",
-        help="Override runner arg: disable position-dependent term in SpeckV scoring.",
+        help="Override runner arg: disable position-dependent term in TriAttention scoring.",
     )
     parser.add_argument(
         "--no-disable-trig",
         dest="disable_trig",
         action="store_false",
-        help="Override runner arg: enable position-dependent term in SpeckV scoring (default).",
+        help="Override runner arg: enable position-dependent term in TriAttention scoring (default).",
     )
     parser.set_defaults(disable_trig=None)
     return parser.parse_args()
@@ -500,7 +500,7 @@ def launch_shard(
     log_stamp: str,
 ) -> ActiveShard:
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"rkv_aime24_shard{shard_id:02d}_{log_stamp}.log"
+    log_path = log_dir / f"shard{shard_id:02d}_{log_stamp}.log"
     shard_cmd = base_cmd + ["--shard_id", str(shard_id)]
     env = base_env.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(gpu)
@@ -581,7 +581,7 @@ def run_shards(
             start_record, local_records = compute_local_records(total_records, total_shards, shard_id)
             record_end = start_record + local_records - 1
             gpu = gpus[shard_id % len(gpus)]
-            log_path = (log_dir / f"rkv_aime24_shard{shard_id:02d}_{log_stamp}.log").resolve()
+            log_path = (log_dir / f"shard{shard_id:02d}_{log_stamp}.log").resolve()
             cmd_preview = base_cmd + ["--shard_id", str(shard_id)]
             runs_preview = pending_runs.get(shard_id)
             run_span = f"runs={num_samples}"
@@ -672,12 +672,11 @@ def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Opti
 
 
 def main() -> None:
-    mask_process_command("PD-L1_binder")
     args = parse_args()
     config = load_config(args.config)
     experiment = config.get("experiment", {})
 
-    conda_env = experiment.get("conda_env", "rkv")
+    conda_env = experiment.get("conda_env", "triattention")
     runner_path = resolve_path(experiment["runner_path"])
     total_shards = args.num_shards or experiment.get("num_shards", 1)
     gpus = determine_gpus(args, experiment)
@@ -690,8 +689,8 @@ def main() -> None:
     runner_args = experiment.get("runner_args", {}).copy()
     if args.output_dir:
         runner_args["output_dir"] = args.output_dir
-    if args.sparse_normalize_scores is not None:
-        runner_args["sparse_normalize_scores"] = args.sparse_normalize_scores
+    if args.triattention_normalize_scores is not None:
+        runner_args["triattention_normalize_scores"] = args.triattention_normalize_scores
     if args.use_rank_aggregation is not None:
         runner_args["use_rank_aggregation"] = args.use_rank_aggregation
     if args.sparse_use_similarity is not None:
@@ -700,18 +699,18 @@ def main() -> None:
         runner_args["sparse_similarity_mix_lambda"] = args.sparse_similarity_mix_lambda
     if args.use_rank_similarity_combination is not None:
         runner_args["use_rank_similarity_combination"] = args.use_rank_similarity_combination
-    if args.include_prefill_in_budget is not None:
-        runner_args["include_prefill_in_budget"] = args.include_prefill_in_budget
-    if args.rkv_style_compression is not None:
-        runner_args["rkv_style_compression"] = args.rkv_style_compression
-    if args.rkv_style_slack_trigger is not None:
-        runner_args["rkv_style_slack_trigger"] = args.rkv_style_slack_trigger
+    if args.count_prompt_tokens is not None:
+        runner_args["count_prompt_tokens"] = args.count_prompt_tokens
+    if args.attention_layer_compression is not None:
+        runner_args["attention_layer_compression"] = args.attention_layer_compression
+    if args.slack_budget_trigger is not None:
+        runner_args["slack_budget_trigger"] = args.slack_budget_trigger
     if args.rkv_aligned_budget is not None:
         runner_args["rkv_aligned_budget"] = args.rkv_aligned_budget
     if args.divide_length is not None:
         runner_args["divide_length"] = args.divide_length
-    if args.sparse_offset_max_length is not None:
-        runner_args["sparse_offset_max_length"] = args.sparse_offset_max_length
+    if args.triattention_frequency_window is not None:
+        runner_args["triattention_frequency_window"] = args.triattention_frequency_window
     if args.disable_top_n_high_freq is not None:
         runner_args["disable_top_n_high_freq"] = args.disable_top_n_high_freq
     if args.disable_mlr is not None:
@@ -739,7 +738,6 @@ def main() -> None:
     if args.protect_prefill is not None:
         runner_args["protect_prefill"] = args.protect_prefill
     base_env = prepare_environment(experiment.get("env", {}))
-    base_env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
 
     runner_args["output_dir"] = resolve_path(args.output_dir or runner_args.get("output_dir", method_output_dir / "shards"))
     runner_args["dataset_path"] = resolve_path(runner_args["dataset_path"])

@@ -16,7 +16,7 @@ usage() {
 Usage: bash scripts/qwen3/run_eval_only.sh --base-dir PATH --dataset NAME [--output-dir PATH] [--num-samples N] [--dry-run]
 
 Examples:
-  bash scripts/qwen3/run_eval_only.sh --base-dir R-KV/speckv_experiments/outputs/aime25/Qwen3-8B/sample64/rkv/budget_256/merged --dataset aime25
+  bash scripts/qwen3/run_eval_only.sh --base-dir R-KV/experiments/outputs/aime25/Qwen3-8B/sample64/rkv/budget_256/merged --dataset aime25
   bash scripts/qwen3/run_eval_only.sh --base-dir /abs/path/to/merged --dataset math500 --num-samples 1
 USAGE
 }
@@ -74,4 +74,4 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   ARGS+=(--dry-run)
 fi
 
-python "${RKV_ROOT}/weian_development/run_eval_only.py" "${ARGS[@]}"
+python "${RKV_ROOT}/scripts/run_eval_only.py" "${ARGS[@]}"

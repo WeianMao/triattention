@@ -9,9 +9,9 @@ export PYTHONPATH="${RKV_ROOT}:${PYTHONPATH:-}"
 
 usage() {
   cat <<USAGE
-Usage: bash scripts/distill_llama8b/run_speckv_per_layer_head.sh [--budget N]
+Usage: bash scripts/distill_llama8b/run_triattention_per_layer_head.sh [--budget N]
 
-Runs per-layer+per-head SpeckV pruning for DeepSeek-R1-Distill-Llama-8B on aime24/aime25/math500.
+Runs per-layer+per-head TriAttention pruning for DeepSeek-R1-Distill-Llama-8B on aime24/aime25/math500.
 Passing --budget forces the supplied KV budget instead of the default from
 configs/shared/defaults.yaml.
 USAGE
@@ -47,7 +47,7 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   EXTRA_ARGS+=("--dry-run")
 fi
 
-EXTRA_CONFIG="${EXTRA_CONFIG:-${EXP_ROOT}/configs/extra_config/speckv_per_layer_perhead_pruning.yaml}"
+EXTRA_CONFIG="${EXTRA_CONFIG:-${EXP_ROOT}/configs/extra_config/triattention_per_layer_perhead_pruning.yaml}"
 
 BUDGET_ARGS=()
 if [[ -n "${BUDGET}" ]]; then
@@ -116,10 +116,10 @@ launch_job() {
   local dataset="$1"
   local model="$2"
   (
-    python "${RKV_ROOT}/weian_development/speckv_experiments_cli_v2.py" "${EXTRA_ARGS[@]}" run-one \
+    python "${RKV_ROOT}/scripts/cli.py" "${EXTRA_ARGS[@]}" run-one \
       --dataset "$dataset" \
       --model "$model" \
-      --method speckv \
+      --method triattention \
       --extra-config "${EXTRA_CONFIG}" \
       "${BUDGET_ARGS[@]}"
   ) &

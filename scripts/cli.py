@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI helpers for the R-KV SpeckV experiments wrapper (defaults-driven)."""
+"""CLI helpers for the TriAttention experiments wrapper (defaults-driven)."""
 from __future__ import annotations
 
 import argparse
@@ -14,11 +14,11 @@ from typing import Dict, List, Tuple
 try:
     import yaml
 except ImportError as exc:
-    raise SystemExit("PyYAML is required to run speckv_experiments scripts.") from exc
+    raise SystemExit("PyYAML is required to run experiment scripts.") from exc
 
 RKV_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = RKV_ROOT.parent
-EXP_ROOT = RKV_ROOT / "speckv_experiments"
+EXP_ROOT = RKV_ROOT / "experiments"
 CONFIG_ROOT = EXP_ROOT / "configs" / "shared"
 DEFAULTS_PATH = CONFIG_ROOT / "defaults.yaml"
 BUDGETS_PATH = CONFIG_ROOT / "budgets.yaml"
@@ -36,7 +36,7 @@ MODEL_SPECS: Dict[str, str] = {
 }
 
 DATASETS = ["aime24", "aime25", "math500"]
-MODES = ["fullkv", "rkv", "snapkv", "speckv"]
+MODES = ["fullkv", "r1kv", "snapkv", "triattention"]
 
 
 def load_yaml(path: Path) -> dict:
@@ -146,7 +146,7 @@ def stats_path_for(
     stats_dataset = "aime25" if dataset == "aime24" else "aime24"
     if announce:
         sys.stderr.write(
-            f"[info] speckv stats dataset: eval={dataset} stats={stats_dataset}\n"
+            f"[info] triattention stats dataset: eval={dataset} stats={stats_dataset}\n"
         )
     return STATS_DIR / stats_dataset / model_name / f"stats_budget_{budget}.pt"
 
@@ -206,7 +206,7 @@ def resolve_stats_override(
     runner_args = extra_config.get("runner_args", {})
     if not isinstance(runner_args, dict):
         return None
-    value = runner_args.get("sparse_stats_path")
+    value = runner_args.get("triattention_stats_file")
     if not value:
         return None
     return resolve_stats_path(str(value))
@@ -263,7 +263,7 @@ def build_config(
     experiment = apply_defaults(
         exp_defaults,
         {
-            "name": f"speckv_{dataset}_{model_name}_{mode}_{tag}",
+            "name": f"{dataset}_{model_name}_{mode}_{tag}",
             "log_dir": str(log_dir),
             "method_output_dir": str(output_dir),
         },
@@ -292,23 +292,23 @@ def build_config(
 
     if mode == "fullkv":
         runner_args["kv_budget"] = None
-    if mode == "speckv":
-        if stats_path is None and "sparse_stats_path" not in runner_args:
-            raise ValueError("stats_path is required for speckv mode")
-        runner_args.setdefault("sparse_stats_path", str(stats_path) if stats_path else None)
+    if mode == "triattention":
+        if stats_path is None and "triattention_stats_file" not in runner_args:
+            raise ValueError("stats_path is required for triattention mode")
+        runner_args.setdefault("triattention_stats_file", str(stats_path) if stats_path else None)
         if "per_head_pruning" not in runner_args and "per_layer_perhead_pruning" not in runner_args:
             runner_args["per_head_pruning"] = True
-        runner_args.setdefault("include_prefill_in_budget", True)
-        runner_args.setdefault("rkv_style_compression", True)
-        runner_args.setdefault("rkv_style_slack_trigger", True)
-        runner_args.setdefault("sparse_normalize_scores", True)
+        runner_args.setdefault("count_prompt_tokens", True)
+        runner_args.setdefault("attention_layer_compression", True)
+        runner_args.setdefault("slack_budget_trigger", True)
+        runner_args.setdefault("triattention_normalize_scores", True)
         runner_args.setdefault("divide_length", 128)
         runner_args.setdefault("window_size", 128)
-        runner_args.setdefault("sparse_round_window", 32)
-        runner_args.setdefault("sparse_offset_max_length", 65536)
-        runner_args.setdefault("sparse_score_aggregation", "mean")
-        runner_args.setdefault("sparse_head_limit", -1)
-        runner_args.setdefault("sparse_seed", 0)
+        runner_args.setdefault("round_window", 32)
+        runner_args.setdefault("triattention_frequency_window", 65536)
+        runner_args.setdefault("triattention_score_aggregation", "mean")
+        runner_args.setdefault("head_limit", -1)
+        runner_args.setdefault("pruning_seed", 0)
 
     return {"experiment": {**experiment, "runner_args": runner_args}}
 
@@ -339,7 +339,7 @@ def dispatch_run(config_path: Path, dataset: str, log_dir: Path, dry_run: bool) 
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{RKV_ROOT}:{pythonpath}" if pythonpath else str(RKV_ROOT)
-    env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
+
 
     cmd = [
         sys.executable,
@@ -390,15 +390,15 @@ def run_one(
     resolved_run_tag = resolve_run_tag(extra_config, run_tag)
 
     stats_path = None
-    if mode == "speckv":
+    if mode == "triattention":
         if budget is None:
-            raise ValueError("budget is required for speckv runs")
+            raise ValueError("budget is required for triattention runs")
         stats_override = resolve_stats_override(extra_config, stats_path_arg)
         if stats_override is None:
             stats_path = stats_path_for(dataset, model_name, budget)
         else:
             stats_path = stats_override
-            sys.stderr.write(f"[info] speckv stats override: {stats_path}\n")
+            sys.stderr.write(f"[info] triattention stats override: {stats_path}\n")
         if require_stats and stats_path and not stats_path.exists():
             if dry_run:
                 print(
@@ -407,7 +407,7 @@ def run_one(
                 )
             else:
                 raise FileNotFoundError(
-                    f"SpeckV stats missing for {dataset}/{model_name}/budget {budget}. "
+                    f"TriAttention stats missing for {dataset}/{model_name}/budget {budget}. "
                     f"Run scripts/build_all_stats_v2.sh first."
                 )
 
@@ -454,7 +454,7 @@ def run_defaults(dry_run: bool) -> None:
             run_one(
                 dataset,
                 model_name,
-                "rkv",
+                "r1kv",
                 default_budget,
                 require_stats=False,
                 stats_path_arg=None,
@@ -466,7 +466,7 @@ def run_defaults(dry_run: bool) -> None:
             run_one(
                 dataset,
                 model_name,
-                "speckv",
+                "triattention",
                 default_budget,
                 require_stats=True,
                 stats_path_arg=None,
@@ -486,7 +486,7 @@ def run_sweep(dry_run: bool) -> None:
                 run_one(
                     dataset,
                     model_name,
-                    "rkv",
+                    "r1kv",
                     budget,
                     require_stats=False,
                     stats_path_arg=None,
@@ -499,7 +499,7 @@ def run_sweep(dry_run: bool) -> None:
                 run_one(
                     dataset,
                     model_name,
-                    "speckv",
+                    "triattention",
                     budget,
                     require_stats=True,
                     stats_path_arg=None,
@@ -593,7 +593,7 @@ def build_stats(
                     str(budget),
                 ]
                 env = os.environ.copy()
-                env.setdefault("VLLM_PROCESS_NAME_PREFIX", "PD-L1_binder")
+            
                 env["PYTHONPATH"] = f"{RKV_ROOT}:{env.get('PYTHONPATH', '')}".strip(":")
                 commands.append(
                     {
@@ -691,7 +691,7 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser("run-default", help="Run all default-budget experiments.")
     subparsers.add_parser("run-sweep", help="Run all budget sweep experiments.")
     build_stats_parser = subparsers.add_parser(
-        "build-stats", help="Build SpeckV stats for all datasets/models."
+        "build-stats", help="Build TriAttention stats for all datasets/models."
     )
     build_stats_parser.add_argument(
         "--dataset",
@@ -720,7 +720,7 @@ def parse_args() -> argparse.Namespace:
     run_one_parser.add_argument(
         "--stats-path",
         default=None,
-        help="Override SpeckV stats path (supports env vars).",
+        help="Override TriAttention stats path (supports env vars).",
     )
     run_one_parser.add_argument(
         "--run-tag",
@@ -767,7 +767,7 @@ def main() -> None:
             args.model,
             args.method,
             budget,
-            require_stats=(args.method == "speckv"),
+            require_stats=(args.method == "triattention"),
             stats_path_arg=args.stats_path,
             run_tag=args.run_tag,
             defaults=defaults,

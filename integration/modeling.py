@@ -32,7 +32,7 @@ from kv_compress import (
 )
 
 KV_COMPRESSION_MAP = {
-    "rkv": R1KV,
+    "r1kv": R1KV,
     "snapkv": SnapKV,
     "streamingllm": StreamingLLM,
     "h2o": H2O,

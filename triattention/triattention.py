@@ -1,7 +1,7 @@
-"""SpeckV implementation using R-KV style attention-layer compression.
+"""TriAttention implementation using attention-layer compression.
 
-This module provides an alternative SpeckV implementation that triggers compression
-inside the attention forward pass (like R-KV) instead of in the generate() wrapper.
+This module provides a TriAttention implementation that triggers compression
+inside the attention forward pass instead of in the generate() wrapper.
 The frequency-based scoring logic is identical to SparseRoundPruner.
 """
 from __future__ import annotations
@@ -33,8 +33,8 @@ from .stats_utils import validate_stats_metadata
 
 
 @dataclass
-class SpeckVRKVStyleConfig:
-    """Configuration for R-KV style SpeckV compression."""
+class TriAttentionConfig:
+    """Configuration for TriAttention attention-layer compression."""
     stats_path: Path
     model_path: Path
     device: torch.device
@@ -47,7 +47,7 @@ class SpeckVRKVStyleConfig:
     metadata_expectations: Dict[str, object] | None = None
     normalize_scores: bool = False
     use_rank_aggregation: bool = False
-    include_prefill_in_budget: bool = False
+    count_prompt_tokens: bool = False
     allow_prefill_compression: bool = False
     divide_length: int = 128  # Compress every N steps (like R-KV's divide_length)
     use_slack_trigger: bool = False  # If True, trigger at budget + divide_length (like generate wrapper)
@@ -61,22 +61,22 @@ class SpeckVRKVStyleConfig:
     disable_trig: bool = False  # If True, drop position-dependent term (base_scores)
 
 
-class SpeckVRKVStyle:
+class TriAttention:
     """
-    SpeckV compression using R-KV style attention-layer triggering.
+    TriAttention compression using attention-layer triggering.
 
-    This class mimics R-KV's compression pattern:
+    This class implements compression in the attention layer:
     - Compression is triggered during attention forward when cache >= budget
     - After compression, cache size returns to budget
-    - Uses SpeckV's frequency-based scoring instead of R-KV's attention+similarity
+    - Uses frequency-based scoring for token importance
     """
 
-    def __init__(self, config: SpeckVRKVStyleConfig) -> None:
+    def __init__(self, config: TriAttentionConfig) -> None:
         self.config = config
         self.budget = config.budget
-        if config.allow_prefill_compression and not config.include_prefill_in_budget:
+        if config.allow_prefill_compression and not config.count_prompt_tokens:
             print(
-                "[warn] allow_prefill_compression=True with include_prefill_in_budget=False "
+                "[warn] allow_prefill_compression=True with count_prompt_tokens=False "
                 "can delay compression when prefill dominates the cache.",
                 file=sys.stderr,
             )
@@ -825,7 +825,7 @@ class SpeckVRKVStyle:
         self.cache_positions_per_layer = None
         self.absolute_position = 0
         self.prefix_length = 0
-        # Reset generator to initial seed (aligned with rkv_speckv_generate.py
+        # Reset generator to initial seed (aligned with original generate wrapper
         # which recreates the entire SparseRoundPruner for each generation)
         if self.config.seed is not None:
             if self.generator is None:
@@ -836,7 +836,7 @@ class SpeckVRKVStyle:
             self.generator.manual_seed(int(self.config.seed))
 
 
-def apply_speckv_rkv_style_patch(
+def apply_triattention_patch(
     model,
     *,
     stats_path: Path,
@@ -844,12 +844,12 @@ def apply_speckv_rkv_style_patch(
     kv_budget: int,
     offset_max_length: int = 65536,
     score_aggregation: str = "mean",
-    sparse_seed: int = 0,
+    pruning_seed: int = 0,
     head_limit: Optional[int] = None,
     metadata_expectations: Dict[str, object] | None = None,
     normalize_scores: bool = False,
     use_rank_aggregation: bool = False,
-    include_prefill_in_budget: bool = False,
+    count_prompt_tokens: bool = False,
     allow_prefill_compression: bool = False,
     divide_length: int = 128,
     use_slack_trigger: bool = False,
@@ -863,7 +863,7 @@ def apply_speckv_rkv_style_patch(
     disable_trig: bool = False,
 ) -> None:
     """
-    Apply SpeckV with R-KV style compression triggering.
+    Apply TriAttention compression patch.
 
     This patches the model to use attention-layer compression instead of
     generate() wrapper compression. The scoring logic remains frequency-based.
@@ -871,7 +871,7 @@ def apply_speckv_rkv_style_patch(
     device = next(model.parameters()).device
     dtype = torch.float32
 
-    config = SpeckVRKVStyleConfig(
+    config = TriAttentionConfig(
         stats_path=stats_path,
         model_path=model_path,
         device=device,
@@ -879,12 +879,12 @@ def apply_speckv_rkv_style_patch(
         budget=kv_budget,
         offset_max_length=offset_max_length,
         score_aggregation=score_aggregation,
-        seed=sparse_seed,
+        seed=pruning_seed,
         head_limit=head_limit,
         metadata_expectations=metadata_expectations,
         normalize_scores=normalize_scores,
         use_rank_aggregation=use_rank_aggregation,
-        include_prefill_in_budget=include_prefill_in_budget,
+        count_prompt_tokens=count_prompt_tokens,
         allow_prefill_compression=allow_prefill_compression,
         divide_length=divide_length,
         use_slack_trigger=use_slack_trigger,
@@ -898,7 +898,7 @@ def apply_speckv_rkv_style_patch(
         disable_trig=disable_trig,
     )
 
-    compressor = SpeckVRKVStyle(config)
+    compressor = TriAttention(config)
 
     # Verify rotary alignment
     model_rotary_emb = None
@@ -915,15 +915,15 @@ def apply_speckv_rkv_style_patch(
     if model_rotary_emb is not None:
         verify_rotary_alignment(compressor.rotary, model_rotary_emb)
     else:
-        print("[SpeckV-RKV] WARNING: Could not locate model rotary_emb for alignment verification.")
+        print("[TriAttention] WARNING: Could not locate model rotary_emb for alignment verification.")
 
     # Store compressor on model for access during forward
-    model._speckv_rkv_compressor = compressor
+    model._triattention_compressor = compressor
 
     # Patch model.forward to apply compression after each forward pass
     orig_forward = model.forward
 
-    def speckv_rkv_forward(
+    def triattention_forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
@@ -938,7 +938,7 @@ def apply_speckv_rkv_style_patch(
         cache_position: Optional[torch.LongTensor] = None,
         **kwargs,
     ):
-        comp = self._speckv_rkv_compressor
+        comp = self._triattention_compressor
         cache_position_override = cache_position
         position_ids_override = position_ids
         attention_mask_override = attention_mask
@@ -992,7 +992,7 @@ def apply_speckv_rkv_style_patch(
         if input_ids is not None:
             current_seq = input_ids[0].cpu().numpy().tolist()
             import sys
-            # sys.stderr.write(f"[SpeckV] Current sequence: {current_seq}\n")    
+            # sys.stderr.write(f"[TriAttention] Current sequence: {current_seq}\n")    
 
         outputs = orig_forward(
             input_ids=input_ids,
@@ -1013,7 +1013,7 @@ def apply_speckv_rkv_style_patch(
         # if hasattr(outputs, "logits") and outputs.logits is not None:
         #     top5_logits = outputs.logits.topk(5, dim=-1).values
         #     import sys
-        #     sys.stderr.write(f"[SpeckV-RKV] Top 5 logits: {top5_logits}\n")
+        #     sys.stderr.write(f"[TriAttention] Top 5 logits: {top5_logits}\n")
         
 
         if getattr(outputs, "past_key_values", None) is None:
@@ -1064,7 +1064,7 @@ def apply_speckv_rkv_style_patch(
 
         # Apply compression based on trigger mode
         effective_size = seq_len
-        if not comp.config.include_prefill_in_budget:
+        if not comp.config.count_prompt_tokens:
             effective_size = max(0, seq_len - comp.prefix_length)
 
         if comp.use_slack_trigger:
@@ -1081,7 +1081,7 @@ def apply_speckv_rkv_style_patch(
             )
 
         # import sys
-        # sys.stderr.write(f"[SpecKV-RKV] Effective size: {effective_size}, Should compress: {should_compress}\n")
+        # sys.stderr.write(f"[TriAttention] Effective size: {effective_size}, Should compress: {should_compress}\n")
 
         if should_compress:
             # Compute keep_indices using scores from ALL layers' sampled heads
@@ -1091,7 +1091,7 @@ def apply_speckv_rkv_style_patch(
             # Handle 3D per-layer-per-head, 2D per-head, or 1D global indices
             if keep_indices.dim() == 3:
                 # Per-layer-per-head mode: keep_indices shape [num_layers, num_kv_heads, budget]
-                # sys.stderr.write(f"[SpeckV-RKV] Per-layer-per-head compressed size: {keep_indices.shape}\n")
+                # sys.stderr.write(f"[TriAttention] Per-layer-per-head compressed size: {keep_indices.shape}\n")
                 num_layers = keep_indices.size(0)
                 num_kv_heads = keep_indices.size(1)
                 budget = keep_indices.size(2)
@@ -1137,7 +1137,7 @@ def apply_speckv_rkv_style_patch(
             elif keep_indices.dim() == 2 and comp.per_layer_pruning:
                 # Per-layer mode: keep_indices shape [num_layers, budget]
                 # All KV heads in each layer share the same token indices
-                # sys.stderr.write(f"[SpeckV-RKV] Per-layer compressed size: {keep_indices.shape}\n")
+                # sys.stderr.write(f"[TriAttention] Per-layer compressed size: {keep_indices.shape}\n")
                 num_layers = keep_indices.size(0)
                 budget = keep_indices.size(1)
 
@@ -1181,7 +1181,7 @@ def apply_speckv_rkv_style_patch(
             elif keep_indices.dim() == 2:
                 # Per-head mode: keep_indices shape [num_kv_heads, budget]
                 # Use gather-based slicing for per-head independent compression
-                # sys.stderr.write(f"[SpeckV-RKV] Per-head compressed size: {keep_indices.shape}\n")
+                # sys.stderr.write(f"[TriAttention] Per-head compressed size: {keep_indices.shape}\n")
                 new_pkv = []
                 for k, v in pkv_tuple:
                     batch_size = k.size(0)
@@ -1219,7 +1219,7 @@ def apply_speckv_rkv_style_patch(
             else:
                 # Global mode: 1D keep_indices shape [budget]
                 # Use index_select (existing behavior)
-                # sys.stderr.write(f"[SpeckV-RKV] Global compressed size: {len(keep_indices)}\n")
+                # sys.stderr.write(f"[TriAttention] Global compressed size: {len(keep_indices)}\n")
                 new_pkv = []
                 for k, v in pkv_tuple:
                     k_new = k.index_select(2, keep_indices)
@@ -1245,9 +1245,9 @@ def apply_speckv_rkv_style_patch(
         )
         return outputs
 
-    model.forward = MethodType(speckv_rkv_forward, model)
+    model.forward = MethodType(triattention_forward, model)
 
-    print(f"[SpeckV-RKV] Applied R-KV style compression (budget={kv_budget}, "
+    print(f"[TriAttention] Applied R-KV style compression (budget={kv_budget}, "
           f"divide_length={divide_length}, normalize_scores={normalize_scores}, "
           f"use_rank_aggregation={use_rank_aggregation}, "
           f"per_layer_pruning={per_layer_pruning}, "

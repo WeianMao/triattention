@@ -13,4 +13,4 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   EXTRA_ARGS+=("--dry-run")
 fi
 
-python "${RKV_ROOT}/weian_development/speckv_experiments_cli_v2.py" "${EXTRA_ARGS[@]}" run-default
+python "${RKV_ROOT}/scripts/cli.py" "${EXTRA_ARGS[@]}" run-default
