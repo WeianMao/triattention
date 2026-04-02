@@ -7,10 +7,10 @@ from typing import Dict, List
 
 from tqdm import tqdm
 
-from evaluate import evaluate
-from utils import save_jsonl
-from python_executor import PythonExecutor
-from parser import run_execute
+from evaluation.evaluate import evaluate
+from evaluation.utils import save_jsonl
+from evaluation.python_executor import PythonExecutor
+from evaluation.parser import run_execute
 
 
 def parse_args():

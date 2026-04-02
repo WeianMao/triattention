@@ -11,7 +11,7 @@ import numpy as np
 from pathlib import Path
 from typing import Iterable, Union, Any
 
-from examples import get_examples
+from evaluation.examples import get_examples
 
 
 def set_seed(seed: int = 42) -> None:

@@ -8,11 +8,11 @@ from tqdm import tqdm
 from pebble import ProcessPool
 from concurrent.futures import TimeoutError
 
-from grader import *
+from evaluation.grader import *
 
-from parser import *
-from utils import load_jsonl
-from python_executor import PythonExecutor
+from evaluation.parser import *
+from evaluation.utils import load_jsonl
+from evaluation.python_executor import PythonExecutor
 
 
 def evaluate(
