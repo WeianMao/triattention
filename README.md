@@ -31,7 +31,10 @@
 - **10.7x KV memory reduction** with trigonometric frequency-domain compression
 - **4 model architectures** verified: Qwen3-8B, DeepSeek-R1-Distill-Llama-8B, DeepSeek-R1-Distill-Qwen-7B, GPT-OSS-20B
 
-<!-- TODO: Add Figure 4 (method overview) -->
+<p align="center">
+  <img src="assets/tradeoff.png" width="80%">
+</p>
+<p align="center"><i>TriAttention achieves 2.5x higher throughput and 10.7x KV memory reduction on AIME25 while matching Full Attention accuracy.</i></p>
 
 ## Table of Contents
 
@@ -55,6 +58,11 @@
 ## Method
 
 <!-- TODO: Add method figure (Figure 4 from paper) -->
+
+<p align="center">
+  <img src="assets/motivation.png" width="85%">
+</p>
+<p align="center"><i>Pre-RoPE Q/K vectors concentrate around fixed centers, enabling trigonometric modeling of attention patterns.</i></p>
 
 Pre-RoPE Q/K vectors in long reasoning models concentrate around fixed centers. These centers determine distance preferences via a trigonometric series. TriAttention exploits this structure: it scores keys using the pre-RoPE centers and norms instead of requiring representative query selection, enabling accurate KV cache compression without the overhead of existing attention-based methods.
 
@@ -131,6 +139,11 @@ print(output)
 | MATH-500 | 1024 | 69.6 | 68.4 | 222.8 | 1405.2 | **6.3x** |
 | AIME24 | 4096 | 57.1 | 54.6 | 222.8 | 413.9 | **1.9x** |
 | AIME25 | 3072 | 40.8 | 40.8 | 222.8 | 563.5 | **2.5x** |
+
+<p align="center">
+  <img src="assets/results.png" width="85%">
+</p>
+<p align="center"><i>Accuracy vs. KV budget across MATH-500, AIME24, AIME25, and DFS Memory Retention benchmarks.</i></p>
 
 <!-- TODO: Add DFS memory benchmark results -->
 
