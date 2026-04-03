@@ -863,7 +863,10 @@ def apply_triattention_patch(
         # Convert cache to tuple for manipulation
         pkv = outputs.past_key_values
         if isinstance(pkv, Cache):
-            pkv_tuple = pkv.to_legacy_cache()
+            if hasattr(pkv, 'to_legacy_cache'):
+                pkv_tuple = pkv.to_legacy_cache()
+            else:
+                pkv_tuple = tuple(zip(pkv.key_cache, pkv.value_cache))
         else:
             pkv_tuple = tuple(pkv) if pkv else ()
 
@@ -1022,7 +1025,13 @@ def apply_triattention_patch(
 
         # Convert back to original cache type
         if isinstance(outputs.past_key_values, Cache):
-            new_cache = DynamicCache.from_legacy_cache(pkv_tuple)
+            if hasattr(DynamicCache, 'from_legacy_cache'):
+                new_cache = DynamicCache.from_legacy_cache(pkv_tuple)
+            else:
+                new_cache = DynamicCache()
+                for k, v in pkv_tuple:
+                    new_cache.key_cache.append(k)
+                    new_cache.value_cache.append(v)
         else:
             new_cache = pkv_tuple
 
