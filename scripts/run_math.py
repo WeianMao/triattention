@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from integration.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
+from triattention.integration.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
 
 RKV_ROOT = Path(__file__).resolve().parents[1]
 

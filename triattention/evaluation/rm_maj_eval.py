@@ -1,8 +1,8 @@
-from evaluation.grader import math_equal
-from evaluation.parser import strip_string
+from triattention.evaluation.grader import math_equal
+from triattention.evaluation.parser import strip_string
 import timeout_decorator
 from collections import defaultdict, Counter
-from evaluation.utils import load_jsonl
+from triattention.evaluation.utils import load_jsonl
 
 
 @timeout_decorator.timeout(5)

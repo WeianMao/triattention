@@ -7,8 +7,8 @@ import regex
 from latex2sympy2 import latex2sympy
 from typing import TypeVar, Iterable, List, Union, Any, Dict
 from word2number import w2n
-from evaluation.utils import *
-from evaluation.trajectory import extract_program_output, extract_program
+from triattention.evaluation.utils import *
+from triattention.evaluation.trajectory import extract_program_output, extract_program
 
 
 def _fix_fracs(string):

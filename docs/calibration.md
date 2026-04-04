@@ -1,6 +1,6 @@
 # Calibration Guide
 
-TriAttention uses pre-computed statistics (Q/K centers and norms) for each model. Pre-computed stats for supported models are included in `calibration/`.
+TriAttention uses pre-computed statistics (Q/K centers and norms) for each model. Pre-computed stats for supported models are included in `triattention/calibration/`.
 
 ## Generating Stats for a Custom Model
 
@@ -8,7 +8,7 @@ TriAttention uses pre-computed statistics (Q/K centers and norms) for each model
 python scripts/calibrate.py \
     --model <your-model-id-or-path> \
     --input <calibration_text.txt> \
-    --output calibration/model_stats.pt
+    --output triattention/calibration/model_stats.pt
 ```
 
 The calibration script runs a forward pass on plain text input, captures query states from every attention layer, inverts RoPE, and computes per-head frequency statistics. The resulting `.pt` file is loaded at inference time to score keys via the trigonometric series.
@@ -17,6 +17,6 @@ The calibration script runs a forward pass on plain text input, captures query s
 
 | Model | Stats Path |
 |-------|-----------|
-| Qwen3-8B | `calibration/qwen3_8b_stats.pt` |
-| DeepSeek-R1-Distill-Llama-8B | `calibration/dsllama_8b_stats.pt` |
-| DeepSeek-R1-Distill-Qwen-7B | `calibration/dsqwen_7b_stats.pt` |
+| Qwen3-8B | `triattention/calibration/qwen3_8b_stats.pt` |
+| DeepSeek-R1-Distill-Llama-8B | `triattention/calibration/dsllama_8b_stats.pt` |
+| DeepSeek-R1-Distill-Qwen-7B | `triattention/calibration/dsqwen_7b_stats.pt` |

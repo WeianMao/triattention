@@ -4,7 +4,7 @@
 
 import json
 import os
-from evaluation.utils import load_jsonl, lower_keys
+from triattention.evaluation.utils import load_jsonl, lower_keys
 from datasets import load_dataset, Dataset, concatenate_datasets
 
 

@@ -1,5 +1,5 @@
 from sympy import *
-from evaluation.latex2sympy import process_sympy
+from triattention.evaluation.latex2sympy import process_sympy
 
 
 #

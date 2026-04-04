@@ -1,4 +1,4 @@
-from evaluation.latex2sympy import process_sympy
+from triattention.evaluation.latex2sympy import process_sympy
 from sympy import *
 import hashlib
 import time

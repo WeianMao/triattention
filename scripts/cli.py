@@ -558,7 +558,7 @@ def build_stats(
     if not input_path.exists():
         raise SystemExit(f"Input file not found: {input_path}")
 
-    out_dir = Path(output_dir) if output_dir else RKV_ROOT / "calibration"
+    out_dir = Path(output_dir) if output_dir else RKV_ROOT / "triattention" / "calibration"
     model_list = normalize_selection(models, list(MODEL_SPECS.keys()), "model")
 
     commands: List[Dict[str, object]] = []

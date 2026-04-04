@@ -38,7 +38,7 @@ https://github.com/user-attachments/assets/a2e6091f-b220-4fea-8f29-808c5517316c
 - **4 model architectures** verified: Qwen3-8B, DeepSeek-R1-Distill-Llama-8B, DeepSeek-R1-Distill-Qwen-7B, GPT-OSS-20B
 
 <p align="center">
-  <img src="assets/tradeoff.png" width="80%">
+  <img src="docs/assets/tradeoff.png" width="80%">
 </p>
 <p align="center"><i>TriAttention achieves 2.5x higher throughput and 10.7x KV memory reduction on AIME25 while matching Full Attention accuracy.</i></p>
 

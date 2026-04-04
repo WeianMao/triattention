@@ -29,7 +29,7 @@ from .pruning_utils import (
     score_keys_for_round,
     verify_rotary_alignment,
 )
-from .stats_utils import validate_stats_metadata
+from ..common.stats_utils import validate_stats_metadata
 
 
 @dataclass

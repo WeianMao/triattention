@@ -17,14 +17,14 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 RKV_ROOT = Path(__file__).resolve().parents[1]
 
 
-from integration.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
-from triattention.prompt_utils import (
+from triattention.integration.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
+from triattention.common.prompt_utils import (
     DEFAULT_SYSTEM_PROMPT,
     PROMPT_TEMPLATE,
     build_prompt,
     extract_question_from_record,
 )
-from triattention.stats_utils import normalize_dtype_name
+from triattention.common.stats_utils import normalize_dtype_name
 
 
 # Debug capture stubs (qk_capture module not included in release)
@@ -590,7 +590,7 @@ def main(args: argparse.Namespace) -> None:
             "dtype": normalize_dtype_name(dtype),
             "kv_budget": int(args.kv_budget),
         }
-        from triattention.triattention import apply_triattention_patch
+        from triattention.methods.triattention import apply_triattention_patch
         apply_triattention_patch(
             model,
             stats_path=stats_path,

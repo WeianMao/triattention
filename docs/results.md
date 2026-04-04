@@ -29,7 +29,7 @@
 ## Accuracy vs. KV Budget
 
 <p align="center">
-  <img src="../assets/results.png" width="85%">
+  <img src="assets/results.png" width="85%">
 </p>
 
 Accuracy vs. KV budget across MATH-500, AIME24, AIME25, and DFS Memory Retention benchmarks. TriAttention consistently outperforms R-KV and SnapKV across all budget levels. On the Recursive State Query benchmark, TriAttention performs comparably to Full Attention up to depth 16, while R-KV shows catastrophic degradation.
@@ -37,7 +37,7 @@ Accuracy vs. KV budget across MATH-500, AIME24, AIME25, and DFS Memory Retention
 ## Motivation: Q/K Concentration
 
 <p align="center">
-  <img src="../assets/motivation.png" width="85%">
+  <img src="assets/motivation.png" width="85%">
 </p>
 
 Pre-RoPE Q/K vectors concentrate around fixed centers, enabling trigonometric modeling of attention patterns. This structure is stable across positions and input contexts.

@@ -10,7 +10,7 @@ import json
 import sys
 from pathlib import Path
 
-from benchmarks.dfs.scripts.eval_dfs_state_query import (
+from triattention.benchmarks.dfs.scripts.eval_dfs_state_query import (
     build_prompt,
     parse_json_response,
     evaluate_prediction

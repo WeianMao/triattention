@@ -1,4 +1,4 @@
-from evaluation.latex2sympy import process_sympy
+from triattention.evaluation.latex2sympy import process_sympy
 
 latex = "\\begin{pmatrix}1\\\\2\\\\3\\end{pmatrix}"
 math = process_sympy(latex)

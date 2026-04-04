@@ -1,5 +1,5 @@
 from sympy import simplify, srepr, Add, Mul, Pow, Rational, pi, sqrt, Symbol
-from evaluation.latex2sympy.latex2sympy2 import latex2sympy as process_sympy
+from triattention.evaluation.latex2sympy.latex2sympy2 import latex2sympy as process_sympy
 
 x = Symbol('x', real=True)
 y = Symbol('y', real=True)

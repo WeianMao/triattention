@@ -24,7 +24,7 @@ from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 def maybe_capture_qk(*args, **kwargs):
     return
 
-from kv_compress import (
+from triattention.methods.baselines import (
     R1KV,
     SnapKV,
     StreamingLLM,

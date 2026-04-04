@@ -4,11 +4,11 @@ import json
 import csv
 from tqdm import tqdm
 
-from evaluation.evaluate import evaluate
-from evaluation.utils import save_jsonl
-from evaluation.python_executor import PythonExecutor
-from evaluation.data_loader import load_data_vanilla
-from evaluation.parser import choice_answer_clean, parse_ground_truth, run_execute
+from triattention.evaluation.evaluate import evaluate
+from triattention.evaluation.utils import save_jsonl
+from triattention.evaluation.python_executor import PythonExecutor
+from triattention.evaluation.data_loader import load_data_vanilla
+from triattention.evaluation.parser import choice_answer_clean, parse_ground_truth, run_execute
 
 
 def parse_args():
