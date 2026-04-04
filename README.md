@@ -13,12 +13,12 @@
 [Xi Lin](https://scholar.google.com/citations?user=TODO)<sup>3*</sup>,
 [Wei Huang](https://aaron-weihuang.com/)<sup>2*</sup>,
 [Yuxin Xie](https://scholar.google.com/citations?user=TODO)<sup>1</sup>,
-[Tianfu Fu](https://scholar.google.com/citations?user=TODO)<sup>4</sup>,
+[Tianfu Fu](https://scholar.google.com/citations?user=TODO)<sup>1</sup>,
 [Bohan Zhuang](https://scholar.google.com/citations?user=TODO)<sup>3</sup>,
 [Song Han](http://songhan.mit.edu/)<sup>1,2</sup>,
 [Yukang Chen](https://yukangchen.com/)<sup>2</sup>
 
-<sup>1</sup>MIT, <sup>2</sup>NVIDIA, <sup>3</sup>ZJU, <sup>4</sup>xAI &nbsp;&nbsp; <sup>*</sup>Equal contribution
+<sup>1</sup>MIT, <sup>2</sup>NVIDIA, <sup>3</sup>ZJU &nbsp;&nbsp; <sup>*</sup>Equal contribution
 
 [Paper](https://arxiv.org/abs/TODO) | [Project Page](https://TODO) | [Code](https://github.com/TODO/triattention)
 
