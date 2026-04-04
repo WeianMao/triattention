@@ -20,7 +20,7 @@ from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 
-# Debug capture stub (qk_capture module not included in release)
+# QK capture stubs (no-op)
 def maybe_capture_qk(*args, **kwargs):
     return
 

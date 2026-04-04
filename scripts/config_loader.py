@@ -1,4 +1,4 @@
-"""YAML configuration loader for DeepConf utility scripts."""
+"""YAML configuration loader for TriAttention utility scripts."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,7 +10,7 @@ try:
     import yaml  # type: ignore
 except ImportError as exc:  # pragma: no cover
     raise RuntimeError(
-        "PyYAML is required to load DeepConf configs. Install with 'pip install pyyaml'."
+        "PyYAML is required to load TriAttention configs. Install with 'pip install pyyaml'."
     ) from exc
 
 
@@ -35,7 +35,7 @@ def _deep_merge(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, An
 
 
 def _resolve_config_path(candidate: Optional[str]) -> Optional[Path]:
-    path = candidate or os.environ.get("DEEPCONF_CONFIG_PATH")
+    path = candidate or os.environ.get("TRIATTENTION_CONFIG_PATH")
     if not path:
         return None
     resolved = Path(path).expanduser()
@@ -53,7 +53,7 @@ def load_config(
     """Load YAML configuration and merge with defaults.
 
     Args:
-        config_path: Optional explicit YAML path. If omitted, DEEPCONF_CONFIG_PATH is used.
+        config_path: Optional explicit YAML path. If omitted, TRIATTENTION_CONFIG_PATH is used.
         defaults: Optional default dictionary merged before user config.
         section: Optional section name (e.g. "online").
 

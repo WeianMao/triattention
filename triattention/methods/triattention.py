@@ -847,12 +847,6 @@ def apply_triattention_patch(
             **kwargs,
         )
 
-        # # print top5 logits for debugging
-        # if hasattr(outputs, "logits") and outputs.logits is not None:
-        #     top5_logits = outputs.logits.topk(5, dim=-1).values
-        #     import sys
-        #     sys.stderr.write(f"[TriAttention] Top 5 logits: {top5_logits}\n")
-        
 
         if getattr(outputs, "past_key_values", None) is None:
             return outputs
@@ -916,9 +910,6 @@ def apply_triattention_patch(
                 and effective_size >= trigger_threshold
                 and (comp.absolute_position % comp.divide_length == 0)
             )
-
-        # import sys
-        # sys.stderr.write(f"[TriAttention] Effective size: {effective_size}, Should compress: {should_compress}\n")
 
         if should_compress:
             # Compute keep_indices using scores from ALL layers' sampled heads

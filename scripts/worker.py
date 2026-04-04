@@ -27,7 +27,7 @@ from triattention.common.prompt_utils import (
 from triattention.common.stats_utils import normalize_dtype_name
 
 
-# Debug capture stubs (qk_capture module not included in release)
+# QK capture stubs (no-op)
 def activate_capture(*args, **kwargs):
     return
 
