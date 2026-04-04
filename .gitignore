@@ -37,5 +37,8 @@ logs/
 # Exception: pre-computed calibration stats are tracked
 !calibration/*.pt
 
+# Experiments (generated at runtime)
+experiments/
+
 # Workflow
 .workflow/

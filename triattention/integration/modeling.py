@@ -27,15 +27,11 @@ def maybe_capture_qk(*args, **kwargs):
 from triattention.methods.baselines import (
     R1KV,
     SnapKV,
-    StreamingLLM,
-    H2O,
 )
 
 KV_COMPRESSION_MAP = {
     "r1kv": R1KV,
     "snapkv": SnapKV,
-    "streamingllm": StreamingLLM,
-    "h2o": H2O,
 }
 
 logger = logging.get_logger(__name__)

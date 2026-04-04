@@ -342,7 +342,6 @@ def load_hf_lm_and_tokenizer_method(
             "snapkv_step_sim",
             "snapkv_step_sim_v2",
             "snapkv_step_sim_v3",
-            "h2o",
         ]:
             window_sizes = 8
 

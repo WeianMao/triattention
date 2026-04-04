@@ -145,7 +145,7 @@ def parse_arguments():
         "--method",
         type=str,
         default=None,
-        choices=["r1kv", "fullkv", "snapkv", "streamingllm", "h2o"],
+        choices=["r1kv", "fullkv", "snapkv"],
     )
     parser.add_argument("--kv_budget", type=int, default=None)
     parser.add_argument("--window_size", type=int, default=8)
@@ -202,9 +202,6 @@ if __name__ == "__main__":
                 "fp32_topk": args.fp32_topk,
             }
         )
-    elif args.method == "streamingllm":
-        method_config.update({"first_tokens": args.first_tokens})
-
     compression_config = {
         "method": args.method,
         "method_config": method_config,

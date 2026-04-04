@@ -123,7 +123,7 @@ See [docs/results.md](docs/results.md) for complete results including MATH-500 a
 ## Acknowledgements
 
 We thank the following projects for their contributions and inspiration:
-[R-KV](https://github.com/Microsoft/R-KV) | [SnapKV](https://github.com/FasterDecoding/SnapKV) | [StreamingLLM](https://github.com/mit-han-lab/streaming-llm)
+[R-KV](https://github.com/Microsoft/R-KV) | [SnapKV](https://github.com/FasterDecoding/SnapKV)
 
 ## License
 

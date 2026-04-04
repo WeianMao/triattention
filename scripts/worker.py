@@ -246,7 +246,7 @@ def parse_arguments() -> argparse.Namespace:
         "--method",
         type=str,
         default=None,
-        choices=["r1kv", "fullkv", "snapkv", "streamingllm", "h2o", "triattention"],
+        choices=["r1kv", "fullkv", "snapkv", "triattention"],
     )
     parser.add_argument("--kv_budget", "--kv-budget", dest="kv_budget", type=int, default=None)
     parser.add_argument("--window_size", "--window-size", dest="window_size", type=int, default=8)
@@ -506,8 +506,6 @@ def main(args: argparse.Namespace) -> None:
                 "protect_prefill": args.protect_prefill,
             }
         )
-    elif method_name == "streamingllm":
-        method_config.update({"first_tokens": args.first_tokens})
     if method_lower == "triattention":
         method_config = triattention_method_config
 
