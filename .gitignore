@@ -36,6 +36,7 @@ logs/
 
 # Exception: pre-computed calibration stats are tracked
 !calibration/*.pt
+!triattention/vllm/stats/*.pt
 
 # Experiments (generated at runtime)
 experiments/

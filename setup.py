@@ -21,5 +21,12 @@ setup(
         "tqdm",
         "matplotlib",
         "regex",
+        "torch",
+        "triton",
     ],
+    entry_points={
+        "vllm.general_plugins": [
+            "triattention = triattention.vllm.plugin:register_triattention_backend",
+        ],
+    },
 )

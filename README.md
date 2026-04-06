@@ -95,6 +95,78 @@ python scripts/cli.py run-one \
 
 See [docs/results.md](docs/results.md) for complete results including MATH-500 accuracy table, accuracy vs. budget curves, and DFS memory retention analysis.
 
+## vLLM Integration
+
+TriAttention includes a vLLM plugin that enables transparent KV cache compression for production deployment. After installation, vLLM automatically discovers and activates the plugin -- no code changes required.
+
+### Server Mode (OpenAI-Compatible API)
+
+```bash
+# Set compression parameters
+export TRIATTN_RUNTIME_KV_BUDGET=2048
+export TRIATTN_RUNTIME_DIVIDE_LENGTH=128
+export TRIATTN_RUNTIME_WINDOW_SIZE=128
+export TRIATTN_RUNTIME_SPARSE_STATS_PATH=triattention/vllm/stats/qwen3_32b_int4_stats.pt
+export TRIATTN_RUNTIME_PRUNING_MODE=per_head
+export TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION=true
+export TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_BLOCK_RECLAIM=true
+
+# Launch vLLM server -- TriAttention activates automatically
+vllm serve <model_path> \
+    --dtype bfloat16 \
+    --max-model-len 32768 \
+    --enforce-eager \
+    --trust-remote-code
+
+# Use the standard OpenAI-compatible API
+curl http://localhost:8000/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{"model": "<model_path>", "messages": [{"role": "user", "content": "Solve: ..."}]}'
+```
+
+### Python API
+
+```python
+from triattention.vllm.runtime.integration_monkeypatch import (
+    install_vllm_integration_monkeypatches,
+)
+
+# Install patches before creating the LLM instance
+install_vllm_integration_monkeypatches(patch_scheduler=True, patch_worker=True)
+
+# Standard vLLM API -- compression happens transparently
+from vllm import LLM, SamplingParams
+
+llm = LLM(
+    model="<model_path>",
+    dtype="bfloat16",
+    max_model_len=32768,
+    enforce_eager=True,
+    trust_remote_code=True,
+)
+
+outputs = llm.generate(["Your prompt here"], SamplingParams(temperature=0.6, top_p=0.95))
+print(outputs[0].outputs[0].text)
+```
+
+### Configuration Reference
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `TRIATTN_RUNTIME_KV_BUDGET` | `2048` | Maximum tokens retained in KV cache per request |
+| `TRIATTN_RUNTIME_DIVIDE_LENGTH` | `128` | Compression trigger interval (every N new tokens) |
+| `TRIATTN_RUNTIME_WINDOW_SIZE` | `128` | Recent tokens always preserved |
+| `TRIATTN_RUNTIME_PRUNING_MODE` | `per_head` | Token selection strategy (`per_head` or `per_layer_per_head`) |
+| `TRIATTN_RUNTIME_SPARSE_STATS_PATH` | -- | Path to precomputed frequency statistics `.pt` file |
+| `TRIATTN_RUNTIME_PROTECT_PREFILL` | `true` | Protect initial prompt tokens from eviction |
+| `TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION` | `false` | Enable in-place KV cache compaction |
+| `TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_BLOCK_RECLAIM` | `false` | Enable freed block reclamation |
+| `ENABLE_TRIATTENTION` | `true` | Master switch to enable/disable the plugin |
+
+### Precomputed Statistics
+
+TriAttention requires precomputed Q/K frequency statistics for scoring. We provide pre-calibrated stats for supported models in `triattention/vllm/stats/`. See the [Calibration Guide](docs/calibration.md) for generating stats for custom models.
+
 ## Documentation
 
 - [Reproduction Guide](docs/reproduction.md) -- full experiment commands for all benchmarks
@@ -103,8 +175,9 @@ See [docs/results.md](docs/results.md) for complete results including MATH-500 a
 
 ## Roadmap
 
-- [ ] vLLM integration
+- [x] vLLM integration
 - [ ] SGLang integration
+- [ ] Ollama integration
 - [ ] Support for more model architectures
 
 ## Citation
