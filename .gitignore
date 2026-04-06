@@ -1,45 +1,46 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-dist/
-build/
-*.egg
-
-# Data
-data/*.jsonl
-
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Cache
-.cache/
-
-# Outputs and logs
 outputs/
-logs/
+brumo_2025.jsonl
+aime25.jsonl
+.claude/
+__pycache__
+deepconf_old
+tmp_eval
+logs
+outputs
+vllm
+kvpress
+/R-KV-backup-*
+/tmp/rkv_test_shard/
+/data/rbg/users/weian/project/rl/dc/R-KV/outputs/
+/data/rbg/users/weian/project/rl/dc/R-KV/logs/
+/data/rbg/users/weian/project/rl/dc/R-KV/outputs/*
+/data/rbg/users/weian/project/rl/dc/R-KV/logs/*
 
-# Large file types
-*.zip
-*.tar.gz
-*.tar
-*.pt
-*.safetensors
-*.bin
-*.ckpt
+# R-KV HuggingFace run artifacts
+R-KV/HuggingFace/outputs*/
+R-KV/HuggingFace/output*.jsonl
+R-KV/HuggingFace/evaluation/*_math_eval*.json*
+R-KV/HuggingFace/evaluation/*/default-*_math_eval*.jsonl
+R-KV/HuggingFace/evaluation/*/*/default-*_math_eval*.jsonl
+R-KV/HuggingFace/evaluation/*/default-*_metrics.json
+R-KV/HuggingFace/evaluation/*/*/default-*_metrics.json
+R-KV/HuggingFace/evaluation/rkv_sdpa_single/
+R-KV/HuggingFace/evaluation/evaluation_*/
+R-KV/HuggingFace/evaluation/aime24/
+R-KV/HuggingFace/evaluation/all_results.csv
+R-KV/HuggingFace/all_results.csv
+R-KV/HuggingFace/rkv.egg-info/
 
-# Exception: pre-computed calibration stats are tracked
-!triattention/calibration/*.pt
-!triattention/vllm/stats/*.pt
+# R-KV sharded outputs/logs
+R-KV/outputs/
+R-KV/logs/
 
-# Experiments (generated at runtime)
-experiments/
-
-# Workflow
+# Workflow session data
 .workflow/
+post_rope_nms_viz/
+
+R-KV/speckv_experiments/configs/generated/
+R-KV/speckv_experiments/models/
+R-KV/speckv_experiments/stats/
+paper_visualizations/
+prompt.txt
