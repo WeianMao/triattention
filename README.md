@@ -24,6 +24,13 @@
 
 </div>
 
+
+
+https://github.com/user-attachments/assets/a2e6091f-b220-4fea-8f29-808c5517316c
+
+
+
+
 ## Highlights
 
 - **2.5x throughput** on AIME25 long reasoning while matching Full Attention accuracy (40.8 vs 40.8)
