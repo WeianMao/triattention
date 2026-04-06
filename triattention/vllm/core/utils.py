@@ -199,15 +199,15 @@ def _convert_rkv_stats(
             )
             return inv_freq[:freq_count].contiguous()
 
-        model_path_raw = rkv_metadata.get("model_path")
-        if model_path_raw:
+        model_id = rkv_metadata.get("model_name", rkv_metadata.get("model_path"))
+        if model_id:
             try:
                 from transformers import AutoConfig
                 from triattention.common.rope_utils import build_rotary
 
-                model_path = Path(str(model_path_raw))
+                model_path = Path(str(model_id))
                 model_config = AutoConfig.from_pretrained(
-                    str(model_path),
+                    str(model_id),
                     trust_remote_code=True,
                 )
                 rotary = build_rotary(
@@ -258,15 +258,15 @@ def _convert_rkv_stats(
         model's rotary embedding scaling (HF-aligned semantic source). If that
         derivation fails, fall back to ones to keep behavior explicit and safe.
         """
-        model_path_raw = rkv_metadata.get("model_path")
-        if model_path_raw:
+        model_id = rkv_metadata.get("model_name", rkv_metadata.get("model_path"))
+        if model_id:
             try:
                 from transformers import AutoConfig
                 from triattention.common.rope_utils import build_rotary, compute_frequency_scaling
 
-                model_path = Path(str(model_path_raw))
+                model_path = Path(str(model_id))
                 model_config = AutoConfig.from_pretrained(
-                    str(model_path),
+                    str(model_id),
                     trust_remote_code=True,
                 )
                 rotary = build_rotary(

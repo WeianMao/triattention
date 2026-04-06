@@ -24,7 +24,6 @@ from triattention.common.prompt_utils import (
     build_prompt,
     extract_question_from_record,
 )
-from triattention.common.stats_utils import normalize_dtype_name
 
 
 # QK capture stubs (no-op)
@@ -576,14 +575,7 @@ def main(args: argparse.Namespace) -> None:
         stats_path = resolve_under_rkv(args.triattention_stats_file)
         if not stats_path.exists():
             raise FileNotFoundError(f"TriAttention stats file not found: {stats_path}")
-        metadata_expectations = {
-            "prompt_template": PROMPT_TEMPLATE,
-            "use_chat_template": prompt_use_chat,
-            "system_prompt": args.chat_system_prompt if prompt_use_chat else "",
-            "attn_implementation": args.attn_implementation,
-            "dtype": normalize_dtype_name(dtype),
-            "kv_budget": int(args.kv_budget),
-        }
+        metadata_expectations = {}
         from triattention.methods.triattention import apply_triattention_patch
         apply_triattention_patch(
             model,
