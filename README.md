@@ -6,8 +6,12 @@
 [![Project Page](https://img.shields.io/badge/Project-Page-teal)](https://TODO)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/downloads/)
-
 *Compress KV cache by 10.7x and boost throughput by 2.5x on long reasoning tasks -- with no accuracy loss.*
+
+<a href="https://youtu.be/TQ20HYqb4Q0">
+  <img src="https://img.youtube.com/vi/TQ20HYqb4Q0/maxresdefault.jpg" width="80%">
+</a>
+<p><i>Click to watch the demo video</i></p>
 
 [Weian Mao](https://scholar.google.com/citations?user=TODO)<sup>1*</sup>,
 [Xi Lin](https://scholar.google.com/citations?user=TODO)<sup>3*</sup>,
@@ -20,7 +24,7 @@
 
 <sup>1</sup>MIT, <sup>2</sup>NVIDIA, <sup>3</sup>ZJU &nbsp;&nbsp; <sup>*</sup>Equal contribution
 
-[Paper](https://arxiv.org/abs/TODO) | [Project Page](https://TODO) | [Code](https://github.com/TODO/triattention)
+[Paper](https://arxiv.org/abs/TODO) | [Project Page](https://TODO) | [Demo Video](https://youtu.be/TQ20HYqb4Q0) | [Code](https://github.com/TODO/triattention)
 
 </div>
 
