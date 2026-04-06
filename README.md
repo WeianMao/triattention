@@ -20,8 +20,6 @@
 
 <sup>1</sup>MIT, <sup>2</sup>NVIDIA, <sup>3</sup>ZJU &nbsp;&nbsp; <sup>*</sup>Equal contribution
 
-[Paper](https://arxiv.org/abs/TODO) | [Project Page](https://TODO) | [Code](https://github.com/TODO/triattention)
-
 </div>
 
 
