@@ -6,6 +6,7 @@
 [![Project Page](https://img.shields.io/badge/Project-Page-teal)](https://TODO)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/downloads/)
+
 *Compress KV cache by 10.7x and boost throughput by 2.5x on long reasoning tasks -- with no accuracy loss.*
 
 [Weian Mao](https://scholar.google.com/citations?user=TODO)<sup>1*</sup>,
