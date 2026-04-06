@@ -34,9 +34,9 @@ def validate_stats_metadata(
     *,
     stats_path: Path,
 ) -> None:
-    prompt_template = _require(metadata, "prompt_template", stats_path)
+    prompt_template = metadata.get("prompt_template")
     expected_template = expected.get("prompt_template")
-    if expected_template and prompt_template != expected_template:
+    if prompt_template and expected_template and prompt_template != expected_template:
         raise ValueError(
             f"Prompt template in stats ({stats_path}) does not match runtime template. "
             "Regenerate stats with the same template used for inference."

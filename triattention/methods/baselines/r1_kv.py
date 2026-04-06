@@ -71,7 +71,6 @@ class R1KV:
             ).mean(dim=-2)
             if not self.use_fp32_topk:
                 attn_weights_sum = attn_weights_sum.to(query_states.dtype)
-            # TODO: Softmax then reduce head
 
             attn_cache = F.max_pool1d(
                 attn_weights_sum,

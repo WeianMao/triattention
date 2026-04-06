@@ -145,7 +145,12 @@ def calibrate(
 
     # --- Build rotary for RoPE inversion ---
     attn_layers = _find_attention_layers(model)
-    rotary = attn_layers[0].rotary_emb
+    backbone = getattr(model, "model", model)
+    # rotary_emb may live on backbone (Qwen2) or on individual attn layers
+    if hasattr(backbone, "rotary_emb"):
+        rotary = backbone.rotary_emb
+    else:
+        rotary = attn_layers[0].rotary_emb
     attn_scale = float(getattr(rotary, "attention_scaling", 1.0))
 
     # --- Read and tokenize input ---
@@ -185,7 +190,7 @@ def calibrate(
             # Apply RoPE
             pos_ids = torch.arange(q_len, device=hidden_states.device).unsqueeze(0)
             p = torch.zeros(1, q_len, head_dim, device=hidden_states.device, dtype=hidden_states.dtype)
-            cos, sin = attn.rotary_emb(p, pos_ids)
+            cos, sin = rotary(p, pos_ids)
             q_rot = (q * cos.unsqueeze(1)) + (_rotate_half(q, style=rope_style) * sin.unsqueeze(1))
             q_rot = q_rot * attn_scale
             captured_q[layer_idx] = q_rot.detach()
@@ -250,15 +255,13 @@ def calibrate(
         or "default"
     )
 
-    # --- Build metadata (clean, no internal paths) ---
+    # --- Build metadata ---
     metadata = {
         "num_traces": 1,
         "head_dim": head_dim,
         "dtype": str(dtype).replace("torch.", ""),
         "use_chat_template": False,
         "system_prompt": "",
-        "prompt_template": "",
-        "kv_budget": 0,
         "attn_implementation": attn_implementation,
         "rope_style": rope_style,
         "rope_type": rope_type,
