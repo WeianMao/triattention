@@ -24,13 +24,15 @@
 
 <sup>1</sup>MIT, <sup>2</sup>NVIDIA, <sup>3</sup>ZJU &nbsp;&nbsp; <sup>*</sup>Equal contribution
 
-[Paper](https://arxiv.org/abs/TODO) | [Project Page](https://TODO) | [Demo Video](https://youtu.be/TQ20HYqb4Q0) | [Code](https://github.com/TODO/triattention)
+[Paper](https://arxiv.org/abs/TODO) | [Project Page](https://TODO) | [Code](https://github.com/TODO/triattention)
 
 </div>
 
 
 
-https://github.com/user-attachments/assets/a2e6091f-b220-4fea-8f29-808c5517316c
+
+https://github.com/user-attachments/assets/1d51b186-edd4-443f-ad52-f4520f701a38
+
 
 
 
