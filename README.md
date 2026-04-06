@@ -8,11 +8,6 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/downloads/)
 *Compress KV cache by 10.7x and boost throughput by 2.5x on long reasoning tasks -- with no accuracy loss.*
 
-<a href="https://youtu.be/TQ20HYqb4Q0">
-  <img src="https://img.youtube.com/vi/TQ20HYqb4Q0/maxresdefault.jpg" width="80%">
-</a>
-<p><i>Click to watch the demo video</i></p>
-
 [Weian Mao](https://scholar.google.com/citations?user=TODO)<sup>1*</sup>,
 [Xi Lin](https://scholar.google.com/citations?user=TODO)<sup>3*</sup>,
 [Wei Huang](https://aaron-weihuang.com/)<sup>2*</sup>,
