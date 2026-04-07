@@ -49,6 +49,17 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 
 Pre-RoPE Q/K vectors in long reasoning models concentrate around fixed centers that determine distance preferences via a trigonometric series. TriAttention scores keys using these centers and norms instead of requiring representative query selection, enabling accurate KV cache compression without the overhead of existing attention-based methods.
 
+## Deploy with OpenClaw
+
+TriAttention's vLLM server exposes an OpenAI-compatible API, which means you can use it directly as a custom provider in [OpenClaw](https://github.com/openclaw/openclaw).
+
+### Quick Setup
+
+1. Follow the [Installation](#installation) and [Server Mode](#server-mode-openai-compatible-api) instructions above to start a vLLM server with TriAttention enabled.
+2. In OpenClaw, add a custom provider pointing to your vLLM server (e.g. `http://localhost:8000/v1`).
+
+For manual configuration or troubleshooting, see the [OpenClaw Manual Configuration Guide](docs/openclaw.md).
+
 ## Installation
 
 ```bash
@@ -172,17 +183,6 @@ print(outputs[0].outputs[0].text)
 ### Precomputed Statistics
 
 TriAttention requires precomputed Q/K frequency statistics for scoring. We provide pre-calibrated stats for supported models in `triattention/vllm/stats/`. See the [Calibration Guide](docs/calibration.md) for generating stats for custom models.
-
-## Deploy with OpenClaw
-
-TriAttention's vLLM server exposes an OpenAI-compatible API, which means you can use it directly as a custom provider in [OpenClaw](https://github.com/openclaw/openclaw).
-
-### Quick Setup
-
-1. Follow the [Server Mode](#server-mode-openai-compatible-api) instructions above to start a vLLM server with TriAttention enabled.
-2. In OpenClaw, add a custom provider pointing to your vLLM server (e.g. `http://localhost:8000/v1`).
-
-For manual configuration or troubleshooting, see the [OpenClaw Manual Configuration Guide](docs/openclaw.md).
 
 ## Documentation
 
