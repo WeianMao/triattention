@@ -241,11 +241,26 @@ def parse_gpu_string(value: str) -> List[str]:
 
 
 def compute_local_runs(num_samples: int, num_shards: int, shard_id: int) -> tuple[int, int]:
+    """Shard-over-draws: split draws across shards, each shard runs all questions."""
     base = num_samples // num_shards
     extra = num_samples % num_shards
     start = shard_id * base + min(shard_id, extra)
     count = base + (1 if shard_id < extra else 0)
     return start, count
+
+
+def compute_local_questions(total_questions: int, num_shards: int, shard_id: int) -> tuple[int, int]:
+    """Shard-over-questions: split questions across shards, each shard runs all draws."""
+    base = total_questions // num_shards
+    extra = total_questions % num_shards
+    start = shard_id * base + min(shard_id, extra)
+    count = base + (1 if shard_id < extra else 0)
+    return start, count
+
+
+def use_question_sharding(num_samples: int, num_shards: int) -> bool:
+    """Use question-level sharding when draws are fewer than shards."""
+    return num_samples < num_shards
 
 
 def shard_run_dir(base_dir: Path, shard_id: int) -> Path:
@@ -446,22 +461,46 @@ def run_shards(
 ) -> None:
     if not gpus:
         raise ValueError("No GPUs available to schedule shards")
+
+    question_mode = use_question_sharding(num_samples, total_shards) and (total_questions or 0) > 0
+    if question_mode:
+        print(f"[dispatch] shard-over-questions mode: {total_questions} questions across {total_shards} shards, {num_samples} draw(s) each")
+    else:
+        print(f"[dispatch] shard-over-draws mode: {num_samples} draws across {total_shards} shards")
+
     shards_to_run: List[int]
     pending_runs: Dict[int, List[int]] = {}
-    expected_records = total_questions if total_questions is not None else 0
+
+    if question_mode:
+        expected_records_for_shard = lambda sid: compute_local_questions(total_questions, total_shards, sid)[1]
+    else:
+        expected_records_for_shard = lambda sid: total_questions if total_questions is not None else 0
+
     if skip_existing:
         shards_to_run = []
         for shard_id in range(total_shards):
-            start_draw, local_count = compute_local_runs(num_samples, total_shards, shard_id)
-            if local_count == 0:
-                print(f"[skip] shard {shard_id} has 0 assigned runs, no output required.")
-                continue
-            missing = []
-            for run_id in range(start_draw, start_draw + local_count):
-                if not run_completed(output_dir, shard_id, run_id, expected_records):
-                    missing.append(run_id)
+            if question_mode:
+                _, local_q = compute_local_questions(total_questions, total_shards, shard_id)
+                if local_q == 0:
+                    print(f"[skip] shard {shard_id} has 0 assigned questions, no output required.")
+                    continue
+                missing = []
+                for run_id in range(num_samples):
+                    if not run_completed(output_dir, shard_id, run_id, local_q):
+                        missing.append(run_id)
+            else:
+                start_draw, local_count = compute_local_runs(num_samples, total_shards, shard_id)
+                if local_count == 0:
+                    print(f"[skip] shard {shard_id} has 0 assigned runs, no output required.")
+                    continue
+                expected = total_questions if total_questions is not None else 0
+                missing = []
+                for run_id in range(start_draw, start_draw + local_count):
+                    if not run_completed(output_dir, shard_id, run_id, expected):
+                        missing.append(run_id)
             if not missing:
-                print(f"[skip] shard {shard_id} has all {local_count} runs completed.")
+                label = f"questions" if question_mode else f"runs"
+                print(f"[skip] shard {shard_id} has all {label} completed.")
                 continue
             pending_runs[shard_id] = missing
             shards_to_run.append(shard_id)
@@ -471,22 +510,32 @@ def run_shards(
     else:
         shards_to_run = []
         for shard_id in range(total_shards):
-            _, local_count = compute_local_runs(num_samples, total_shards, shard_id)
-            if local_count == 0:
-                print(f"[skip] shard {shard_id} has 0 assigned runs, no output required.")
-                continue
+            if question_mode:
+                _, local_q = compute_local_questions(total_questions, total_shards, shard_id)
+                if local_q == 0:
+                    print(f"[skip] shard {shard_id} has 0 assigned questions, no output required.")
+                    continue
+            else:
+                _, local_count = compute_local_runs(num_samples, total_shards, shard_id)
+                if local_count == 0:
+                    print(f"[skip] shard {shard_id} has 0 assigned runs, no output required.")
+                    continue
             shards_to_run.append(shard_id)
     if dry_run:
         for shard_id in shards_to_run:
-            start_draw, local_count = compute_local_runs(num_samples, total_shards, shard_id)
+            if question_mode:
+                start_q, local_q = compute_local_questions(total_questions, total_shards, shard_id)
+                info = f"questions={local_q} range={start_q}-{start_q + local_q - 1}, draws={num_samples}"
+            else:
+                start_draw, local_count = compute_local_runs(num_samples, total_shards, shard_id)
+                info = f"runs={local_count}"
             gpu = gpus[shard_id % len(gpus)]
             log_path = (log_dir / f"shard{shard_id:02d}_{log_stamp}.log").resolve()
             cmd_preview = base_cmd + ["--shard_id", str(shard_id)]
             runs_preview = pending_runs.get(shard_id)
-            run_span = f"runs={local_count}"
             if runs_preview is not None:
-                run_span = f"missing_runs={runs_preview}"
-            print(f"[dry-run] shard {shard_id} -> GPU {gpu} ({run_span})\n  log: {log_path}\n  cmd: {' '.join(cmd_preview)}")
+                info = f"missing_runs={runs_preview}"
+            print(f"[dry-run] shard {shard_id} -> GPU {gpu} ({info})\n  log: {log_path}\n  cmd: {' '.join(cmd_preview)}")
         return
     shard_queue: deque[int] = deque(shards_to_run)
     available: deque[str] = deque(gpus)
@@ -496,11 +545,18 @@ def run_shards(
             while shard_queue and available:
                 gpu = available.popleft()
                 shard_id = shard_queue.popleft()
-                _, local_count = compute_local_runs(num_samples, total_shards, shard_id)
-                if local_count == 0:
-                    print(f"[skip] shard {shard_id} has 0 assigned runs, continuing.")
-                    available.append(gpu)
-                    continue
+                if question_mode:
+                    _, local_q = compute_local_questions(total_questions, total_shards, shard_id)
+                    if local_q == 0:
+                        print(f"[skip] shard {shard_id} has 0 assigned questions, continuing.")
+                        available.append(gpu)
+                        continue
+                else:
+                    _, local_count = compute_local_runs(num_samples, total_shards, shard_id)
+                    if local_count == 0:
+                        print(f"[skip] shard {shard_id} has 0 assigned runs, continuing.")
+                        available.append(gpu)
+                        continue
                 active[gpu] = launch_shard(gpu, shard_id, base_cmd, base_env, log_dir, log_stamp)
             if not active:
                 continue

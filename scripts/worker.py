@@ -99,11 +99,26 @@ def resolve_under_rkv(path_like: str | Path) -> Path:
 
 
 def compute_local_runs(num_samples: int, num_shards: int, shard_id: int) -> tuple[int, int]:
+    """Shard-over-draws: split draws across shards, each shard runs all questions."""
     base = num_samples // num_shards
     extra = num_samples % num_shards
     start = shard_id * base + min(shard_id, extra)
     count = base + (1 if shard_id < extra else 0)
     return start, count
+
+
+def compute_local_questions(total_questions: int, num_shards: int, shard_id: int) -> tuple[int, int]:
+    """Shard-over-questions: split questions across shards, each shard runs all draws."""
+    base = total_questions // num_shards
+    extra = total_questions % num_shards
+    start = shard_id * base + min(shard_id, extra)
+    count = base + (1 if shard_id < extra else 0)
+    return start, count
+
+
+def use_question_sharding(num_samples: int, num_shards: int) -> bool:
+    """Use question-level sharding when draws are fewer than shards."""
+    return num_samples < num_shards
 
 
 def shard_run_dir(base_dir: Path, shard_id: int) -> Path:
@@ -436,11 +451,17 @@ def main(args: argparse.Namespace) -> None:
         raise ValueError("eval_batch_size must be 1 for current TriAttention sharded runner.")
 
     total_samples = args.num_samples
-    start_draw, local_samples = compute_local_runs(total_samples, args.num_shards, args.shard_id)
-    if local_samples == 0:
-        return
+    question_mode = use_question_sharding(total_samples, args.num_shards)
 
-    run_ids = list(range(start_draw, start_draw + local_samples))
+    if question_mode:
+        start_draw = 0
+        local_samples = total_samples
+        run_ids = list(range(total_samples))
+    else:
+        start_draw, local_samples = compute_local_runs(total_samples, args.num_shards, args.shard_id)
+        if local_samples == 0:
+            return
+        run_ids = list(range(start_draw, start_draw + local_samples))
     output_root = Path(args.output_dir)
 
     method_lower = args.method.lower() if args.method else ""
@@ -469,6 +490,20 @@ def main(args: argparse.Namespace) -> None:
         system_prompt=args.chat_system_prompt,
         max_examples=args.max_examples,
     )
+
+    if question_mode:
+        total_questions = len(test_data)
+        start_q, local_q = compute_local_questions(total_questions, args.num_shards, args.shard_id)
+        if local_q == 0:
+            return
+        prompts = prompts[start_q : start_q + local_q]
+        test_data = test_data[start_q : start_q + local_q]
+        sys.stderr.write(
+            f"[shard-over-questions] shard={args.shard_id} questions={start_q}-{start_q + local_q - 1} "
+            f"({local_q}/{total_questions}), draws={total_samples}\n"
+        )
+        sys.stderr.flush()
+
     expected_records = len(test_data)
     if expected_records == 0:
         return
