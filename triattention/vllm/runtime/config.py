@@ -59,6 +59,12 @@ class TriAttentionRuntimeConfig:
     disable_trig: bool = False
     disable_top_n_high_freq: int = 0
 
+    # Debug compression log: when enabled, writes decoded text around each
+    # compression event to a log file for quality diagnosis.
+    debug_compression_log: bool = False
+    debug_compression_log_path: str = ""
+    debug_compression_log_context_tokens: int = 50
+
     @classmethod
     def from_env(cls, prefix: str = "TRIATTN_RUNTIME_") -> "TriAttentionRuntimeConfig":
         env = os.environ
@@ -175,6 +181,17 @@ class TriAttentionRuntimeConfig:
             disable_trig=maybe_bool("DISABLE_TRIG", cls.disable_trig),
             disable_top_n_high_freq=maybe_int(
                 "DISABLE_TOP_N_HIGH_FREQ", cls.disable_top_n_high_freq
+            ),
+            debug_compression_log=maybe_bool(
+                "DEBUG_COMPRESSION_LOG", cls.debug_compression_log
+            ),
+            debug_compression_log_path=(
+                maybe_str("DEBUG_COMPRESSION_LOG_PATH", cls.debug_compression_log_path)
+                or cls.debug_compression_log_path
+            ),
+            debug_compression_log_context_tokens=maybe_int(
+                "DEBUG_COMPRESSION_LOG_CONTEXT_TOKENS",
+                cls.debug_compression_log_context_tokens,
             ),
         )
         config.validate()

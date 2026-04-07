@@ -7,6 +7,7 @@ import os
 import time
 from typing import Any
 
+from .compression_debug_log import CompressionDebugLog
 from .config import TriAttentionRuntimeConfig
 from .debug_trace import trace_event
 from .executor import CompressionExecutor, RunnerHookCompressionExecutor
@@ -52,6 +53,7 @@ class TriAttentionModelRunner:
         self._perf = TriAttentionPerfProfile.from_env(self._logger)
         self._pending_compression_events: list[dict[str, Any]] = []
         self._strict_no_downgrade = bool(self.config.enable_experimental_kv_compaction)
+        self._compression_debug_log = CompressionDebugLog(self.config)
         self._runtime_input_patch_installed = False
         self._allowed_strict_skip_reasons = {
             "under_budget",
@@ -71,6 +73,9 @@ class TriAttentionModelRunner:
         )
 
     def _cleanup_finished_requests(self, scheduler_output: Any) -> None:
+        if self._compression_debug_log.enabled:
+            for req_id in getattr(scheduler_output, "finished_req_ids", []):
+                self._compression_debug_log.flush_request(req_id)
         cleanup_finished_requests(state_store=self.state_store, scheduler_output=scheduler_output)
 
     def _mark_preemptions(self, scheduler_output: Any) -> None:
@@ -90,6 +95,126 @@ class TriAttentionModelRunner:
         self._last_step = step
         return signals
 
+    def _get_actual_kv_from_block_table(self, req_id: str) -> int | None:
+        """Return actual KV token count from Worker's block table.
+
+        Uses ``num_blocks_per_row * block_size`` which reflects the true
+        physical state, free of async Scheduler lag.  Returns *None* when
+        the information is unavailable (e.g. request not yet in input_batch).
+        """
+        input_batch = getattr(self._base_runner, "input_batch", None)
+        if input_batch is None:
+            return None
+        req_id_to_index = getattr(input_batch, "req_id_to_index", None)
+        if not isinstance(req_id_to_index, dict):
+            return None
+        req_index = req_id_to_index.get(req_id)
+        if not isinstance(req_index, int):
+            return None
+        block_table_obj = getattr(input_batch, "block_table", None)
+        if block_table_obj is None:
+            return None
+        inner_tables = getattr(block_table_obj, "block_tables", None)
+        first_table = (
+            inner_tables[0]
+            if isinstance(inner_tables, list) and inner_tables
+            else block_table_obj
+        )
+        num_blocks_per_row = getattr(first_table, "num_blocks_per_row", None)
+        if num_blocks_per_row is None:
+            return None
+        cache_config = getattr(self._base_runner, "cache_config", None)
+        blk_size = int(getattr(cache_config, "block_size", 0))
+        if blk_size <= 0:
+            return None
+        return int(num_blocks_per_row[req_index]) * blk_size
+
+    def _supplement_worker_self_triggers(
+        self,
+        scheduler_output: Any,
+        signals: dict[str, CompressionSignal],
+    ) -> dict[str, CompressionSignal]:
+        """Generate self-trigger signals for requests the Scheduler missed.
+
+        The Scheduler's estimate can lag behind the Worker's actual KV length
+        by several chunks due to async scheduling.  This check uses the real
+        Worker-side state so compression triggers at the right time.
+        """
+        if not self.config.enable_experimental_kv_compaction:
+            return signals
+        scheduled_items = get_scheduled_token_items(scheduler_output)
+        for _raw_key, req_id, scheduled_tokens in scheduled_items:
+            # If Scheduler already sent a trigger, check if we should
+            # override it with a more accurate block-table-based estimate.
+            existing = signals.get(req_id)
+            if existing is not None and existing.should_compress:
+                # During decode, Scheduler's signal is fine — skip.
+                if int(getattr(existing, "scheduled_tokens", 1)) <= 1:
+                    continue
+                # During prefill, Scheduler's estimated_cache_len may lag.
+                # Fall through to compute block-table-based actual_kv and
+                # replace the signal with a corrected estimate.
+            state = self.state_store.get(req_id) if hasattr(self.state_store, "get") else None
+            if state is None:
+                continue
+            prefill_len = state.prefill_len
+            # Compute actual KV length on the Worker side.
+            # kv_from_blocks: block table already includes current step's
+            # allocated blocks (update_states runs before execute_model),
+            # so scheduled_tokens must NOT be added again.
+            kv_from_blocks = False
+            if state.compression_count > 0 and state.current_cache_len > 0:
+                actual_kv = state.current_cache_len
+            else:
+                # First-time compression: use block table for ground truth.
+                # num_computed_tokens from base_runner.requests has async lag
+                # (Scheduler runs 2-3 chunks ahead), so we derive actual KV
+                # from the physical block count on the Worker side.
+                actual_kv_bt = self._get_actual_kv_from_block_table(req_id)
+                if actual_kv_bt is not None:
+                    actual_kv = actual_kv_bt
+                    kv_from_blocks = True
+                else:
+                    # Fallback: base_runner.requests (may be stale).
+                    req_state = None
+                    requests = getattr(self._base_runner, "requests", None)
+                    if isinstance(requests, dict):
+                        req_state = requests.get(req_id)
+                    if req_state is not None:
+                        actual_kv = int(getattr(req_state, "num_computed_tokens", 0))
+                    else:
+                        continue
+            # Threshold: budget + divide_length (same formula as Scheduler).
+            threshold = self.config.kv_budget + self.config.divide_length
+            if self.config.protect_prefill and not self.config.include_prefill_in_budget:
+                threshold += max(prefill_len, 0)
+            if kv_from_blocks:
+                # Block table capacity already covers scheduled tokens.
+                effective_kv = actual_kv
+            else:
+                effective_kv = actual_kv + max(1, int(scheduled_tokens))
+            if effective_kv < threshold:
+                continue
+            self._logger.info(
+                "TriAttention worker self-trigger: req=%s actual_kv=%d "
+                "effective_kv=%d scheduled=%d threshold=%d "
+                "from_blocks=%s (scheduler had no signal)",
+                req_id, actual_kv, effective_kv, scheduled_tokens,
+                threshold, kv_from_blocks,
+            )
+            signals[req_id] = CompressionSignal(
+                req_id=req_id,
+                should_compress=True,
+                reason="length_threshold",
+                estimated_cache_len=effective_kv,
+                step=self._last_step,
+                kv_usage=None,
+                protect_prefill=self.config.protect_prefill,
+                prefill_len=prefill_len,
+                scheduled_tokens=max(1, int(scheduled_tokens)),
+            )
+        return signals
+
     def _execute_compression_actions(
         self,
         scheduler_output: Any,
@@ -104,6 +229,8 @@ class TriAttentionModelRunner:
             allowed_strict_skip_reasons=self._allowed_strict_skip_reasons,
             logger=self._logger,
             log_decisions=bool(self.config.log_decisions),
+            compression_debug_log=self._compression_debug_log if self._compression_debug_log.enabled else None,
+            base_runner=self._base_runner,
         )
 
     def _apply_worker_block_reclaim_events(self) -> None:
@@ -216,20 +343,85 @@ class TriAttentionModelRunner:
             return
         # Unit tests may instantiate TriAttentionModelRunner with a lightweight fake
         # base runner that does not expose vLLM GPU input-prep internals.
+        #
+        # vLLM 0.15 runtime paths may populate `input_batch` while leaving
+        # `req_states` unset, so treat either surface as sufficient evidence
+        # that the native GPU input-prep hooks are available.
         if (
             getattr(self._base_runner, "req_states", None) is None
+            and getattr(self._base_runner, "input_batch", None) is None
             and os.environ.get("TRIATTN_DEBUG_ENABLE_V1_OVERRIDE_PATH", "0") != "1"
         ):
             return
         if self._runtime_input_patch_installed:
             return
         patch_ok = install_runtime_input_patch()
+        trace_event(
+            "runner_install_runtime_input_patch",
+            patch_ok=bool(patch_ok),
+            base_runner_has_req_states=bool(getattr(self._base_runner, "req_states", None) is not None),
+            base_runner_has_input_batch=bool(getattr(self._base_runner, "input_batch", None) is not None),
+        )
         if not patch_ok:
             raise RuntimeError(
                 "TriAttention runtime requires gpu seq_len/slot_mapping patch when "
                 "effective-length overrides are active, but patch installation failed"
             )
         self._runtime_input_patch_installed = True
+
+    def _collect_post_compression_tokens(self, output: Any) -> None:
+        """Feed newly sampled tokens into the compression debug log."""
+        if not self._compression_debug_log.enabled:
+            return
+        # No pending captures → nothing to collect.
+        if not self._compression_debug_log._pending:
+            return
+        # In V1 async path, sample_tokens returns AsyncGPUModelRunnerOutput.
+        # At this point, sampled_token_ids in the inner ModelRunnerOutput is []
+        # because the GPU→CPU async copy hasn't completed yet.
+        # For debug logging, we synchronize and read from the CPU tensor.
+        async_copy_event = getattr(output, "async_copy_ready_event", None)
+        sampled_cpu = getattr(output, "sampled_token_ids_cpu", None)
+        if async_copy_event is not None and sampled_cpu is not None:
+            async_copy_event.synchronize()
+            inner = getattr(output, "_model_runner_output", None)
+            if inner is None:
+                return
+            req_ids = getattr(inner, "req_ids", None)
+            req_id_to_index = getattr(inner, "req_id_to_index", None)
+            if not req_ids or not isinstance(req_id_to_index, dict):
+                return
+            sampled_token_ids = sampled_cpu.tolist()
+            # Filter out invalid requests (their tokens are cleared in get_output)
+            invalid_indices = set(getattr(output, "_invalid_req_indices", []))
+            for req_id in req_ids:
+                idx = req_id_to_index.get(req_id)
+                if idx is None or idx >= len(sampled_token_ids) or idx in invalid_indices:
+                    continue
+                new_tokens = sampled_token_ids[idx]
+                if not new_tokens:
+                    continue
+                for token_id in new_tokens:
+                    self._compression_debug_log.collect_post_token(req_id, int(token_id))
+            return
+        # Sync path: ModelRunnerOutput has sampled_token_ids directly.
+        inner = getattr(output, "_model_runner_output", None)
+        if inner is not None:
+            output = inner
+        req_ids = getattr(output, "req_ids", None)
+        req_id_to_index = getattr(output, "req_id_to_index", None)
+        sampled_token_ids = getattr(output, "sampled_token_ids", None)
+        if not req_ids or not isinstance(req_id_to_index, dict) or not sampled_token_ids:
+            return
+        for req_id in req_ids:
+            idx = req_id_to_index.get(req_id)
+            if idx is None or idx >= len(sampled_token_ids):
+                continue
+            new_tokens = sampled_token_ids[idx]
+            if not new_tokens:
+                continue
+            for token_id in new_tokens:
+                self._compression_debug_log.collect_post_token(req_id, int(token_id))
 
     def execute_model(
         self,
@@ -244,6 +436,7 @@ class TriAttentionModelRunner:
         self._mark_preemptions(scheduler_output)
         self._mark_resumed(scheduler_output)
         signals = self._consume_signals(scheduler_output)
+        signals = self._supplement_worker_self_triggers(scheduler_output, signals)
         t_state_ms = (time.perf_counter() - t0) * 1000.0 if perf_enabled else 0.0
         t0 = time.perf_counter() if perf_enabled else 0.0
         self._execute_compression_actions(scheduler_output, signals)
@@ -283,6 +476,7 @@ class TriAttentionModelRunner:
             t_base_exec_ms=float((bridge_perf or {}).get("base_exec_ms", 0.0)),
             t_total_exec_ms=t_total_exec_ms,
         )
+        self._collect_post_compression_tokens(output)
         output, self._pending_compression_events = attach_execute_model_compression_events(
             output=output,
             pending_events=self._pending_compression_events,
@@ -291,8 +485,10 @@ class TriAttentionModelRunner:
         return output
 
     def sample_tokens(self, grammar_output: Any) -> Any:
-        # Kept for compatibility in case a runner path still calls this method.
+        # In vLLM V1 async path, execute_model returns None and the actual
+        # ModelRunnerOutput (with sampled_token_ids) is produced here.
         output = self._base_runner.sample_tokens(grammar_output)
+        self._collect_post_compression_tokens(output)
         output, self._pending_compression_events = attach_sample_tokens_compression_events(
             output=output,
             pending_events=self._pending_compression_events,

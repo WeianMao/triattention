@@ -97,18 +97,47 @@ def _effective_base_before_step(
     return max(0, current_len - max(0, int(scheduled_tokens)))
 
 
+def _build_scheduler_nct_map(scheduler_output: Any) -> dict[str, int] | None:
+    """Extract req_id → num_computed_tokens from scheduler_output.
+
+    These are the values that ``_update_states`` will write into
+    ``num_computed_tokens_cpu`` *before* ``_prepare_inputs`` computes
+    ``positions_np``.  Using them here ensures the delta we compute is
+    consistent with the positions that the patched input pipeline will
+    actually see.
+    """
+    cached = getattr(scheduler_output, "scheduled_cached_reqs", None)
+    if cached is None:
+        return None
+    req_ids = getattr(cached, "req_ids", None)
+    nct_list = getattr(cached, "num_computed_tokens", None)
+    if not isinstance(req_ids, list) or not isinstance(nct_list, list):
+        return None
+    if len(req_ids) != len(nct_list):
+        return None
+    return dict(zip(req_ids, nct_list))
+
+
 def _resolve_abs_progress_for_override(
     *,
     req_state: Any,
     state: Any,
     scheduled_tokens: int,
     scheduler_step: int | None,
+    scheduler_nct: int | None = None,
 ) -> int:
-    abs_progress = (
-        int(getattr(req_state, "num_computed_tokens", 0))
-        if req_state is not None
-        else 0
-    )
+    # Prefer the value from scheduler_output.scheduled_cached_reqs which
+    # reflects the num_computed_tokens that _update_states will write
+    # *before* _prepare_inputs runs.  req_state.num_computed_tokens is
+    # stale (set by the *previous* step's _update_states).
+    if scheduler_nct is not None:
+        abs_progress = int(scheduler_nct)
+    else:
+        abs_progress = (
+            int(getattr(req_state, "num_computed_tokens", 0))
+            if req_state is not None
+            else 0
+        )
     if state is None:
         return abs_progress
 
@@ -260,6 +289,7 @@ def build_effective_sparse_overrides(
         return out
 
     scheduler_step = _scheduler_output_step(scheduler_output)
+    scheduler_nct_map = _build_scheduler_nct_map(scheduler_output)
 
     seq_bases: dict[int, int] = {}
     pos_deltas: dict[int, int] = {}
@@ -279,19 +309,40 @@ def build_effective_sparse_overrides(
                 # follow native vLLM seq_len / slot-mapping semantics.
                 continue
         req_state = requests_get(req_id)
-        abs_progress = _resolve_abs_progress_for_override(
-            req_state=req_state,
-            state=state,
-            scheduled_tokens=scheduled_tokens,
-            scheduler_step=scheduler_step,
-        )
-        effective_before_step = _effective_base_before_step(
-            state=state,
-            abs_progress=abs_progress,
-            scheduled_tokens=scheduled_tokens,
-            scheduler_step=scheduler_step,
-        )
-        delta = int(effective_before_step - abs_progress)
+        # Prefer the stable compression-anchored delta when available.
+        # This avoids depending on per-step current_cache_len tracking
+        # which can go stale when no scheduler signal arrives.
+        _nct_at_comp = getattr(state, "nct_at_last_compression", None) if state is not None else None
+        _cla = getattr(state, "cache_len_after_last_compression", None) if state is not None else None
+        _sched_nct = scheduler_nct_map.get(req_id) if scheduler_nct_map is not None else None
+        if (
+            isinstance(_nct_at_comp, int)
+            and isinstance(_cla, int)
+            and isinstance(_sched_nct, int)
+        ):
+            # Stable path: delta is constant between compressions.
+            # effective_before_step = cache_len_after + (current_nct - nct_at_compression)
+            # delta = effective_before_step - current_nct = cache_len_after - nct_at_compression
+            effective_before_step = _cla + (_sched_nct - _nct_at_comp)
+            abs_progress = _sched_nct
+            delta = int(_cla - _nct_at_comp)
+        else:
+            # Fallback: original path for edge cases where compression
+            # state hasn't recorded scheduler_nct yet.
+            abs_progress = _resolve_abs_progress_for_override(
+                req_state=req_state,
+                state=state,
+                scheduled_tokens=scheduled_tokens,
+                scheduler_step=scheduler_step,
+                scheduler_nct=_sched_nct,
+            )
+            effective_before_step = _effective_base_before_step(
+                state=state,
+                abs_progress=abs_progress,
+                scheduled_tokens=scheduled_tokens,
+                scheduler_step=scheduler_step,
+            )
+            delta = int(effective_before_step - abs_progress)
         trace_event(
             "effective_override_observe",
             req_id=repr(req_id),

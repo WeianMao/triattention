@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from .constants import TRITON_SCORING_REQUIRED_MARKER
+from .debug_trace import trace_event
 from .signals import CompressionSignal
 
 
@@ -18,6 +19,8 @@ def execute_runner_compression_actions(
     allowed_strict_skip_reasons: set[str],
     logger: logging.Logger,
     log_decisions: bool,
+    compression_debug_log: Any = None,
+    base_runner: Any = None,
 ) -> list[dict[str, Any]]:
     """Execute compression for triggered requests and emit scheduler-side events."""
     events: list[dict[str, Any]] = []
@@ -28,15 +31,26 @@ def execute_runner_compression_actions(
         # compression signals for the same request before update_from_output
         # runs.  The worker-side block table was already shrunk by the first
         # step, so executing again would desync scheduler/worker block counts.
+        # Exception: during chunked prefill (scheduled_tokens > 1), each step
+        # adds up to 2048 tokens, so consecutive compression is expected and
+        # necessary to avoid excessive accumulation.
         req_state = state_store.get(req_id) if hasattr(state_store, "get") else None
         if req_state is not None:
             last_step = getattr(req_state, "last_compression_step", -1)
-            if last_step >= 0 and signal.step - last_step <= 1:
+            compression_count = int(getattr(req_state, "compression_count", 0) or 0)
+            sched_tokens = int(getattr(signal, "scheduled_tokens", 1))
+            if compression_count > 0 and last_step >= 0 and signal.step - last_step <= 1 and sched_tokens <= 1:
                 logger.info(
                     "TriAttention compression skipped (batch-queue dedup) "
                     "req=%s step=%d last_compression_step=%d",
                     req_id, signal.step, last_step,
                 )
+                if hasattr(state_store, "mark_compression_skipped"):
+                    state_store.mark_compression_skipped(
+                        req_id=req_id,
+                        reason="batch_queue_dedup",
+                        step=signal.step,
+                    )
                 events.append(
                     {
                         "req_id": req_id,
@@ -55,6 +69,14 @@ def execute_runner_compression_actions(
                 req_id=req_id,
                 signal=signal,
                 scheduler_output=scheduler_output,
+            )
+            trace_event(
+                "runner_compression_result",
+                req_id=repr(req_id),
+                step=int(signal.step),
+                applied=bool(getattr(result, "applied", False)),
+                reason=str(getattr(result, "reason", "unknown")),
+                cache_len_after=getattr(result, "cache_len_after", None),
             )
         except Exception as exc:  # pragma: no cover - safety fallback
             if strict_no_downgrade:
@@ -127,11 +149,35 @@ def execute_runner_compression_actions(
                 req_id, signal.step, result.reason,
                 before_len, cache_len_after, reclaimed_block_count,
             )
+            # Resolve scheduler_nct for this request so state can record
+            # the num_computed_tokens at compression time (used by
+            # build_effective_sparse_overrides for stable delta).
+            _sched_nct = None
+            _cached_reqs = getattr(scheduler_output, "scheduled_cached_reqs", None)
+            if _cached_reqs is not None:
+                _cr_ids = getattr(_cached_reqs, "req_ids", None)
+                _cr_nct = getattr(_cached_reqs, "num_computed_tokens", None)
+                if isinstance(_cr_ids, list) and isinstance(_cr_nct, list):
+                    try:
+                        _idx = _cr_ids.index(req_id)
+                        _sched_nct = int(_cr_nct[_idx])
+                    except (ValueError, IndexError):
+                        pass
             state_store.mark_compressed(
                 req_id=req_id,
                 step=signal.step,
                 cache_len=cache_len_after,
+                scheduled_tokens=int(getattr(signal, "scheduled_tokens", 1)),
+                scheduler_nct=_sched_nct,
             )
+            if compression_debug_log is not None and base_runner is not None:
+                compression_debug_log.record_compression_event(
+                    req_id=req_id,
+                    step=signal.step,
+                    before_tokens=before_len if isinstance(before_len, int) else 0,
+                    after_tokens=int(cache_len_after),
+                    base_runner=base_runner,
+                )
             if log_decisions:
                 logger.debug(
                     "TriAttention compression applied req=%s step=%d reason=%s",

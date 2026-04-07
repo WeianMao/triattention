@@ -50,13 +50,84 @@ _DUMP_KEEP_DIR = os.environ.get("TRIATTN_DEBUG_DUMP_KEEP_DIR", "").strip()
 _DUMP_GROUP_COMPARE_DIR = os.environ.get(
     "TRIATTN_DEBUG_DUMP_GROUP_COMPARE_DIR", ""
 ).strip()
+_DEBUG_OVERRIDE_FIRST_KEEP_JSON = os.environ.get(
+    "TRIATTN_DEBUG_OVERRIDE_FIRST_KEEP_JSON", ""
+).strip()
 _SEEN_KEEP_DUMP_KEYS: set[tuple[str, int, int]] = set()
+_FIRST_KEEP_OVERRIDE_USED = False
+_OVERRIDE_FIRST_KEEP_CACHE: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
 class PreparedGroupSelection:
     tasks: list[PreparedLayerCompaction]
     selection_mode: str
+
+
+def _load_override_first_keep_tensor() -> torch.Tensor:
+    global _OVERRIDE_FIRST_KEEP_CACHE
+    if _OVERRIDE_FIRST_KEEP_CACHE is not None:
+        return _OVERRIDE_FIRST_KEEP_CACHE
+    if not _DEBUG_OVERRIDE_FIRST_KEEP_JSON:
+        raise RuntimeError("override_keep_json_not_set")
+    payload = json.loads(
+        Path(_DEBUG_OVERRIDE_FIRST_KEEP_JSON).read_text(encoding="utf-8")
+    )
+    indices = payload.get("indices") if isinstance(payload, dict) else payload
+    tensor = torch.as_tensor(indices, dtype=torch.long).contiguous()
+    if tensor.ndim != 2:
+        raise RuntimeError(f"override_keep_ndim_{int(tensor.ndim)}")
+    _OVERRIDE_FIRST_KEEP_CACHE = tensor
+    return tensor
+
+
+def _maybe_override_first_keep_plan(
+    *,
+    keep_plan: KeepPlan,
+    req_id: str,
+    gid: int,
+    round_start: int,
+    group_total_tokens: int,
+) -> KeepPlan:
+    global _FIRST_KEEP_OVERRIDE_USED
+    if not _DEBUG_OVERRIDE_FIRST_KEEP_JSON or _FIRST_KEEP_OVERRIDE_USED:
+        return keep_plan
+    if keep_plan.mode != "per_head":
+        return keep_plan
+    if int(round_start) != int(group_total_tokens):
+        return keep_plan
+
+    override_cpu = _load_override_first_keep_tensor()
+    current = keep_plan.indices
+    current_tensor = (
+        current.detach().to(dtype=torch.long)
+        if isinstance(current, torch.Tensor)
+        else torch.as_tensor(current, dtype=torch.long)
+    )
+    if tuple(current_tensor.shape) != tuple(override_cpu.shape):
+        raise RuntimeError(
+            "override_keep_shape_mismatch:"
+            f"current={tuple(current_tensor.shape)}:"
+            f"override={tuple(override_cpu.shape)}"
+        )
+    if isinstance(current, torch.Tensor):
+        override_indices = override_cpu.to(device=current.device)
+    else:
+        override_indices = override_cpu.tolist()
+    _FIRST_KEEP_OVERRIDE_USED = True
+    trace_event(
+        "selector_first_keep_overridden",
+        req_id=repr(req_id),
+        gid=int(gid),
+        round_start=int(round_start),
+        total_tokens=int(group_total_tokens),
+        override_path=_DEBUG_OVERRIDE_FIRST_KEEP_JSON,
+    )
+    return KeepPlan(
+        mode=keep_plan.mode,
+        indices=override_indices,
+        semantic=keep_plan.semantic,
+    )
 
 
 def _per_head_debug_metrics(indices: Any) -> dict[str, Any]:
@@ -491,6 +562,11 @@ def prepare_group_layer_compactions(
                             if isinstance(dense_selected_for_group, dict)
                             else []
                         ),
+                        "dense_effective_model_path": (
+                            dense_selected_for_group.get("debug_effective_model_path")
+                            if isinstance(dense_selected_for_group, dict)
+                            else None
+                        ),
                     }
                     dump_path.write_text(
                         json.dumps(payload, ensure_ascii=False, indent=2),
@@ -575,6 +651,13 @@ def prepare_group_layer_compactions(
             selected_from_fallback = True
 
         keep_plan = KeepPlan.from_selector_result(selected)
+        keep_plan = _maybe_override_first_keep_plan(
+            keep_plan=keep_plan,
+            req_id=req_id,
+            gid=gid,
+            round_start=round_start,
+            group_total_tokens=group_total_tokens,
+        )
         if _SELECTOR_METRICS_DEBUG and keep_plan.mode == "per_head":
             metrics = _per_head_debug_metrics(keep_plan.indices)
             trace_event(

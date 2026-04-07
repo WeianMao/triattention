@@ -16,23 +16,38 @@ _LEGACY_COMPRESSED_ESTIMATE = (
 )
 
 
+def _resolve_full_prefill_len_from_request_like(request_like: Any) -> int:
+    candidates: list[int] = []
+
+    prompt_token_ids = getattr(request_like, "prompt_token_ids", None)
+    if prompt_token_ids is not None:
+        try:
+            candidates.append(len(prompt_token_ids))
+        except Exception:
+            pass
+
+    for attr_name in ("prompt_token_ids_len", "num_prompt_tokens"):
+        raw_value = getattr(request_like, attr_name, None)
+        if raw_value is None:
+            continue
+        try:
+            candidates.append(int(raw_value))
+        except (TypeError, ValueError):
+            continue
+
+    prefill_token_ids = getattr(request_like, "prefill_token_ids", None)
+    if prefill_token_ids is not None:
+        try:
+            candidates.append(len(prefill_token_ids))
+        except Exception:
+            pass
+
+    return max(candidates, default=0)
+
+
 def register_new_requests(*, state_store: Any, scheduler_output: Any, protect_prefill: bool) -> None:
     for new_req in scheduler_output.scheduled_new_reqs:
-        prefill_token_ids = getattr(new_req, "prefill_token_ids", None)
-        prompt_token_ids = getattr(new_req, "prompt_token_ids", None)
-        if prefill_token_ids is not None:
-            prefill_len = len(prefill_token_ids)
-        elif prompt_token_ids is not None:
-            prefill_len = len(prompt_token_ids)
-        else:
-            prefill_len = int(
-                getattr(
-                    new_req,
-                    "num_prompt_tokens",
-                    getattr(new_req, "prompt_token_ids_len", 0),
-                )
-                or 0
-            )
+        prefill_len = _resolve_full_prefill_len_from_request_like(new_req)
         state_store.ensure(
             req_id=new_req.req_id,
             prefill_len=prefill_len,

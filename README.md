@@ -55,10 +55,36 @@ TriAttention's vLLM server exposes an OpenAI-compatible API, which means you can
 
 ### Quick Setup
 
-1. Follow the [Installation](#installation) and [Server Mode](#server-mode-openai-compatible-api) instructions above to start a vLLM server with TriAttention enabled.
+1. Follow the [Installation](#installation) instructions, then start a vLLM server with the recommended settings below.
 2. In OpenClaw, add a custom provider pointing to your vLLM server (e.g. `http://localhost:8000/v1`).
 
 For manual configuration or troubleshooting, see the [OpenClaw Manual Configuration Guide](docs/openclaw.md).
+
+### Recommended Server Settings for Chat
+
+Interactive chat workloads differ from offline benchmarks — conversations are long-running and prefill chunks can trigger compression at unexpected points. We recommend the following adjustments:
+
+```bash
+# Required: path to precomputed frequency statistics
+export TRIATTN_RUNTIME_SPARSE_STATS_PATH=triattention/vllm/stats/qwen3_32b_int4_stats.pt
+
+# Use a larger KV budget for multi-turn chat (default: 2048)
+export TRIATTN_RUNTIME_KV_BUDGET=12000
+
+vllm serve <model_path> \
+    --dtype bfloat16 \
+    --max-model-len 32768 \
+    --enforce-eager \
+    --trust-remote-code \
+    --enable-prefix-caching false \
+    --max-num-batched-tokens 1024
+```
+
+**Key differences from the default server mode:**
+
+- **`--enable-prefix-caching false`** — Prefix caching is incompatible with KV compression currently; disable it to avoid incorrect cache hits on compressed entries.
+- **`--max-num-batched-tokens 1024`** — Limits the prefill chunk size. Large chunks can overshoot the KV budget in a single step before compression has a chance to trigger, leading to OOM.
+- **`TRIATTN_RUNTIME_KV_BUDGET=12000`** — Chat sessions accumulate context across many turns; a larger budget (e.g. 12k) keeps more history available and avoids aggressive eviction.
 
 ## Installation
 
@@ -121,19 +147,15 @@ TriAttention includes a vLLM plugin that enables transparent KV cache compressio
 ```bash
 # Set compression parameters
 export TRIATTN_RUNTIME_KV_BUDGET=2048
-export TRIATTN_RUNTIME_DIVIDE_LENGTH=128
-export TRIATTN_RUNTIME_WINDOW_SIZE=128
 export TRIATTN_RUNTIME_SPARSE_STATS_PATH=triattention/vllm/stats/qwen3_32b_int4_stats.pt
-export TRIATTN_RUNTIME_PRUNING_MODE=per_head
-export TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION=true
-export TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_BLOCK_RECLAIM=true
 
 # Launch vLLM server -- TriAttention activates automatically
 vllm serve <model_path> \
     --dtype bfloat16 \
     --max-model-len 32768 \
     --enforce-eager \
-    --trust-remote-code
+    --trust-remote-code \
+    --enable-prefix-caching false
 
 # Use the standard OpenAI-compatible API
 curl http://localhost:8000/v1/chat/completions \
