@@ -38,7 +38,7 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 
 - **2.5x throughput** on AIME25 long reasoning while matching Full Attention accuracy (40.8 vs 40.8)
 - **10.7x KV memory reduction** with trigonometric frequency-domain compression
-- **3 model architectures** verified: Qwen3-8B, DeepSeek-R1-Distill-Llama-8B, DeepSeek-R1-Distill-Qwen-7B
+- **OpenClaw compatible** — enables local deployment on 24GB RTX 4090
 
 <p align="center">
   <img src="docs/assets/tradeoff.png" width="80%">
