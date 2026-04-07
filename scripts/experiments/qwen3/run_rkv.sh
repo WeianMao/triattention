@@ -13,7 +13,7 @@ Usage: bash scripts/qwen3/run_rkv.sh [--budget N]
 
 Runs the Qwen3-8B R-KV sweep for aime24/aime25/math500. When --budget is
 provided, the underlying CLI receives the supplied budget. Omitting the flag
-falls back to the default budget defined in configs/shared/defaults.yaml.
+falls back to the default budget defined in triattention/configs/shared/defaults.yaml.
 USAGE
 }
 

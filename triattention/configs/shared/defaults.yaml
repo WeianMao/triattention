@@ -1,1 +1,3 @@
 default_budget: 2048
+default_budget_by_model:
+  DeepSeek-R1-Distill-Llama-8B: 512

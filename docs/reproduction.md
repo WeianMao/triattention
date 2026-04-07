@@ -3,7 +3,7 @@
 ## Prerequisites
 
 ```bash
-git clone https://github.com/TODO/triattention.git
+git clone https://github.com/WeianMao/triattention.git
 cd triattention
 pip install -e .
 pip install flash-attn --no-build-isolation  # recommended

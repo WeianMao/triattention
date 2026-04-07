@@ -145,8 +145,6 @@ class R1KV:
                 sim_scores = similarity_cos_analysis.clone().squeeze(0).to("cpu")
                 fin_scores = final_score_analysis.clone().squeeze(0).to("cpu")
 
-                # print(f"cur_indices {cur_indices} attn_cache_analysis {attn_cache_analysis.shape} similarity_cos_analysis {similarity_cos_analysis.shape} final_score_analysis {final_score_analysis.shape}")
-
                 # Gather the scores based on index
                 kept_attn = torch.gather(attn_scores, dim=1, index=cur_indices)
                 kept_sim = torch.gather(sim_scores, dim=1, index=cur_indices)

@@ -170,13 +170,6 @@ def calibrate(
     # --- Register hooks to capture Q ---
     captured_q: Dict[int, torch.Tensor] = {}
 
-    def _make_hook(layer_idx: int):
-        def hook_fn(module, args, output):
-            # After attention forward, Q has been consumed. We need to
-            # capture Q *before* attention. Use a pre-hook instead.
-            pass
-        return hook_fn
-
     def _make_pre_hook(layer_idx: int):
         def hook_fn(module, args, kwargs):
             hidden_states = args[0] if args else kwargs.get("hidden_states")

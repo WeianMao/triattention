@@ -24,6 +24,6 @@ Each of the `run_*.sh` scripts fans out over the dataset list, spawns up to `JOB
 
 ## Tips
 
-- Shared config is in `experiments/configs/shared/runner_defaults.yaml`.
+- Shared config is in `triattention/configs/shared/runner_defaults.yaml`.
 - Use `JOB_PARALLEL=N` on any script to speed up throughput.
 - Logs for each run land in `experiments/logs/<dataset>/<model>/<mode>/<tag>/`. Check them if a batch failure is reported.

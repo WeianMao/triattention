@@ -13,14 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, TextIO
 
-RKV_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 import yaml
 
 
-DEFAULT_CONFIG = RKV_ROOT / "configs" / "dispatch_default.yaml"
-MERGE_SCRIPT = RKV_ROOT / "scripts" / "merge_shards.py"
-MULTI_EVAL_SCRIPT = RKV_ROOT / "evaluation" / "eval_math_multi.py"
+DEFAULT_CONFIG = REPO_ROOT / "configs" / "dispatch_default.yaml"
+MERGE_SCRIPT = REPO_ROOT / "scripts" / "merge_shards.py"
+MULTI_EVAL_SCRIPT = REPO_ROOT / "evaluation" / "eval_math_multi.py"
 PATH_ARG_KEYS = {"output_dir", "dataset_path", "model_path", "tokenizer_path"}
 RUNNER_EXCLUDE_KEYS = {"num_samples_by_dataset"}
 
@@ -355,7 +355,7 @@ def resolve_path(value: str | Path) -> Path:
     parts = path.parts
     if parts and parts[0] == "R-KV":
         path = Path(*parts[1:]) if len(parts) > 1 else Path(".")
-    return (RKV_ROOT / path).resolve()
+    return (REPO_ROOT / path).resolve()
 
 
 def format_runner_args(args_dict: Dict[str, object], total_shards: int) -> List[str]:
@@ -407,7 +407,7 @@ def launch_shard(
     print(f"[launch] shard {shard_id} -> GPU {gpu}, log {log_path}")
     process = subprocess.Popen(
         shard_cmd,
-        cwd=str(RKV_ROOT),
+        cwd=str(REPO_ROOT),
         stdout=log_handle,
         stderr=subprocess.STDOUT,
         env=env,
@@ -531,7 +531,7 @@ def merge_outputs(shard_output_dir: Path, merged_dir_name: str, skip_merge: bool
         return
     cmd = [sys.executable, str(MERGE_SCRIPT), "--method-output-dir", str(shard_output_dir), "--merged-dir-name", merged_dir_name]
     print(f"[merge] {' '.join(cmd)}")
-    subprocess.check_call(cmd, cwd=str(RKV_ROOT))
+    subprocess.check_call(cmd, cwd=str(REPO_ROOT))
 
 
 def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Optional[Path], conda_env: str, dry_run: bool, num_samples: int | None = None) -> None:
@@ -563,7 +563,7 @@ def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Opti
         print(f"[dry-run] eval command: {' '.join(cmd)}")
         return
     print(f"[eval] {' '.join(cmd)}")
-    subprocess.check_call(cmd, cwd=str(RKV_ROOT))
+    subprocess.check_call(cmd, cwd=str(REPO_ROOT))
 
 
 def main() -> None:

@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-RKV_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 from triattention.integration.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
@@ -95,7 +95,7 @@ def resolve_under_rkv(path_like: str | Path) -> Path:
     parts = path.parts
     if parts and parts[0] == "R-KV":
         path = Path(*parts[1:]) if len(parts) > 1 else Path(".")
-    return (RKV_ROOT / path).resolve()
+    return (REPO_ROOT / path).resolve()
 
 
 def compute_local_runs(num_samples: int, num_shards: int, shard_id: int) -> tuple[int, int]:
@@ -227,7 +227,7 @@ def load_dataset(
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=888)
     parser.add_argument("--dataset_path", "--dataset-path", dest="dataset_path", type=str, required=True)
     parser.add_argument("--output_dir", "--output-dir", dest="output_dir", type=str, required=True)
     parser.add_argument("--model_path", "--model-path", dest="model_path", type=str, required=True)
@@ -324,7 +324,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--triattention_normalize_scores",
         type=str2bool,
-        default=False,
+        default=True,
         help="Normalize per-head sparse scores before aggregation.",
     )
     parser.add_argument(
@@ -336,8 +336,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--per_head_pruning",
         type=str2bool,
-        default=False,
-        help="Enable per-KV-head independent pruning (each head selects tokens independently). Default: False",
+        default=True,
+        help="Enable per-KV-head independent pruning (each head selects tokens independently). Default: True",
     )
     parser.add_argument(
         "--per_layer_perhead_pruning",
@@ -376,7 +376,7 @@ def parse_arguments() -> argparse.Namespace:
         "--count-prompt-tokens",
         dest="count_prompt_tokens",
         type=str2bool,
-        default=False,
+        default=True,
         help="Include prefill tokens in budget calculation (aligns with R-KV behavior).",
     )
     parser.add_argument(
@@ -384,7 +384,7 @@ def parse_arguments() -> argparse.Namespace:
         "--attention-layer-compression",
         dest="attention_layer_compression",
         type=str2bool,
-        default=False,
+        default=True,
         help="Use attention-layer compression instead of generate wrapper.",
     )
     parser.add_argument(
@@ -392,7 +392,7 @@ def parse_arguments() -> argparse.Namespace:
         "--slack-budget-trigger",
         dest="slack_budget_trigger",
         type=str2bool,
-        default=False,
+        default=True,
         help="Trigger pruning at budget + divide_length (like generate wrapper).",
     )
     parser.add_argument(
@@ -433,7 +433,7 @@ def main(args: argparse.Namespace) -> None:
         if args.dataset_name in dataset2max_length:
             args.max_length = dataset2max_length[args.dataset_name]
     if args.eval_batch_size != 1:
-        raise ValueError("eval_batch_size must be 1 for current R-KV sharded runner.")
+        raise ValueError("eval_batch_size must be 1 for current TriAttention sharded runner.")
 
     total_samples = args.num_samples
     start_draw, local_samples = compute_local_runs(total_samples, args.num_shards, args.shard_id)

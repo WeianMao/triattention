@@ -24,7 +24,7 @@ usage() {
 Usage: bash scripts/qwen3/run_one.sh [--dataset name] [--model name] [--method fullkv|r1kv|triattention] [--budget N] [--dry-run]
 
 Dataset defaults to aime24 and model defaults to Qwen3-8B.
-If --budget is omitted for r1kv/triattention, default_budget from configs/shared/defaults.yaml is used.
+If --budget is omitted for r1kv/triattention, default_budget from triattention/configs/shared/defaults.yaml is used.
 USAGE
 }
 

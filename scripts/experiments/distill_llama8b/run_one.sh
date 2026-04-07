@@ -24,7 +24,7 @@ usage() {
 Usage: bash scripts/distill_llama8b/run_one.sh [--dataset name] [--model name] [--method fullkv|r1kv|snapkv|triattention] [--budget N] [--dry-run]
 
 Dataset defaults to aime24 and model defaults to DeepSeek-R1-Distill-Llama-8B.
-If --budget is omitted for r1kv/snapkv/triattention, default_budget from configs/shared/defaults.yaml is used.
+If --budget is omitted for r1kv/snapkv/triattention, default_budget from triattention/configs/shared/defaults.yaml is used.
 USAGE
 }
 

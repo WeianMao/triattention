@@ -3,18 +3,18 @@
 # TriAttention: Efficient Long Reasoning with Trigonometric KV Compression
 
 [![Paper](https://img.shields.io/badge/ArXiv-Paper-brown)](https://arxiv.org/abs/TODO)
-[![Project Page](https://img.shields.io/badge/Project-Page-teal)](https://TODO)
+[![Project Page](https://img.shields.io/badge/Project-Page-teal)](https://weianmao.github.io/tri-attention-project-page/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/downloads/)
 
 *Compress KV cache by 10.7x and boost throughput by 2.5x on long reasoning tasks -- with no accuracy loss.*
 
-[Weian Mao](https://scholar.google.com/citations?user=TODO)<sup>1*</sup>,
-[Xi Lin](https://scholar.google.com/citations?user=TODO)<sup>3*</sup>,
+[Weian Mao](https://scholar.google.com/citations?user=Qu-QXTsAAAAJ)<sup>1*</sup>,
+Xi Lin<sup>3*</sup>,
 [Wei Huang](https://aaron-weihuang.com/)<sup>2*</sup>,
-[Yuxin Xie](https://scholar.google.com/citations?user=TODO)<sup>1</sup>,
-[Tianfu Fu](https://scholar.google.com/citations?user=TODO)<sup>1</sup>,
-[Bohan Zhuang](https://scholar.google.com/citations?user=TODO)<sup>3</sup>,
+Yuxin Xie<sup>1</sup>,
+Tianfu Fu<sup>1</sup>,
+[Bohan Zhuang](https://bohanzhuang.github.io)<sup>3</sup>,
 [Song Han](http://songhan.mit.edu/)<sup>1,2</sup>,
 [Yukang Chen](https://yukangchen.com/)<sup>2</sup>
 
@@ -52,7 +52,7 @@ Pre-RoPE Q/K vectors in long reasoning models concentrate around fixed centers t
 ## Installation
 
 ```bash
-git clone https://github.com/TODO/triattention.git
+git clone https://github.com/WeianMao/triattention.git
 cd triattention
 pip install -e .
 pip install flash-attn --no-build-isolation  # recommended
@@ -67,6 +67,10 @@ python scripts/cli.py run-one \
     --method triattention \
     --budget 2048
 ```
+
+## Datasets
+
+Benchmark datasets (AIME 2024, AIME 2025, MATH-500) are automatically downloaded from HuggingFace on first run -- no manual data preparation is needed. The evaluation scripts handle downloading, caching, and formatting transparently.
 
 ## Supported Models
 

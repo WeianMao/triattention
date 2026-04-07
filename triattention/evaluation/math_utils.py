@@ -188,33 +188,6 @@ def extract_answer_number(sentence: str) -> float:
     return pred[-1]
 
 
-@timeout_decorator.timeout(5)
-def compare_ans(ans_p_str, ans_l_str, is_strict=False):
-    ans_p_str = clean_expr_str(ans_p_str)
-    ans_p_str = ans_p_str.replace(",", "").replace("$", "")
-    ans_l_str = clean_expr_str(ans_l_str)
-    ans_l_str = ans_l_str.replace(",", "").replace("$", "")
-    if ans_p_str is None:
-        return False
-    if ans_p_str.replace(" ", "") == ans_l_str.replace(" ", ""):
-        return True
-    ans_p = parse_latex_answer(ans_p_str)
-    if ans_p is None:
-        return False
-    ans_l = parse_latex_answer(ans_l_str)
-    if ans_l is None:
-        return False
-    if is_expr_equal(ans_p, ans_l, is_strict=is_strict):
-        return True
-    # TODO not suitable
-    ans_p_str = extract_answer_number(ans_p_str)
-    if is_number(ans_p_str):
-        ans_p = parse_latex_answer(ans_p_str)
-        if is_expr_equal(ans_p, ans_l, is_strict=is_strict):
-            return True
-    return False
-
-
 def vote(answers):
     counter = Counter(answers)
     return counter.most_common(1)[0][0]
@@ -241,9 +214,3 @@ def rough_compare_ans(generation, answer):
         ):
             return 1
     return 0
-
-
-if __name__ == "__main__":
-    pred = "To find the minimum value of $f(x)$, we need to find the critical points where the derivative of $f(x)$ is either zero or undefined. Let's write a function to solve this problem:\n\n```python\nfrom sympy import symbols, diff, solve\n\ndef find_minimum_value():\n    x, p = symbols('x p')\n    f = abs(x - p) + abs(x - 15) + abs(x - p - 15)\n    f_prime = diff(f, x)\n    critical_points = solve(f_prime, x)\n    \n    # Evaluate f(x) at the critical points and endpoints\n    values = [f.subs(x, p), f.subs(x, 15)]\n    for point in critical_points:\n        values.append(f.subs(x, point))\n    \n    # Find the minimum value\n    minimum_value = min(values)\n    \n    return minimum_value\n\nresult = find_minimum_value()\nprint(result)\n```\n```output\nValueError(\"\\nCan't calculate derivative wrt re(x) + I*im(x).\")\n```\nIt seems that there is an error in the code. Let's modify the code to handle the case when the derivative is undefined.\n\n```python\nfrom sympy import symbols, diff, solve, oo\n\ndef find_minimum_value():\n    x, p = symbols('x p')\n    f = abs(x - p) + abs(x - 15) + abs(x - p - 15)\n    f_prime = diff(f, x)\n    critical_points = solve(f_prime, x)\n    \n    # Evaluate f(x) at the critical points and endpoints\n    values = [f.subs(x, p), f.subs(x, 15)]\n    for point in critical_points:\n        if point.is_real:\n            values.append(f.subs(x, point))\n    \n    # Find the minimum value\n    minimum_value = min(values)\n    \n    return minimum_value\n\nresult = find_minimum_value()\nprint(result)\n```\n```output\nValueError(\"\\nCan't calculate derivative wrt re(x) + I*im(x).\")\n```\nApologies for the error in the code. It seems that the derivative calculation is causing an issue. Let's modify the code to handle the absolute value function and find the minimum value using a different approach.\n\n```python\nfrom sympy import symbols, Piecewise, Min, oo\n\ndef find_minimum_value():\n    x, p = symbols('x p')\n    f = abs(x - p) + abs(x - 15) + abs(x - p - 15)\n    \n    # Define the piecewise function for f(x)\n    f_piecewise = Piecewise((f, x <= p), (f.subs(x, p), p < x <= 15), (f.subs(x, 15), x > 15))\n    \n    # Find the minimum value\n    minimum_value = Min(f_piecewise, (x, p, 15))\n    \n    return minimum_value\n\nresult = find_minimum_value()\nprint(result)\n```\n```output\nTypeError('cannot determine truth value of Relational')\n```\nApologies for the error in the code. It seems that the piecewise function is causing an issue. Let's modify the code to handle the absolute value function and find the minimum value using a different approach.\n\n```python\nfrom sympy import symbols, Min, oo\n\ndef find_minimum_value():\n    x, p = symbols('x p')\n    f = abs(x - p) + abs(x - 15) + abs(x - p - 15)\n    \n    # Find the minimum value\n    minimum_value = Min(f, (x, p, 15))\n    \n    return minimum_value\n\nresult = find_minimum_value()\nprint(result)\n```\n"
-    label = "15"
-    print(compare_ans(pred, label))

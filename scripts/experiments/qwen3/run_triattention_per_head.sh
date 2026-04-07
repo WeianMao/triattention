@@ -13,7 +13,7 @@ Usage: bash scripts/qwen3/run_triattention_per_head.sh [--budget N]
 
 Runs TriAttention per-head pruning for Qwen3-8B on aime24/aime25/math500. Passing
 --budget forwards the specific budget to cli.py. Omit the
-flag to fall back to configs/shared/defaults.yaml.
+flag to fall back to triattention/configs/shared/defaults.yaml.
 USAGE
 }
 

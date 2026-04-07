@@ -16,10 +16,10 @@ try:
 except ImportError as exc:
     raise SystemExit("PyYAML is required to run experiment scripts.") from exc
 
-RKV_ROOT = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = RKV_ROOT.parent
-EXP_ROOT = RKV_ROOT / "experiments"
-CONFIG_ROOT = EXP_ROOT / "configs" / "shared"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = REPO_ROOT.parent
+EXP_ROOT = REPO_ROOT / "experiments"
+CONFIG_ROOT = REPO_ROOT / "triattention" / "configs" / "shared"
 DEFAULTS_PATH = CONFIG_ROOT / "defaults.yaml"
 BUDGETS_PATH = CONFIG_ROOT / "budgets.yaml"
 RUNNER_DEFAULTS_PATH = CONFIG_ROOT / "runner_defaults.yaml"
@@ -45,10 +45,14 @@ def load_yaml(path: Path) -> dict:
         return yaml.safe_load(handle) or {}
 
 
-def load_default_budget() -> int:
+def load_default_budget(model_name: str | None = None) -> int:
     data = load_yaml(DEFAULTS_PATH)
     if "default_budget" not in data:
         raise ValueError(f"default_budget missing in {DEFAULTS_PATH}")
+    if model_name is not None:
+        by_model = data.get("default_budget_by_model", {})
+        if isinstance(by_model, dict) and model_name in by_model:
+            return int(by_model[model_name])
     return int(data["default_budget"])
 
 
@@ -107,13 +111,13 @@ def dataset_max_length(dataset: str, defaults: dict) -> int:
 def resolve_dataset_path(dataset: str) -> Path:
     candidates = [
         PROJECT_ROOT / f"{dataset}.jsonl",
-        RKV_ROOT / "data" / f"{dataset}.jsonl",
+        REPO_ROOT / "data" / f"{dataset}.jsonl",
     ]
     if dataset == "math500":
         candidates.extend(
             [
                 PROJECT_ROOT / "math.jsonl",
-                RKV_ROOT / "data" / "math.jsonl",
+                REPO_ROOT / "data" / "math.jsonl",
             ]
         )
     for candidate in candidates:
@@ -336,12 +340,12 @@ def ensure_run_log(log_dir: Path) -> None:
 def dispatch_run(config_path: Path, dataset: str, log_dir: Path, dry_run: bool) -> None:
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{RKV_ROOT}:{pythonpath}" if pythonpath else str(RKV_ROOT)
+    env["PYTHONPATH"] = f"{REPO_ROOT}:{pythonpath}" if pythonpath else str(REPO_ROOT)
 
 
     cmd = [
         sys.executable,
-        str(RKV_ROOT / "scripts" / "dispatch.py"),
+        str(REPO_ROOT / "scripts" / "dispatch.py"),
         "--config",
         str(config_path),
         "--dataset",
@@ -350,7 +354,7 @@ def dispatch_run(config_path: Path, dataset: str, log_dir: Path, dry_run: bool) 
     if dry_run:
         print(f"[dry-run] {' '.join(cmd)}")
         return
-    subprocess.check_call(cmd, cwd=str(RKV_ROOT), env=env)
+    subprocess.check_call(cmd, cwd=str(REPO_ROOT), env=env)
     ensure_run_log(log_dir)
 
 
@@ -406,7 +410,7 @@ def run_one(
             else:
                 raise FileNotFoundError(
                     f"TriAttention stats missing for {dataset}/{model_name}/budget {budget}. "
-                    f"Run scripts/build_all_stats_v2.sh first."
+                    f"Run scripts/experiments/build_all_stats.sh first."
                 )
 
     tag = tag_with_suffix(tag, resolved_run_tag)
@@ -434,9 +438,9 @@ def run_one(
 
 def run_defaults(dry_run: bool) -> None:
     defaults = load_runner_defaults()
-    default_budget = load_default_budget()
     for dataset in DATASETS:
         for model_name in MODEL_SPECS.keys():
+            default_budget = load_default_budget(model_name)
             run_one(
                 dataset,
                 model_name,
@@ -558,7 +562,7 @@ def build_stats(
     if not input_path.exists():
         raise SystemExit(f"Input file not found: {input_path}")
 
-    out_dir = Path(output_dir) if output_dir else RKV_ROOT / "triattention" / "calibration"
+    out_dir = Path(output_dir) if output_dir else REPO_ROOT / "triattention" / "calibration"
     model_list = normalize_selection(models, list(MODEL_SPECS.keys()), "model")
 
     commands: List[Dict[str, object]] = []
@@ -572,7 +576,7 @@ def build_stats(
         stats_path.parent.mkdir(parents=True, exist_ok=True)
         cmd = [
             sys.executable,
-            str(RKV_ROOT / "scripts" / "calibrate.py"),
+            str(REPO_ROOT / "scripts" / "calibrate.py"),
             "--model",
             str(model_path),
             "--input",
@@ -587,11 +591,11 @@ def build_stats(
             "flash_attention_2",
         ]
         env = os.environ.copy()
-        env["PYTHONPATH"] = f"{RKV_ROOT}:{env.get('PYTHONPATH', '')}".strip(":")
+        env["PYTHONPATH"] = f"{REPO_ROOT}:{env.get('PYTHONPATH', '')}".strip(":")
         commands.append(
             {
                 "cmd": cmd,
-                "cwd": str(RKV_ROOT),
+                "cwd": str(REPO_ROOT),
                 "env": env,
                 "label": model_name,
             }
@@ -658,12 +662,12 @@ def download_models() -> None:
         )
 
 
-def resolve_budget_for_mode(mode: str, budget: int | None) -> int | None:
+def resolve_budget_for_mode(mode: str, budget: int | None, model_name: str | None = None) -> int | None:
     if mode == "fullkv":
         return None
     if budget is not None:
         return int(budget)
-    return load_default_budget()
+    return load_default_budget(model_name)
 
 
 def parse_args() -> argparse.Namespace:
@@ -754,7 +758,7 @@ def main() -> None:
         return
     if args.command == "run-one":
         defaults = load_runner_defaults()
-        budget = resolve_budget_for_mode(args.method, args.budget)
+        budget = resolve_budget_for_mode(args.method, args.budget, args.model)
         extra_config = load_extra_config(
             [Path(path) for path in (args.extra_config or [])]
         )

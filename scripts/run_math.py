@@ -11,7 +11,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from triattention.integration.monkeypatch import replace_llama, replace_qwen2, replace_qwen3
 
-RKV_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 dataset2key = {
@@ -126,7 +126,7 @@ def main(args):
 def parse_arguments():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=888)
     parser.add_argument("--dataset_path", type=str)
     parser.add_argument("--save_path", type=str)
     parser.add_argument("--model_path", type=str)
@@ -188,7 +188,7 @@ if __name__ == "__main__":
     if args.dataset_name in dataset2max_length:
         args.max_length = dataset2max_length[args.dataset_name]
     if args.eval_batch_size != 1:
-        raise ValueError("eval_batch_size must be 1 for current R-KV HuggingFace path.")
+        raise ValueError("eval_batch_size must be 1 for current TriAttention HuggingFace path.")
 
     # ====== build compression config ======
     method_config = {"budget": args.kv_budget, "window_size": args.window_size}

@@ -4,8 +4,8 @@ setup(
     name="triattention",
     version="0.1.0",
     description="TriAttention: efficient KV cache compression via tri-directional sparse attention",
-    author="Anonymous",
-    url="https://github.com/placeholder/triattention",
+    author="Weian Mao, Xi Lin, Wei Huang, Yuxin Xie, Tianfu Fu, Bohan Zhuang, Song Han, Yukang Chen",
+    url="https://github.com/WeianMao/triattention",
     packages=find_packages(),
     python_requires=">=3.10",
     install_requires=[
@@ -24,6 +24,16 @@ setup(
         "torch",
         "triton",
     ],
+    extras_require={
+        "eval": [
+            "pebble>=5.0",
+            "sympy>=1.13",
+            "latex2sympy2",
+            "word2number",
+            "antlr4-python3-runtime==4.7.2",
+        ],
+        "flash": ["flash-attn>=2.5.8"],
+    },
     entry_points={
         "vllm.general_plugins": [
             "triattention = triattention.vllm.plugin:register_triattention_backend",

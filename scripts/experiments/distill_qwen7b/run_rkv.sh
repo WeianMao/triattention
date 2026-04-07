@@ -13,7 +13,7 @@ Usage: bash scripts/distill_qwen7b/run_rkv.sh [--budget N]
 
 Runs the DeepSeek-R1-Distill-Qwen-7B R-KV sweep for aime24/aime25/math500. When --budget is
 provided, the underlying CLI receives the supplied budget. Omitting the flag
-falls back to the default budget defined in configs/shared/defaults.yaml.
+falls back to the default budget defined in triattention/configs/shared/defaults.yaml.
 USAGE
 }
 

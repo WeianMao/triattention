@@ -15,8 +15,20 @@ The calibration script runs a forward pass on plain text input, captures query s
 
 ## Pre-computed Stats
 
+Stats are organised by experiment target. Each sub-directory contains per-model `.pt` files:
+
+**For AIME-24 experiments** (`triattention/calibration/for_aime24_experiment/`):
+
 | Model | Stats Path |
 |-------|-----------|
-| Qwen3-8B | `triattention/calibration/qwen3_8b_stats.pt` |
-| DeepSeek-R1-Distill-Llama-8B | `triattention/calibration/dsllama_8b_stats.pt` |
-| DeepSeek-R1-Distill-Qwen-7B | `triattention/calibration/dsqwen_7b_stats.pt` |
+| Qwen3-8B | `triattention/calibration/for_aime24_experiment/qwen3_8b.pt` |
+| DeepSeek-R1-Distill-Llama-8B | `triattention/calibration/for_aime24_experiment/ds_llama8b.pt` |
+| DeepSeek-R1-Distill-Qwen-7B | `triattention/calibration/for_aime24_experiment/ds_qwen7b.pt` |
+
+**For AIME-25 experiments** (`triattention/calibration/for_aime25_experiment/`):
+
+| Model | Stats Path |
+|-------|-----------|
+| Qwen3-8B | `triattention/calibration/for_aime25_experiment/qwen3_8b.pt` |
+| DeepSeek-R1-Distill-Llama-8B | `triattention/calibration/for_aime25_experiment/ds_llama8b.pt` |
+| DeepSeek-R1-Distill-Qwen-7B | `triattention/calibration/for_aime25_experiment/ds_qwen7b.pt` |

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge R-KV shard outputs (jsonl) sorted by sample_idx."""
+"""Merge TriAttention shard outputs (jsonl) sorted by sample_idx."""
 from __future__ import annotations
 
 import argparse

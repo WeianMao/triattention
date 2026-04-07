@@ -826,12 +826,6 @@ def apply_triattention_patch(
         else:
             cache_position_override = None
 
-        # print current sequence for debugging
-        if input_ids is not None:
-            current_seq = input_ids[0].cpu().numpy().tolist()
-            import sys
-            # sys.stderr.write(f"[TriAttention] Current sequence: {current_seq}\n")    
-
         outputs = orig_forward(
             input_ids=input_ids,
             attention_mask=attention_mask_override,
