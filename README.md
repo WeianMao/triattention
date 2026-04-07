@@ -164,9 +164,9 @@ print(outputs[0].outputs[0].text)
 | `TRIATTN_RUNTIME_WINDOW_SIZE` | `128` | Recent tokens always preserved |
 | `TRIATTN_RUNTIME_PRUNING_MODE` | `per_head` | Token selection strategy (`per_head` or `per_layer_per_head`) |
 | `TRIATTN_RUNTIME_SPARSE_STATS_PATH` | -- | Path to precomputed frequency statistics `.pt` file |
-| `TRIATTN_RUNTIME_PROTECT_PREFILL` | `true` | Protect initial prompt tokens from eviction |
-| `TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION` | `false` | Enable in-place KV cache compaction |
-| `TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_BLOCK_RECLAIM` | `false` | Enable freed block reclamation |
+| `TRIATTN_RUNTIME_PROTECT_PREFILL` | `false` | Protect initial prompt tokens from eviction |
+| `TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_KV_COMPACTION` | `true` | Enable in-place KV cache compaction |
+| `TRIATTN_RUNTIME_ENABLE_EXPERIMENTAL_BLOCK_RECLAIM` | `true` | Enable freed block reclamation |
 | `ENABLE_TRIATTENTION` | `true` | Master switch to enable/disable the plugin |
 
 ### Precomputed Statistics

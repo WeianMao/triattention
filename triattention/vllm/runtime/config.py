@@ -26,14 +26,14 @@ class TriAttentionRuntimeConfig:
 
     kv_budget: int = 2048
     divide_length: int = 128
-    protect_prefill: bool = True
+    protect_prefill: bool = False
     disable_compression: bool = False
 
     enable_kv_usage_trigger: bool = False
     kv_usage_trigger: float = 0.98
     kv_usage_release: float = 0.90
 
-    enable_experimental_kv_compaction: bool = False
+    enable_experimental_kv_compaction: bool = True
     enable_experimental_block_reclaim: bool = True
     require_triton_scoring: bool = True
     require_physical_reclaim: bool = True
