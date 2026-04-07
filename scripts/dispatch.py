@@ -471,11 +471,6 @@ def run_shards(
     shards_to_run: List[int]
     pending_runs: Dict[int, List[int]] = {}
 
-    if question_mode:
-        expected_records_for_shard = lambda sid: compute_local_questions(total_questions, total_shards, sid)[1]
-    else:
-        expected_records_for_shard = lambda sid: total_questions if total_questions is not None else 0
-
     if skip_existing:
         shards_to_run = []
         for shard_id in range(total_shards):
@@ -499,7 +494,7 @@ def run_shards(
                     if not run_completed(output_dir, shard_id, run_id, expected):
                         missing.append(run_id)
             if not missing:
-                label = f"questions" if question_mode else f"runs"
+                label = "questions" if question_mode else "runs"
                 print(f"[skip] shard {shard_id} has all {label} completed.")
                 continue
             pending_runs[shard_id] = missing
