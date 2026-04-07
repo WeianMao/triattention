@@ -70,7 +70,12 @@ def compact_layer_with_keep_plan(
     after_required = num_required_blocks(keep_count, block_size)
     preserve_dropped_tokens = True
     if enable_experimental_block_reclaim and after_required < before_required:
-        preserve_dropped_tokens = False
+        # Physical reclaim can still happen by truncating tail blocks after
+        # compaction. We intentionally keep the stable, order-preserving
+        # permutation here because the fill-hole path can preserve the kept
+        # token set while silently scrambling prefix order across repeated
+        # compressions.
+        preserve_dropped_tokens = True
     if _DEBUG_FORCE_PRESERVE_DROPPED:
         preserve_dropped_tokens = True
 

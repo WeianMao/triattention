@@ -15,7 +15,10 @@ from vllm.v1.outputs import ModelRunnerOutput
 
 from .config import TriAttentionRuntimeConfig
 from .effective_len_tracker import EffectiveCacheLenTracker
-from .kv_allocation_sync import resolve_request_effective_num_computed
+from .kv_allocation_sync import (
+    prepare_request_effective_num_computed,
+    resolve_request_effective_num_computed,
+)
 from .planner import CompressionPlanner
 from .request_key_compat import iter_scheduled_token_items
 from .scheduler import TriAttentionScheduler
@@ -106,12 +109,49 @@ def _patched_scheduler_init(self, *args, **kwargs):
     )
 
 
+def _compute_max_chunk_for_compression(self, cfg: TriAttentionRuntimeConfig) -> int | None:
+    """Compute max tokens per scheduling step to allow compression cycling.
+
+    When physical KV cache is smaller than budget + default chunk size,
+    chunked prefill cannot fit the next chunk after compression. Cap the
+    per-step token budget so that budget + chunk <= physical KV capacity.
+    Returns None if no cap is needed.
+    """
+    block_pool = getattr(getattr(self, "kv_cache_manager", None), "block_pool", None)
+    if block_pool is None:
+        return None
+    total_blocks = getattr(block_pool, "num_gpu_blocks", 0)
+    if total_blocks <= 0:
+        return None
+    block_size = int(getattr(self, "block_size", 16) or 16)
+    physical_kv = total_blocks * block_size
+    headroom = physical_kv - cfg.kv_budget
+    if headroom <= 0:
+        return None
+    # Leave a small margin (one block) for allocation bookkeeping.
+    headroom = max(1, headroom - block_size)
+    return headroom
+
+
 def _patched_scheduler_schedule(self):
     assert _ORIG_SCHED_SCHEDULE is not None
     TriAttentionScheduler._sync_effective_kv_offsets_before_schedule(self)
-    scheduler_output = _ORIG_SCHED_SCHEDULE(self)
 
     cfg = getattr(self, "triattention_config", None)
+    orig_max_scheduled = None
+    if cfg and not cfg.disable_compression:
+        max_chunk = _compute_max_chunk_for_compression(self, cfg)
+        if max_chunk is not None:
+            current_max = getattr(self, "max_num_scheduled_tokens", None)
+            if current_max is not None and max_chunk < current_max:
+                orig_max_scheduled = current_max
+                self.max_num_scheduled_tokens = max_chunk
+
+    scheduler_output = _ORIG_SCHED_SCHEDULE(self)
+
+    if orig_max_scheduled is not None:
+        self.max_num_scheduled_tokens = orig_max_scheduled
+
     if cfg is None:
         return scheduler_output
 
@@ -227,8 +267,18 @@ def _patched_kv_cache_allocate_slots(
     *args,
     **kwargs,
 ):
-    """Keep vLLM allocation math aligned with TriAttention effective KV length."""
+    """Keep vLLM allocation math aligned with TriAttention effective KV length.
+
+    Once a request has been physically compacted, its live KV layout no longer
+    matches vLLM's original contiguous-prefix block-hash chain. Continuing to
+    commit prefix-cache hashes for later full blocks is therefore invalid and
+    can trip BlockPool invariants on the next cache update. We keep slot
+    allocation but skip vLLM's cache-commit step for compressed requests.
+    """
     assert _ORIG_KVCACHE_ALLOCATE_SLOTS is not None
+    # Ensure effective marker is refreshed — _sync_effective_kv_offsets only
+    # covers RUNNING requests, but preempted WAITING requests also need it.
+    prepare_request_effective_num_computed(request)
     effective_num_computed = resolve_request_effective_num_computed(request)
     if effective_num_computed is None:
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
@@ -243,6 +293,8 @@ def _patched_kv_cache_allocate_slots(
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
             self, request, num_new_tokens, *args, **kwargs,
         )
+    kwargs = dict(kwargs)
+    kwargs["delay_cache_blocks"] = True
     setattr(request, "num_computed_tokens", int(effective_num_computed))
     try:
         return _ORIG_KVCACHE_ALLOCATE_SLOTS(
@@ -427,27 +479,66 @@ def install_vllm_integration_monkeypatches(
     try:
         import vllm.v1.core.kv_cache_utils as _kv_utils
 
-        _orig_check = _kv_utils._check_enough_kv_cache_memory
+        _legacy_check = getattr(_kv_utils, "_check_enough_kv_cache_memory", None)
+        _public_check = getattr(_kv_utils, "check_enough_kv_cache_memory", None)
 
-        def _relaxed_check(available_memory, get_needed_memory, max_model_len,
-                           estimate_max_model_len):
-            if available_memory <= 0:
-                _orig_check(available_memory, get_needed_memory,
-                            max_model_len, estimate_max_model_len)
-                return
-            needed = get_needed_memory()
-            if needed > available_memory:
-                est = estimate_max_model_len(available_memory)
+        if _legacy_check is not None:
+
+            def _relaxed_legacy_check(available_memory, get_needed_memory,
+                                      max_model_len,
+                                      estimate_max_model_len):
+                if available_memory <= 0:
+                    _legacy_check(available_memory, get_needed_memory,
+                                  max_model_len, estimate_max_model_len)
+                    return
+                needed = get_needed_memory()
+                if needed > available_memory:
+                    est = estimate_max_model_len(available_memory)
+                    logger.warning(
+                        "[TriAttention] KV cache check relaxed: max_model_len=%d "
+                        "needs %.2f GiB but only %.2f GiB available (est max %d). "
+                        "Compression will keep actual usage within limits.",
+                        max_model_len, needed / (1 << 30),
+                        available_memory / (1 << 30), est,
+                    )
+
+            _kv_utils._check_enough_kv_cache_memory = _relaxed_legacy_check
+            logger.info(
+                "Relaxed legacy KV cache memory check for TriAttention compression"
+            )
+
+        if _public_check is not None:
+
+            def _relaxed_public_check(vllm_config, kv_cache_spec,
+                                      available_memory):
+                if available_memory <= 0:
+                    _public_check(vllm_config, kv_cache_spec, available_memory)
+                    return
+
+                needed = _kv_utils.max_memory_usage_bytes(
+                    vllm_config, kv_cache_spec.values())
+                if needed <= available_memory:
+                    return
+
+                est = _kv_utils.estimate_max_model_len(vllm_config, kv_cache_spec,
+                                                       available_memory)
                 logger.warning(
                     "[TriAttention] KV cache check relaxed: max_model_len=%d "
                     "needs %.2f GiB but only %.2f GiB available (est max %d). "
                     "Compression will keep actual usage within limits.",
-                    max_model_len, needed / (1 << 30),
-                    available_memory / (1 << 30), est,
+                    vllm_config.model_config.max_model_len,
+                    needed / (1 << 30),
+                    available_memory / (1 << 30),
+                    est,
                 )
 
-        _kv_utils._check_enough_kv_cache_memory = _relaxed_check
-        logger.info("Relaxed KV cache memory check for TriAttention compression")
+            _kv_utils.check_enough_kv_cache_memory = _relaxed_public_check
+            logger.info(
+                "Relaxed public KV cache memory check for TriAttention compression"
+            )
+
+        if _legacy_check is None and _public_check is None:
+            logger.warning("Could not find a KV cache memory check symbol to relax")
     except Exception:
         logger.warning("Could not relax KV cache memory check", exc_info=True)
 

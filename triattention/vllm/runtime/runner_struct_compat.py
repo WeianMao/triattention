@@ -63,6 +63,7 @@ class CompatRequestStateView:
     base_runner: Any
     req_id: str
     req_index: int
+    requests_state: Any | None = None
 
     @property
     def num_computed_tokens(self) -> int:
@@ -70,6 +71,13 @@ class CompatRequestStateView:
         num_computed = getattr(getattr(req_states, "num_computed_tokens", None), "gpu", None)
         if torch.is_tensor(num_computed):
             return int(num_computed[self.req_index].item())
+        input_batch = getattr(self.base_runner, "input_batch", None)
+        num_computed_cpu = getattr(input_batch, "num_computed_tokens_cpu", None)
+        if num_computed_cpu is not None:
+            try:
+                return int(num_computed_cpu[self.req_index])
+            except Exception:
+                pass
         return 0
 
     @property
@@ -78,29 +86,40 @@ class CompatRequestStateView:
         table_list = getattr(block_tables, "block_tables", None) if block_tables is not None else None
         num_blocks = getattr(block_tables, "num_blocks", None) if block_tables is not None else None
         num_blocks_np = getattr(num_blocks, "np", None) if num_blocks is not None else None
-        if not isinstance(table_list, list) or num_blocks_np is None:
-            return None
+        if isinstance(table_list, list) and num_blocks_np is not None:
+            block_ids_by_group: list[list[int]] = []
+            valid = True
+            for gid, table in enumerate(table_list):
+                try:
+                    count = int(num_blocks_np[gid, self.req_index])
+                except Exception:
+                    valid = False
+                    break
+                if count <= 0:
+                    block_ids_by_group.append([])
+                    continue
+                row = getattr(table, "gpu", None)
+                if not torch.is_tensor(row):
+                    valid = False
+                    break
+                block_ids_by_group.append([int(x) for x in row[self.req_index, :count].tolist()])
+            if valid and any(group_block_ids for group_block_ids in block_ids_by_group):
+                return tuple(block_ids_by_group)
 
-        block_ids_by_group: list[list[int]] = []
-        for gid, table in enumerate(table_list):
-            try:
-                count = int(num_blocks_np[gid, self.req_index])
-            except Exception:
-                return None
-            if count <= 0:
-                block_ids_by_group.append([])
-                continue
-            row = getattr(table, "gpu", None)
-            if not torch.is_tensor(row):
-                return None
-            block_ids_by_group.append([int(x) for x in row[self.req_index, :count].tolist()])
-        return tuple(block_ids_by_group)
+        fallback_block_ids = getattr(self.requests_state, "block_ids", None)
+        if isinstance(fallback_block_ids, (list, tuple)):
+            normalized: list[list[int]] = []
+            for group_block_ids in fallback_block_ids:
+                if not isinstance(group_block_ids, (list, tuple)):
+                    normalized.append([])
+                    continue
+                normalized.append([int(block_id) for block_id in group_block_ids])
+            return tuple(normalized)
+        return None
 
     @block_ids.setter
     def block_ids(self, new_block_ids: Any) -> None:
         block_tables = getattr(self.base_runner, "block_tables", None)
-        if block_tables is None:
-            raise AttributeError("base_runner.block_tables is unavailable")
         if not isinstance(new_block_ids, (list, tuple)):
             raise TypeError("block_ids must be a list/tuple by group")
         normalized = tuple(
@@ -109,17 +128,16 @@ class CompatRequestStateView:
             else []
             for group_block_ids in new_block_ids
         )
-        block_tables.append_block_ids(self.req_index, normalized, overwrite=True)
-        block_tables.apply_staged_writes()
+        if block_tables is not None:
+            block_tables.append_block_ids(self.req_index, normalized, overwrite=True)
+            block_tables.apply_staged_writes()
+        if self.requests_state is not None:
+            setattr(self.requests_state, "block_ids", normalized)
 
 
 def resolve_request_state_view(base_runner: Any, req_id: str) -> tuple[Any | None, str]:
     requests = getattr(base_runner, "requests", None)
-    if isinstance(requests, dict):
-        req_state = requests.get(req_id)
-        if req_state is not None:
-            return req_state, "requests"
-
+    requests_state = requests.get(req_id) if isinstance(requests, dict) else None
     req_states = getattr(base_runner, "req_states", None)
     req_id_to_index = getattr(req_states, "req_id_to_index", None) if req_states is not None else None
     if isinstance(req_id_to_index, dict):
@@ -129,6 +147,7 @@ def resolve_request_state_view(base_runner: Any, req_id: str) -> tuple[Any | Non
                 base_runner=base_runner,
                 req_id=req_id,
                 req_index=req_index,
+                requests_state=requests_state,
             ), "req_states_proxy"
 
     input_batch = getattr(base_runner, "input_batch", None)
@@ -140,6 +159,7 @@ def resolve_request_state_view(base_runner: Any, req_id: str) -> tuple[Any | Non
                 base_runner=base_runner,
                 req_id=req_id,
                 req_index=req_index,
+                requests_state=requests_state,
             ), "input_batch_proxy"
 
     rebuilt = _build_req_id_map_from_input_batch(input_batch)
@@ -150,6 +170,10 @@ def resolve_request_state_view(base_runner: Any, req_id: str) -> tuple[Any | Non
                 base_runner=base_runner,
                 req_id=req_id,
                 req_index=req_index,
+                requests_state=requests_state,
             ), "input_batch_req_ids_proxy"
+
+    if requests_state is not None:
+        return requests_state, "requests"
 
     return None, "none"

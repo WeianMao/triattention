@@ -16,6 +16,15 @@ _ORIGINAL_COMPUTE_SLOT_MAPPINGS: Callable[..., Any] | None = None
 _ORIGINAL_V1_PREPARE_INPUTS: Callable[..., Any] | None = None
 
 
+def _debug_disable_v1_override_path() -> bool:
+    return os.environ.get("TRIATTN_DEBUG_DISABLE_V1_OVERRIDE_PATH", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def install_runtime_input_patch_hooks() -> bool:
     """Patch vLLM GPU input prep once.
 
@@ -49,7 +58,7 @@ def install_runtime_input_patch_hooks() -> bool:
             )
             patched_any = True
 
-    if os.environ.get("TRIATTN_DEBUG_ENABLE_V1_OVERRIDE_PATH", "0") == "1":
+    if not _debug_disable_v1_override_path():
         try:
             import vllm.v1.worker.gpu_model_runner as gpu_model_runner_v1
         except Exception:

@@ -75,9 +75,32 @@ def build_triattention_selector(
     pruning_mode = "per_head"
     per_head_semantics = config.per_head_selection_semantics
 
+    def _resolve_effective_model_path() -> Path | None:
+        if getattr(config, "model_path", None) is not None:
+            return Path(config.model_path)
+        if base_runner is None:
+            return None
+        candidates: list[Any] = []
+        candidates.append(getattr(getattr(base_runner, "model_config", None), "model", None))
+        candidates.append(
+            getattr(
+                getattr(getattr(base_runner, "vllm_config", None), "model_config", None),
+                "model",
+                None,
+            )
+        )
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.strip():
+                return Path(candidate)
+            if isinstance(candidate, Path):
+                return candidate
+        return None
+
+    effective_model_path = _resolve_effective_model_path()
+
     tri_cfg = TriAttentionConfig(
         stats_path=stats_path,
-        model_path=config.model_path,
+        model_path=effective_model_path,
         kv_budget=config.kv_budget,
         divide_length=config.divide_length,
         pruning_mode=pruning_mode,
@@ -109,12 +132,25 @@ def build_triattention_selector(
         "TRIATTN_DEBUG_DUMP_FIRST_DENSE_LAYER_PATH",
         "",
     ).strip()
+    dump_single_layer_target_raw = os.environ.get(
+        "TRIATTN_DEBUG_DUMP_FIRST_DENSE_LAYER_INDEX",
+        "",
+    ).strip()
+    dump_single_layer_target = (
+        int(dump_single_layer_target_raw) if dump_single_layer_target_raw else None
+    )
     dump_dense_keys_done = False
     dump_single_layer_dense_keys_done = False
     debug_dump_group_score_samples = (
         os.environ.get("TRIATTN_DEBUG_DUMP_GROUP_SCORE_SAMPLES", "0").strip().lower()
         in {"1", "true", "yes", "on"}
     )
+    debug_dump_model_path_info_path = os.environ.get(
+        "TRIATTN_DEBUG_DUMP_SELECTOR_MODEL_PATH_INFO_PATH",
+        "",
+    ).strip()
+    debug_dump_model_path_info_done = False
+
     def _resolve_effective_recent_count(total_tokens: int) -> int:
         if total_tokens <= 0 or config.window_size <= 0:
             return 0
@@ -138,6 +174,53 @@ def build_triattention_selector(
         if layer_idx in available_layers_set:
             return layer_idx
         return available_layers_sorted[layer_idx % len(available_layers_sorted)]
+
+    if debug_dump_model_path_info_path and not debug_dump_model_path_info_done:
+        try:
+            compressor._lazy_init()
+            dump_path = Path(debug_dump_model_path_info_path)
+            dump_path.parent.mkdir(parents=True, exist_ok=True)
+            omega_head = (
+                compressor.omega[:8].detach().to(device="cpu", dtype=torch.float32).tolist()
+                if getattr(compressor, "omega", None) is not None
+                else None
+            )
+            inv_freq_head = (
+                compressor.inv_freq[:8].detach().to(device="cpu", dtype=torch.float32).tolist()
+                if getattr(compressor, "inv_freq", None) is not None
+                else None
+            )
+            payload = {
+                "config_model_path": (
+                    None if getattr(config, "model_path", None) is None else str(config.model_path)
+                ),
+                "resolved_effective_model_path": (
+                    None if effective_model_path is None else str(effective_model_path)
+                ),
+                "base_runner_type": None if base_runner is None else type(base_runner).__name__,
+                "base_runner_model_config_model": None,
+                "base_runner_vllm_config_model_config_model": None,
+                "compressor_rope_style": getattr(compressor.config, "rope_style", None),
+                "compressor_omega_head": omega_head,
+                "compressor_inv_freq_head": inv_freq_head,
+            }
+            if base_runner is not None:
+                model_config = getattr(base_runner, "model_config", None)
+                model_value = getattr(model_config, "model", None)
+                if model_value is not None:
+                    payload["base_runner_model_config_model"] = str(model_value)
+                vllm_config = getattr(base_runner, "vllm_config", None)
+                inner_model_config = getattr(vllm_config, "model_config", None)
+                inner_model_value = getattr(inner_model_config, "model", None)
+                if inner_model_value is not None:
+                    payload["base_runner_vllm_config_model_config_model"] = str(inner_model_value)
+            dump_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            debug_dump_model_path_info_done = True
+        except Exception:
+            pass
 
     reduced_head_stats_cache: dict[tuple[int, int], tuple[dict[str, torch.Tensor], torch.Tensor]] = {}
 
@@ -219,7 +302,15 @@ def build_triattention_selector(
         )
         nonlocal dump_single_layer_dense_keys_done
 
-        if dump_single_layer_dense_keys_path and not dump_single_layer_dense_keys_done:
+        should_dump_single_layer = (
+            dump_single_layer_dense_keys_path
+            and not dump_single_layer_dense_keys_done
+            and (
+                dump_single_layer_target is None
+                or int(layer_idx) == dump_single_layer_target
+            )
+        )
+        if should_dump_single_layer:
             try:
                 dump_path = Path(dump_single_layer_dense_keys_path)
                 dump_path.parent.mkdir(parents=True, exist_ok=True)
@@ -399,7 +490,15 @@ def build_triattention_selector(
             runtime_heads=runtime_heads,
         )
         nonlocal dump_single_layer_dense_keys_done
-        if dump_single_layer_dense_keys_path and not dump_single_layer_dense_keys_done:
+        should_dump_single_layer = (
+            dump_single_layer_dense_keys_path
+            and not dump_single_layer_dense_keys_done
+            and (
+                dump_single_layer_target is None
+                or int(layer_idx) == dump_single_layer_target
+            )
+        )
+        if should_dump_single_layer:
             try:
                 dump_path = Path(dump_single_layer_dense_keys_path)
                 dump_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1414,6 +1513,9 @@ def build_triattention_selector(
                     float(aggregated_scores[0, pos].detach().to(device="cpu", dtype=torch.float32).item())
                     for pos in sample_positions
                 ]
+                payload["debug_effective_model_path"] = (
+                    None if effective_model_path is None else str(effective_model_path)
+                )
             return payload
 
     setattr(_select_keep_indices, "_supports_paged", True)

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
 from typing import Any
 
 from vllm.config import VllmConfig
@@ -25,6 +28,71 @@ from .request_key_compat import iter_scheduled_token_items
 from .signals import CompressionSignal
 
 logger = init_logger(__name__)
+
+_DUMP_FIRST_PROMPT_TOKEN_IDS = (
+    os.environ.get("TRIATTN_DEBUG_DUMP_FIRST_PROMPT_TOKEN_IDS", "0").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
+_DUMP_FIRST_PROMPT_TOKEN_IDS_PATH = os.environ.get(
+    "TRIATTN_DEBUG_DUMP_FIRST_PROMPT_TOKEN_IDS_PATH",
+    "",
+).strip()
+_FIRST_PROMPT_TOKEN_IDS_DUMPED = False
+
+
+def _evict_reclaimed_block_metadata(block_pool: Any, block: Any) -> None:
+    """Best-effort clear of prefix-cache metadata before reusing a block."""
+    if block_pool is None or block is None:
+        return
+    block_hash = getattr(block, "block_hash", None)
+    if block_hash is None:
+        return
+
+    maybe_evict = getattr(block_pool, "_maybe_evict_cached_block", None)
+    if callable(maybe_evict):
+        maybe_evict(block)
+
+
+def _free_reclaimed_blocks(manager: Any, removed_blocks: list[Any]) -> bool:
+    """Free reclaimed tail blocks after clearing any stale prefix-cache identity."""
+    if not removed_blocks:
+        return False
+    block_pool = getattr(manager, "block_pool", None)
+    for block in removed_blocks:
+        _evict_reclaimed_block_metadata(block_pool, block)
+    if block_pool is None:
+        return False
+    block_pool.free_blocks(reversed(removed_blocks))
+    return True
+
+
+def _resolve_full_prefill_len_from_request_like(request_like: Any) -> int:
+    candidates: list[int] = []
+
+    prompt_token_ids = getattr(request_like, "prompt_token_ids", None)
+    if prompt_token_ids is not None:
+        try:
+            candidates.append(len(prompt_token_ids))
+        except Exception:
+            pass
+
+    for attr_name in ("prompt_token_ids_len", "num_prompt_tokens"):
+        raw_value = getattr(request_like, attr_name, None)
+        if raw_value is None:
+            continue
+        try:
+            candidates.append(int(raw_value))
+        except (TypeError, ValueError):
+            continue
+
+    prefill_token_ids = getattr(request_like, "prefill_token_ids", None)
+    if prefill_token_ids is not None:
+        try:
+            candidates.append(len(prefill_token_ids))
+        except Exception:
+            pass
+
+    return max(candidates, default=0)
 
 
 class TriAttentionScheduler(Scheduler):
@@ -81,22 +149,49 @@ class TriAttentionScheduler(Scheduler):
         return threshold
 
     def _sync_prefill_lens(self, scheduler_output: SchedulerOutput) -> None:
+        global _FIRST_PROMPT_TOKEN_IDS_DUMPED
         for new_req in scheduler_output.scheduled_new_reqs:
-            # Treat newly scheduled request as lifecycle reset for tracker state.
-            self._effective_len_tracker.reset_request(
-                new_req.req_id,
-                new_req.num_computed_tokens,
-            )
-            prefill_token_ids = getattr(new_req, "prefill_token_ids", None)
+            req_id = new_req.req_id
+            is_first_seen = req_id not in self._prefill_lens
+            if is_first_seen:
+                # Chunked-prefill may surface the same request multiple times in
+                # scheduled_new_reqs. Only the first appearance should reset the
+                # effective-length tracker; later repeats are continuation of the
+                # same lifecycle, not a new request.
+                self._effective_len_tracker.reset_request(
+                    req_id,
+                    new_req.num_computed_tokens,
+                )
             prompt_token_ids = getattr(new_req, "prompt_token_ids", None)
-            if prefill_token_ids is not None:
-                prefill_len = len(prefill_token_ids)
-            elif prompt_token_ids is not None:
-                prefill_len = len(prompt_token_ids)
-            else:
-                prefill_len = int(getattr(new_req, "num_prompt_tokens", 0) or 0)
-            self._prefill_lens[new_req.req_id] = prefill_len
-            self._length_threshold_cache[new_req.req_id] = self._compute_length_threshold(prefill_len)
+            prefill_len = _resolve_full_prefill_len_from_request_like(new_req)
+            if (
+                is_first_seen
+                and _DUMP_FIRST_PROMPT_TOKEN_IDS
+                and not _FIRST_PROMPT_TOKEN_IDS_DUMPED
+                and _DUMP_FIRST_PROMPT_TOKEN_IDS_PATH
+                and isinstance(prompt_token_ids, list)
+            ):
+                try:
+                    dump_path = Path(_DUMP_FIRST_PROMPT_TOKEN_IDS_PATH)
+                    dump_path.parent.mkdir(parents=True, exist_ok=True)
+                    dump_path.write_text(
+                        json.dumps(
+                            {
+                                "req_id": req_id,
+                                "prefill_len": int(prefill_len),
+                                "prompt_token_ids_len": len(prompt_token_ids),
+                                "prompt_token_ids": [int(x) for x in prompt_token_ids],
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+                    _FIRST_PROMPT_TOKEN_IDS_DUMPED = True
+                except Exception:
+                    pass
+            self._prefill_lens[req_id] = prefill_len
+            self._length_threshold_cache[req_id] = self._compute_length_threshold(prefill_len)
 
         for req_id in scheduler_output.finished_req_ids:
             req = self.requests.get(req_id)
@@ -217,9 +312,40 @@ class TriAttentionScheduler(Scheduler):
         for request in running:
             prepare_request_effective_num_computed(request)
 
+    def _compute_max_chunk_for_compression(self) -> int | None:
+        """Max tokens per step to allow compression cycling within physical KV."""
+        block_pool = getattr(getattr(self, "kv_cache_manager", None), "block_pool", None)
+        if block_pool is None:
+            return None
+        total_blocks = getattr(block_pool, "num_gpu_blocks", 0)
+        if total_blocks <= 0:
+            return None
+        block_size = int(getattr(self, "block_size", 16) or 16)
+        physical_kv = total_blocks * block_size
+        headroom = physical_kv - self.triattention_config.kv_budget
+        if headroom <= 0:
+            return None
+        # Leave a small margin (one block) for allocation bookkeeping.
+        headroom = max(1, headroom - block_size)
+        return headroom
+
     def schedule(self) -> SchedulerOutput:
         self._sync_effective_kv_offsets_before_schedule()
+
+        orig_max_scheduled = None
+        if not self.triattention_config.disable_compression:
+            max_chunk = self._compute_max_chunk_for_compression()
+            if max_chunk is not None:
+                current_max = getattr(self, "max_num_scheduled_tokens", None)
+                if current_max is not None and max_chunk < current_max:
+                    orig_max_scheduled = current_max
+                    self.max_num_scheduled_tokens = max_chunk
+
         scheduler_output = super().schedule()
+
+        if orig_max_scheduled is not None:
+            self.max_num_scheduled_tokens = orig_max_scheduled
+
         self._triattention_step += 1
         self._sync_prefill_lens(scheduler_output)
         if (
@@ -295,6 +421,7 @@ class TriAttentionScheduler(Scheduler):
             if not self.triattention_config.enable_experimental_block_reclaim:
                 continue
             required_blocks = _num_required_blocks(cache_len_after)
+            _evt_scheduled = int(event.get("scheduled_tokens", 1))
             expected_shrink_gids: set[int] = set()
             reclaim_applied_any = False
             req_groups_seen = 0
@@ -325,7 +452,20 @@ class TriAttentionScheduler(Scheduler):
                 # whose events the scheduler hasn't consumed yet.  When that
                 # happens the later event legitimately has block_reclaim=None.
                 # Synthesize the reclaim by truncating to required_blocks.
-                if expected_shrink_gids and isinstance(managers, (list, tuple)):
+                #
+                # Safety: during chunked prefill (scheduled_tokens > 1),
+                # _update_states may have appended new blocks after the hook
+                # ran.  Without block_ids_before we cannot distinguish old
+                # blocks from new ones — skip synthesis to avoid freeing
+                # blocks the worker is still using.
+                if _evt_scheduled > 1:
+                    logger.info(
+                        "TriAttention block reclaim: skipping synthesized "
+                        "reclaim during prefill (no groups, "
+                        "scheduled_tokens=%d) req=%s",
+                        _evt_scheduled, req_id,
+                    )
+                elif expected_shrink_gids and isinstance(managers, (list, tuple)):
                     for gid in sorted(expected_shrink_gids):
                         manager = managers[gid]
                         req_blocks = manager.req_to_blocks.get(req_id)
@@ -339,9 +479,8 @@ class TriAttentionScheduler(Scheduler):
                                 manager.num_cached_block[req_id],
                                 len(kept_blocks),
                             )
-                        if removed_blocks:
+                        if _free_reclaimed_blocks(manager, removed_blocks):
                             reclaim_applied_any = True
-                            manager.block_pool.free_blocks(reversed(removed_blocks))
                 if reclaim_applied_any:
                     update_request_effective_kv_offset(
                         request=req,
@@ -401,28 +540,42 @@ class TriAttentionScheduler(Scheduler):
                         f"required_blocks={required_blocks}"
                     )
 
-                kept_blocks = req_blocks[:kept_len]
-                removed_blocks = req_blocks[kept_len:]
-
-                manager.req_to_blocks[req_id] = kept_blocks
+                # Use block_ids_before to distinguish old blocks (present
+                # when the hook ran) from new blocks appended by
+                # _update_states after the hook.  Only free old tail blocks
+                # that the hook removed; preserve new blocks the worker needs.
+                block_ids_before = group.get("block_ids_before")
+                if isinstance(block_ids_before, list):
+                    original_count = len(block_ids_before)
+                else:
+                    original_count = len(req_blocks)
+                new_blocks_this_step = list(req_blocks[original_count:])
+                kept_old_blocks = list(req_blocks[:kept_len])
+                removed_old_blocks = list(req_blocks[kept_len:original_count])
+                # Reassemble: kept old prefix + new blocks from this step
+                reassembled = kept_old_blocks + new_blocks_this_step
+                manager.req_to_blocks[req_id] = reassembled
                 if req_id in manager.num_cached_block:
                     manager.num_cached_block[req_id] = min(
-                        manager.num_cached_block[req_id], len(kept_blocks)
+                        manager.num_cached_block[req_id], len(reassembled)
                     )
-                if removed_blocks:
+                if removed_old_blocks:
                     logger.info(
                         "TriAttention scheduler FREE_BLOCKS: req=%s gid=%d "
-                        "freed=%d kept=%d",
-                        req_id, gid, len(removed_blocks), len(kept_blocks),
+                        "freed=%d kept=%d new=%d",
+                        req_id, gid, len(removed_old_blocks),
+                        len(kept_old_blocks), len(new_blocks_this_step),
                     )
-                    reclaim_applied_any = True
-                    manager.block_pool.free_blocks(reversed(removed_blocks))
+                    if _free_reclaimed_blocks(manager, removed_old_blocks):
+                        reclaim_applied_any = True
 
             # Synthesize reclaim for groups that were expected but not
             # covered by the explicit block_reclaim payload (V1 batch-queue
             # race — worker already truncated in an earlier step).
+            # Same safety as above: skip during chunked prefill without
+            # block_ids_before to avoid freeing new blocks.
             missing_gids = expected_shrink_gids - seen_gids
-            if missing_gids:
+            if missing_gids and _evt_scheduled <= 1:
                 for gid in sorted(missing_gids):
                     manager = managers[gid]
                     req_blocks = manager.req_to_blocks.get(req_id)
@@ -436,9 +589,15 @@ class TriAttentionScheduler(Scheduler):
                             manager.num_cached_block[req_id],
                             len(kept_blocks),
                         )
-                    if removed_blocks:
+                    if _free_reclaimed_blocks(manager, removed_blocks):
                         reclaim_applied_any = True
-                        manager.block_pool.free_blocks(reversed(removed_blocks))
+            elif missing_gids and _evt_scheduled > 1:
+                logger.info(
+                    "TriAttention block reclaim: skipping synthesized "
+                    "reclaim for missing gids %s during prefill "
+                    "(scheduled_tokens=%d) req=%s",
+                    sorted(missing_gids), _evt_scheduled, req_id,
+                )
 
             if reclaim_applied_any:
                 update_request_effective_kv_offset(

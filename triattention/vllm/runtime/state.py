@@ -21,6 +21,11 @@ class RequestCompressionState:
     is_preempted: bool = False
     current_cache_len_semantics: str = "unknown"
     current_cache_len_step: int = -1
+    # Scheduler's num_computed_tokens at the moment of last compression.
+    # Used to compute a stable delta that doesn't depend on per-step
+    # current_cache_len tracking.  See effective_overrides.py.
+    nct_at_last_compression: int | None = None
+    cache_len_after_last_compression: int | None = None
 
     @property
     def mode(self) -> str:
@@ -93,7 +98,10 @@ class RequestStateStore:
         # Setting it here would cause the batch_queue_dedup guard to block the
         # very first compression attempt (step - last_step == 0).
 
-    def mark_compressed(self, req_id: str, step: int, cache_len: int) -> None:
+    def mark_compressed(
+        self, req_id: str, step: int, cache_len: int,
+        scheduled_tokens: int = 0, scheduler_nct: int | None = None,
+    ) -> None:
         state = self._states.get(req_id)
         if state is None:
             return
@@ -101,19 +109,28 @@ class RequestStateStore:
         state.compression_count += 1
         state.pending_triggers = max(state.pending_triggers - 1, 0)
         state.last_compression_step = step
-        state.current_cache_len = cache_len
-        state.current_cache_len_semantics = "effective_pre_step"
+        # Include this step's scheduled decode tokens so that the next step's
+        # effective_base calculation accounts for the KV entries written by
+        # the compression step's own decode.  Without this, the next step
+        # computes the same effective slot as the compression step (off-by-1).
+        state.current_cache_len = cache_len + max(0, scheduled_tokens)
+        state.current_cache_len_semantics = "estimated_with_scheduled"
         state.current_cache_len_step = int(step)
         state.last_absorbed_cache_len = max(0, int(cache_len))
         state.recent_unabsorbed_tokens = 0
         state.last_trigger_reason = "applied"
+        # Record scheduler's num_computed_tokens at compression time so that
+        # build_effective_sparse_overrides can compute a stable pos_delta
+        # without depending on per-step current_cache_len tracking.
+        state.cache_len_after_last_compression = int(cache_len)
+        if scheduler_nct is not None:
+            state.nct_at_last_compression = int(scheduler_nct)
 
     def mark_compression_skipped(self, req_id: str, reason: str, step: int) -> None:
         state = self._states.get(req_id)
         if state is None:
             return
         state.pending_triggers = max(state.pending_triggers - 1, 0)
-        state.last_compression_step = max(state.last_compression_step, step)
         state.last_trigger_reason = f"skipped:{reason}"
 
     def remove(self, req_id: str) -> None:

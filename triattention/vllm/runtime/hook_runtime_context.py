@@ -7,6 +7,7 @@ from typing import Any
 
 from .config import TriAttentionRuntimeConfig
 from .constants import TRITON_SCORING_REQUIRED_MARKER
+from .debug_trace import trace_event
 from .request_key_compat import get_scheduled_token_items
 from .signals import CompressionSignal
 
@@ -20,6 +21,24 @@ def effective_budget_for_signal(
     if signal.protect_prefill and not config.include_prefill_in_budget:
         budget += max(signal.prefill_len, 0)
     return min(total_tokens, budget)
+
+
+def _resolve_estimated_effective_tokens(
+    *,
+    signal: CompressionSignal,
+    req_runtime_state: Any,
+) -> int:
+    if req_runtime_state is not None:
+        compression_count = getattr(req_runtime_state, "compression_count", None)
+        current_cache_len = getattr(req_runtime_state, "current_cache_len", None)
+        if (
+            isinstance(compression_count, int)
+            and compression_count > 0
+            and isinstance(current_cache_len, int)
+            and current_cache_len > 0
+        ):
+            return max(0, int(current_cache_len))
+    return max(0, int(getattr(signal, "estimated_cache_len", 0)))
 
 
 def effective_len_guard_upper(
@@ -108,15 +127,23 @@ def build_hook_runtime_context(
         req_id=req_id,
     )
     num_computed_tokens = int(getattr(req_state, "num_computed_tokens", 0))
-    estimated_effective_tokens = int(
-        getattr(signal, "estimated_cache_len", num_computed_tokens)
+    estimated_effective_tokens = _resolve_estimated_effective_tokens(
+        signal=signal,
+        req_runtime_state=req_runtime_state,
     )
-    if estimated_effective_tokens < 0:
-        estimated_effective_tokens = 0
 
-    effective_tokens = max(0, estimated_effective_tokens - max(0, scheduled_tokens))
-    if effective_tokens > num_computed_tokens:
-        effective_tokens = num_computed_tokens
+    _post_forward = getattr(signal, '_post_forward', False)
+    if _post_forward:
+        # Post-forward mode (prefill): KV cache already contains the
+        # current chunk's tokens, so use the full estimate directly.
+        effective_tokens = max(0, estimated_effective_tokens)
+    else:
+        # Pre-forward mode (decode): subtract tokens not yet in KV.
+        effective_tokens = max(0, estimated_effective_tokens - max(0, scheduled_tokens))
+    # Cap at the actual number of tokens in KV.
+    kv_upper = num_computed_tokens + (scheduled_tokens if _post_forward else 0)
+    if effective_tokens > kv_upper:
+        effective_tokens = kv_upper
 
     if isinstance(block_capacity_hint, int):
         physical_upper = block_capacity_hint + block_size_hint
@@ -135,10 +162,14 @@ def build_hook_runtime_context(
     else:
         setattr(base_runner, "_triattention_active_recent_unabsorbed_tokens", None)
 
+    prefill_len = int(getattr(signal, "prefill_len", 0) or 0)
+    prefill_incomplete = prefill_len > 0 and num_computed_tokens < prefill_len
+
     if (
         config.fail_on_effective_len_regression
         and config.enable_experimental_block_reclaim
         and req_id in compressed_once
+        and not prefill_incomplete
     ):
         guard_upper = effective_len_guard_upper(config, signal)
         estimated_slack = max(1, int(getattr(signal, "estimated_cache_len", 0)) - num_computed_tokens)
@@ -163,6 +194,19 @@ def build_hook_runtime_context(
         and req_id in compressed_once
         and not kv_override
         and not length_gate_hit
+    )
+    trace_event(
+        "hook_runtime_context_summary",
+        req_id=repr(req_id),
+        scheduled_tokens=int(scheduled_tokens),
+        num_computed_tokens=int(num_computed_tokens),
+        estimated_effective_tokens=int(estimated_effective_tokens),
+        effective_tokens=int(effective_tokens),
+        budget_total=int(budget_total),
+        prefill_len=int(prefill_len),
+        prefill_incomplete=bool(prefill_incomplete),
+        should_defer_recompress=bool(should_defer_recompress),
+        signal_reason=str(getattr(signal, "reason", "")),
     )
 
     return HookRuntimeContext(
