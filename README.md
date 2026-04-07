@@ -173,6 +173,17 @@ print(outputs[0].outputs[0].text)
 
 TriAttention requires precomputed Q/K frequency statistics for scoring. We provide pre-calibrated stats for supported models in `triattention/vllm/stats/`. See the [Calibration Guide](docs/calibration.md) for generating stats for custom models.
 
+## Deploy with OpenClaw
+
+TriAttention's vLLM server exposes an OpenAI-compatible API, which means you can use it directly as a custom provider in [OpenClaw](https://github.com/openclaw/openclaw).
+
+### Quick Setup
+
+1. Follow the [Server Mode](#server-mode-openai-compatible-api) instructions above to start a vLLM server with TriAttention enabled.
+2. In OpenClaw, add a custom provider pointing to your vLLM server (e.g. `http://localhost:8000/v1`).
+
+For manual configuration or troubleshooting, see the [OpenClaw Manual Configuration Guide](docs/openclaw.md).
+
 ## Documentation
 
 - [Reproduction Guide](docs/reproduction.md) -- full experiment commands for all benchmarks
