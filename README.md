@@ -2,7 +2,7 @@
 
 # TriAttention: Efficient Long Reasoning with Trigonometric KV Compression
 
-[![Paper](https://img.shields.io/badge/ArXiv-Paper-brown)](https://arxiv.org/abs/TODO)
+[![Paper](https://img.shields.io/badge/ArXiv-Paper-brown)](https://arxiv.org/abs/2604.04921)
 [![Project Page](https://img.shields.io/badge/Project-Page-teal)](https://weianmao.github.io/tri-attention-project-page/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org/downloads/)
@@ -193,7 +193,7 @@ TriAttention requires precomputed Q/K frequency statistics for scoring. We provi
     title={TriAttention: Efficient Long Reasoning with Trigonometric KV Compression},
     author={Weian Mao and Xi Lin and Wei Huang and Yuxin Xie and Tianfu Fu and Bohan Zhuang and Song Han and Yukang Chen},
     year={2026},
-    eprint={TODO},
+    eprint={2604.04921},
     archivePrefix={arXiv},
     primaryClass={cs.CL}
 }
