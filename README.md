@@ -10,7 +10,7 @@
 *Compress KV cache by 10.7x and boost throughput by 2.5x on long reasoning tasks -- with no accuracy loss.*
 
 [Weian Mao](https://scholar.google.com/citations?user=Qu-QXTsAAAAJ)<sup>1*</sup>,
-Xi Lin<sup>3*</sup>,
+[Xi Lin](https://profile.erix025.me/)<sup>3*</sup>,
 [Wei Huang](https://aaron-weihuang.com/)<sup>2*</sup>,
 Yuxin Xie<sup>1</sup>,
 Tianfu Fu<sup>1</sup>,
