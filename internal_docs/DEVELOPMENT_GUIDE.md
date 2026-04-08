@@ -46,14 +46,37 @@ Internal reference for anyone picking up this work. Keep this file up to date.
 
 ---
 
-## 4. Syncing Changes
+## 4. Publishing Workflow (Release Branch → Public)
 
-| Direction | Method |
-|---|---|
-| Public → Release branch | `git fetch public && git cherry-pick <commits>` |
-| Release branch → Public | Manually copy files to `triattention/`, review diff, commit and push |
+1. Develop and test in `dc1-release/`
+2. When a feature/fix is ready, package it as a **single clean commit** — no internal paths, no debug defaults, no experiment configs
+3. Push the commit to the private repo (`git push origin release/public`)
+4. Cherry-pick that commit into `triattention/`:
+   ```bash
+   cd /data/rbg/users/weian/project/rl/triattention
+   git fetch  # ensure up to date
+   # cherry-pick from the release branch
+   cd /data/rbg/users/weian/project/rl/dc1-release
+   git log --oneline -5  # find the commit hash
+   cd /data/rbg/users/weian/project/rl/triattention
+   git cherry-pick <commit-hash>
+   # review, then push
+   git push origin main
+   ```
+5. Run a sensitive content scan before pushing to public
 
-**Never use `git merge` between the two repos.** Use cherry-pick or manual copy only to keep histories clean and avoid leaking internal commits.
+**Key rule**: the commit must be self-contained and clean. Don't mix internal config tweaks with publishable code changes in the same commit.
+
+## 5. Syncing Public → Release Branch
+
+When a teammate pushes to the public repo:
+```bash
+cd /data/rbg/users/weian/project/rl/dc1-release
+git fetch public
+git cherry-pick <commits>
+```
+
+**Never use `git merge` between the two repos.** Cherry-pick only to keep histories clean and avoid leaking internal commits.
 
 ---
 
