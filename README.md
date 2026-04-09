@@ -36,7 +36,7 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 
 ## News
 
-- **[2026-04-09]** Experimental MLX and TurboQuant support for Apple Silicon — thanks to [@DeadByDawn101](https://github.com/DeadByDawn101) (RavenX AI) for proposing and contributing this feature.
+- **[2026-04-09]** Experimental MLX and TurboQuant support for Apple Silicon (M1/M2/M3/M4) — thanks to [@DeadByDawn101](https://github.com/DeadByDawn101) (RavenX AI) for proposing and contributing this feature.
 
 ## Highlights
 
