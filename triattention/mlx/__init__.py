@@ -1,7 +1,7 @@
 """
 TriAttention MLX — Apple Silicon port
 ======================================
-RavenX AI fork: native MLX implementation of TriAttention KV compression.
+Native MLX implementation of TriAttention KV compression.
 
 Original: https://github.com/WeianMao/triattention (MIT)
 MLX port:  https://github.com/DeadByDawn101/triattention

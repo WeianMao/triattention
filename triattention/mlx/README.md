@@ -2,7 +2,7 @@
 
 > **10.7x KV memory reduction, 2.5x throughput on long reasoning — native MLX for M-series Macs.**
 
-This directory contains the MLX port of [TriAttention](https://arxiv.org/abs/2604.04921) by RavenX AI.
+This directory contains the MLX port of [TriAttention](https://arxiv.org/abs/2604.04921). Contributed by [@DeadByDawn101](https://github.com/DeadByDawn101).
 
 Original implementation (PyTorch + vLLM): [WeianMao/triattention](https://github.com/WeianMao/triattention)  
 MLX port: [DeadByDawn101/triattention](https://github.com/DeadByDawn101/triattention)
@@ -116,5 +116,5 @@ cache_module.make_prompt_cache = lambda model, **kw: [
 
 ---
 
-*MLX port by [RavenX AI](https://github.com/DeadByDawn101) 🖤 — April 2026*  
+*MLX port by [@DeadByDawn101](https://github.com/DeadByDawn101) — April 2026*  
 *Original paper: [TriAttention: Efficient Long Reasoning with Trigonometric KV Compression](https://arxiv.org/abs/2604.04921)*
