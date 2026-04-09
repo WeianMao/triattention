@@ -84,7 +84,7 @@ class HeadFrequencyStats:
 
 def load_stats(stats_path: Path) -> Dict[Tuple[int, int], HeadFrequencyStats]:
     """Load precomputed frequency statistics from .npz file."""
-    data = np.load(str(stats_path), allow_pickle=True)
+    data = np.load(str(stats_path))
     stats = {}
     
     # Expected format: {layer}_{head}_q_mean_real, {layer}_{head}_q_mean_imag, {layer}_{head}_q_abs_mean
