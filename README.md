@@ -34,6 +34,10 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 
 
 
+## News
+
+- **[2026-04-09]** Experimental MLX and TurboQuant support for Apple Silicon — thanks to [@DeadByDawn101](https://github.com/DeadByDawn101) (RavenX AI) for proposing and contributing this feature.
+
 ## Highlights
 
 - **2.5x throughput** on AIME25 long reasoning while matching Full Attention accuracy (40.8 vs 40.8)
@@ -236,6 +240,8 @@ TriAttention requires precomputed Q/K frequency statistics for scoring. We provi
 
 We thank the following projects for their contributions and inspiration:
 [R-KV](https://github.com/Microsoft/R-KV) | [SnapKV](https://github.com/FasterDecoding/SnapKV)
+
+[@DeadByDawn101](https://github.com/DeadByDawn101) (RavenX AI) — MLX port for Apple Silicon
 
 ## License
 
