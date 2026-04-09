@@ -16,7 +16,7 @@ What it does:
     3. Computes mean complex Q vectors and |Q| means per head
     4. Saves to .npz for use by TriAttentionMLX
 
-Author: RavenX AI — April 2026
+Contributed by: @DeadByDawn101 — April 2026
 """
 
 import argparse

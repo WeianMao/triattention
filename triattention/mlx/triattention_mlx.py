@@ -20,7 +20,7 @@ References:
   Origin: https://github.com/WeianMao/triattention
   Fork:   https://github.com/DeadByDawn101/triattention
 
-Author: RavenX AI (MLX port) — April 2026
+Contributed by: @DeadByDawn101 (MLX port) — April 2026
 """
 
 from __future__ import annotations
