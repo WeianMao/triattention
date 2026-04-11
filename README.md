@@ -54,10 +54,6 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 
 Pre-RoPE Q/K vectors in long reasoning models concentrate around fixed centers that determine distance preferences via a trigonometric series. TriAttention scores keys using these centers and norms instead of requiring representative query selection, enabling accurate KV cache compression without the overhead of existing attention-based methods.
 
-## Deploy with OpenClaw
-
-TriAttention's vLLM server exposes an OpenAI-compatible API, which means you can use it directly as a custom provider in [OpenClaw](https://github.com/openclaw/openclaw).
-
 ## Documentation
 
 - [OpenClaw](docs/openclaw.md) -- OpenClaw manual configuration
@@ -65,6 +61,10 @@ TriAttention's vLLM server exposes an OpenAI-compatible API, which means you can
 - [Calibration Guide](docs/calibration.md) -- generating custom Q/K statistics
 - [MLX Support](docs/mlx.md) -- supporting Apple Silicon Macs (M1/M2/M3/M4) via the MLX
 - [Full Results](docs/results.md) -- complete tables, figures, and analysis
+
+## Deploy with OpenClaw
+
+TriAttention's vLLM server exposes an OpenAI-compatible API, which means you can use it directly as a custom provider in [OpenClaw](https://github.com/openclaw/openclaw).
 
 ### Quick Setup
 
