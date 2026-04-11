@@ -257,6 +257,7 @@ We thank the following projects for their contributions and inspiration:
 [R-KV](https://github.com/Microsoft/R-KV) | [SnapKV](https://github.com/FasterDecoding/SnapKV)
 
 [@DeadByDawn101](https://github.com/DeadByDawn101) (RavenX AI) — MLX port for Apple Silicon
+[@kishan5111](https://github.com/kishan5111) — GPT-OSS-120B model integration
 
 ## License
 
