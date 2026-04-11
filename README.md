@@ -36,6 +36,7 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 
 ## News
 
+- **[2026-04-11]** Community C/ggml port for llama.cpp (HIP/ROCm) by [@domvox](https://github.com/domvox) — enables TriAttention on AMD GPUs via llama.cpp, with ~6.8× KV reduction when composed with TurboQuant. See [triattention-ggml](https://github.com/domvox/triattention-ggml).
 - **[2026-04-09]** Experimental MLX and TurboQuant support for Apple Silicon (M1/M2/M3/M4) — thanks to [@DeadByDawn101](https://github.com/DeadByDawn101) (RavenX AI) for proposing and contributing this feature.
 
 ## Highlights
@@ -52,6 +53,14 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 ## How It Works
 
 Pre-RoPE Q/K vectors in long reasoning models concentrate around fixed centers that determine distance preferences via a trigonometric series. TriAttention scores keys using these centers and norms instead of requiring representative query selection, enabling accurate KV cache compression without the overhead of existing attention-based methods.
+
+## Documentation
+
+- [OpenClaw](docs/openclaw.md) -- OpenClaw manual configuration
+- [Reproduction Guide](docs/reproduction.md) -- full experiment commands for all benchmarks
+- [Calibration Guide](docs/calibration.md) -- generating custom Q/K statistics
+- [MLX Support](docs/mlx.md) -- supporting Apple Silicon Macs (M1/M2/M3/M4) via the MLX
+- [Full Results](docs/results.md) -- complete tables, figures, and analysis
 
 ## Deploy with OpenClaw
 
@@ -210,18 +219,22 @@ print(outputs[0].outputs[0].text)
 
 TriAttention requires precomputed Q/K frequency statistics for scoring. We provide pre-calibrated stats for supported models in `triattention/vllm/stats/`. See the [Calibration Guide](docs/calibration.md) for generating stats for custom models.
 
-## Documentation
-
-- [Reproduction Guide](docs/reproduction.md) -- full experiment commands for all benchmarks
-- [Calibration Guide](docs/calibration.md) -- generating custom Q/K statistics
-- [Full Results](docs/results.md) -- complete tables, figures, and analysis
-
 ## Roadmap
 
 - [x] vLLM integration
 - [ ] SGLang integration
 - [ ] Ollama integration
 - [ ] Support for more model architectures
+
+## Community Implementations
+
+Independent ports and integrations maintained by the community:
+
+| Project | Stack | Maintainer | Notes |
+|---------|-------|------------|-------|
+| [triattention-ggml](https://github.com/domvox/triattention-ggml) | C/ggml, llama.cpp (HIP/ROCm) | [@domvox](https://github.com/domvox) | AMD GPU support; composes with TurboQuant (~6.8× KV reduction). Includes pre-built calibration stats for Qwen3 family. |
+
+> **Note:** Community projects are independently maintained and not officially supported. Please direct questions and issues to each project's own issue tracker.
 
 ## Citation
 
