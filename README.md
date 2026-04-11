@@ -36,7 +36,7 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 
 ## News
 
-- **[2026-04-11]** Community C/ggml port for llama.cpp (HIP/ROCm) by [@domvox](https://github.com/domvox) — enables TriAttention on AMD GPUs via llama.cpp, with ~6.8× KV reduction when composed with TurboQuant.
+- **[2026-04-11]** Community C/ggml port for llama.cpp (HIP/ROCm) by [@domvox](https://github.com/domvox) — enables TriAttention on AMD GPUs via llama.cpp, with ~6.8× KV reduction when composed with TurboQuant. See [triattention-ggml](https://github.com/domvox/triattention-ggml).
 - **[2026-04-09]** Experimental MLX and TurboQuant support for Apple Silicon (M1/M2/M3/M4) — thanks to [@DeadByDawn101](https://github.com/DeadByDawn101) (RavenX AI) for proposing and contributing this feature.
 
 ## Highlights
