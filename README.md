@@ -57,6 +57,14 @@ Pre-RoPE Q/K vectors in long reasoning models concentrate around fixed centers t
 
 TriAttention's vLLM server exposes an OpenAI-compatible API, which means you can use it directly as a custom provider in [OpenClaw](https://github.com/openclaw/openclaw).
 
+## Documentation
+
+- [OpenClaw](docs/openclaw.md) -- OpenClaw manual configuration
+- [Reproduction Guide](docs/reproduction.md) -- full experiment commands for all benchmarks
+- [Calibration Guide](docs/calibration.md) -- generating custom Q/K statistics
+- [MLX Support](docs/mlx.md) -- supporting Apple Silicon Macs (M1/M2/M3/M4) via the MLX
+- [Full Results](docs/results.md) -- complete tables, figures, and analysis
+
 ### Quick Setup
 
 1. Follow the [Installation](#installation) instructions, then start a vLLM server with the recommended settings below.
@@ -209,12 +217,6 @@ print(outputs[0].outputs[0].text)
 ### Precomputed Statistics
 
 TriAttention requires precomputed Q/K frequency statistics for scoring. We provide pre-calibrated stats for supported models in `triattention/vllm/stats/`. See the [Calibration Guide](docs/calibration.md) for generating stats for custom models.
-
-## Documentation
-
-- [Reproduction Guide](docs/reproduction.md) -- full experiment commands for all benchmarks
-- [Calibration Guide](docs/calibration.md) -- generating custom Q/K statistics
-- [Full Results](docs/results.md) -- complete tables, figures, and analysis
 
 ## Roadmap
 
