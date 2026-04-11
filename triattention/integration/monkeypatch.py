@@ -5,6 +5,10 @@ try:
     from transformers.models.qwen3 import modeling_qwen3
 except ImportError:
     modeling_qwen3 = None
+try:
+    from transformers.models.gpt_oss import modeling_gpt_oss
+except ImportError:
+    modeling_gpt_oss = None
 from .modeling import (
     LlamaAttention_init,
     LlamaAttention_forward,
@@ -12,6 +16,8 @@ from .modeling import (
     Qwen2Attention_forward,
     Qwen3Attention_init,
     Qwen3Attention_forward,
+    GptOssAttention_init,
+    GptOssAttention_forward,
     CausalLM_forward,
 )
 
@@ -43,3 +49,15 @@ def replace_qwen3(compression_config):
     modeling_qwen3.Qwen3Attention.__init__ = init_wrapper
     modeling_qwen3.Qwen3Attention.forward = Qwen3Attention_forward
     modeling_qwen3.Qwen3ForCausalLM.forward = CausalLM_forward
+
+
+def replace_gpt_oss(compression_config):
+    if modeling_gpt_oss is None:
+        raise ImportError("transformers does not provide gpt_oss in this version")
+
+    def init_wrapper(self, config, layer_idx):
+        GptOssAttention_init(self, config, layer_idx, compression_config)
+
+    modeling_gpt_oss.GptOssAttention.__init__ = init_wrapper
+    modeling_gpt_oss.GptOssAttention.forward = GptOssAttention_forward
+    modeling_gpt_oss.GptOssForCausalLM.forward = CausalLM_forward
