@@ -1,0 +1,55 @@
+# TriAttention KV Compression -- 120-frame example config
+# Two-step workflow:
+#   1. Calibrate: collect Q statistics (use kv_compression_mode: calibrate)
+#   2. Compress:  run inference with reduced KV cache (this config)
+# See https://github.com/WeianMao/triattention for details.
+
+denoising_step_list:
+- 1000
+- 750
+- 500
+- 250
+warp_denoising_step: true
+num_frame_per_block: 3
+model_name: Wan2.1-T2V-1.3B
+model_kwargs:
+  local_attn_size: -1
+  timestep_shift: 5.0
+  sink_size: 0
+  kv_compression_mode: compress
+  kv_stats_path: longlive_models/kv_stats/normal_q_stats_120f_peak49.pt
+  kv_budget_tokens: 71760
+  kv_compress_every_n_frames: 3
+  kv_keep_last_frames: 3
+  kv_pruning_mode: layer_perhead
+  kv_score_aggregation: mean
+  kv_perhead_layer_aggregation: mean_of_layer_max
+  kv_offset_max_frames: 128
+  kv_normalize_scores: true
+  kv_tie_break_noise: true
+  kv_tie_break_noise_scale: 1.0e-6
+  kv_random_seed: 0
+
+# 120 latent-frame run with TriAttention KV compression
+# Budget: 46 frames (71760 tokens), calibrated with peak=49 frames
+data_path: example/quick_test_prompt.txt
+output_folder: videos/triattention_120f
+inference_iter: 0
+num_output_frames: 120
+use_ema: false
+seed: 0
+num_samples: 1
+save_with_index: true
+global_sink: true
+context_noise: 0
+
+generator_ckpt: longlive_models/models/longlive_base.pt
+lora_ckpt: longlive_models/models/lora.pt
+
+adapter:
+  type: "lora"
+  rank: 256
+  alpha: 256
+  dropout: 0.0
+  dtype: "bfloat16"
+  verbose: false
