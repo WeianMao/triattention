@@ -46,3 +46,10 @@ scripts/configs/aime25_llama_budget512_a6000_verify.yaml
 
 # Misc
 prompt.txt
+
+# LongLive integration outputs and symlinks
+videos/
+longlive_models
+wan_models
+example/
+triattention/longlive/__pycache__/
