@@ -36,6 +36,7 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 
 ## News
 
+- **[2026-04-11]** Community C/ggml port for llama.cpp (HIP/ROCm) by [@domvox](https://github.com/domvox) — enables TriAttention on AMD GPUs via llama.cpp, with ~6.8× KV reduction when composed with TurboQuant.
 - **[2026-04-09]** Experimental MLX and TurboQuant support for Apple Silicon (M1/M2/M3/M4) — thanks to [@DeadByDawn101](https://github.com/DeadByDawn101) (RavenX AI) for proposing and contributing this feature.
 
 ## Highlights
@@ -224,6 +225,16 @@ TriAttention requires precomputed Q/K frequency statistics for scoring. We provi
 - [ ] SGLang integration
 - [ ] Ollama integration
 - [ ] Support for more model architectures
+
+## Community Implementations
+
+Independent ports and integrations maintained by the community:
+
+| Project | Stack | Maintainer | Notes |
+|---------|-------|------------|-------|
+| [triattention-ggml](https://github.com/domvox/triattention-ggml) | C/ggml, llama.cpp (HIP/ROCm) | [@domvox](https://github.com/domvox) | AMD GPU support; composes with TurboQuant (~6.8× KV reduction). Includes pre-built calibration stats for Qwen3 family. |
+
+> **Note:** Community projects are independently maintained and not officially supported. Please direct questions and issues to each project's own issue tracker.
 
 ## Citation
 
