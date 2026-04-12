@@ -36,7 +36,7 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 
 ## News
 
-- **[2026-04-11]** TriAttention now supports [LongLive](https://github.com/NVlabs/LongLive) long video generation with KV cache compression. See [docs/longlive.md](docs/longlive.md).
+- **[2026-04-12]** TriAttention now supports AR video generation with KV cache compression. See [docs/longlive.md](docs/longlive.md).
 - **[2026-04-11]** Community C/ggml port for llama.cpp (HIP/ROCm) by [@domvox](https://github.com/domvox) — enables TriAttention on AMD GPUs via llama.cpp, with ~6.8× KV reduction when composed with TurboQuant. See [triattention-ggml](https://github.com/domvox/triattention-ggml).
 - **[2026-04-09]** Experimental MLX and TurboQuant support for Apple Silicon (M1/M2/M3/M4) — thanks to [@DeadByDawn101](https://github.com/DeadByDawn101) (RavenX AI) for proposing and contributing this feature.
 
@@ -61,7 +61,7 @@ Pre-RoPE Q/K vectors in long reasoning models concentrate around fixed centers t
 - [Reproduction Guide](docs/reproduction.md) -- full experiment commands for all benchmarks
 - [Calibration Guide](docs/calibration.md) -- generating custom Q/K statistics
 - [MLX Support](docs/mlx.md) -- supporting Apple Silicon Macs (M1/M2/M3/M4) via the MLX
-- [LongLive Video Generation](docs/longlive.md) -- KV cache compression for long video generation with LongLive
+- [Video Generation](docs/longlive.md) -- KV cache compression for long video generation with LongLive
 - [Full Results](docs/results.md) -- complete tables, figures, and analysis
 
 ## Deploy with OpenClaw
