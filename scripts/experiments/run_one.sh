@@ -68,8 +68,9 @@ ARGS=("--dataset" "$DATASET" "--model" "$MODEL" "--method" "$METHOD")
 if [[ -n "$BUDGET" ]]; then
   ARGS+=("--budget" "$BUDGET")
 fi
+GLOBAL_ARGS=()
 if [[ "${DRY_RUN}" == "1" ]]; then
-  ARGS+=("--dry-run")
+  GLOBAL_ARGS+=("--dry-run")
 fi
 
-python "${RKV_ROOT}/scripts/cli.py" run-one "${ARGS[@]}"
+python "${RKV_ROOT}/scripts/cli.py" "${GLOBAL_ARGS[@]}" run-one "${ARGS[@]}"
