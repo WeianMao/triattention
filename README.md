@@ -105,22 +105,7 @@ vllm serve <model_path> \
 
 ```bash
 pip install -e .
-pip install flash-attn --no-build-isolation  # recommended
-```
-
-### DGX Spark / GB10 installation
-
-```bash
-uv venv
-. .venv/bin/activate
-uv pip install --index-url https://download.pytorch.org/whl/cu130 torch torchvision torchaudio
-# Install this vLLM wheel first, even if you will not use vLLM now; it prevents dependency conflicts.
-uv pip install \
-  https://github.com/vllm-project/vllm/releases/download/v0.19.0/vllm-0.19.0-cp38-abi3-manylinux_2_31_aarch64.whl \
-  --extra-index-url https://download.pytorch.org/whl/cu130 \
-  --extra-index-url https://pypi.org/simple \
-  --index-strategy unsafe-best-match
-uv pip install -e .
+pip install flash-attn --no-build-isolation  # recommended (takes 105m in DGX Spark / GB10)
 ```
 
 ## Quick Start
@@ -191,11 +176,21 @@ curl http://localhost:8000/v1/chat/completions \
     -d '{"model": "<model_path>", "messages": [{"role": "user", "content": "Solve: ..."}]}'
 ```
 
-#### vLLM in DGX Spark / GB10
+#### vLLM with DGX Spark / GB10
 
-After completing the DGX Spark / GB10 and vLLM setup above, run:
+To enable vLLM in DGX Spark / GB10, run these installation steps instead:
 
 ```bash
+uv venv
+. .venv/bin/activate
+uv pip install --index-url https://download.pytorch.org/whl/cu130 torch torchvision torchaudio
+uv pip install \
+  https://github.com/vllm-project/vllm/releases/download/v0.19.0/vllm-0.19.0-cp38-abi3-manylinux_2_31_aarch64.whl \
+  --extra-index-url https://download.pytorch.org/whl/cu130 \
+  --extra-index-url https://pypi.org/simple \
+  --index-strategy unsafe-best-match
+uv pip install -e .
+
 export TRITON_CACHE_DIR=~/.cache/.triton-cache
 mkdir -p $TRITON_CACHE_DIR
 export LD_LIBRARY_PATH=./.venv/lib/python3.10/site-packages/torch/lib:./.venv/lib/python3.10/site-packages/nvidia/cu13/lib:/usr/local/lib/ollama/cuda_v12:/usr/local/cuda/targets/sbsa-linux/lib:${LD_LIBRARY_PATH:-}
