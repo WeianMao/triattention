@@ -1,3 +1,3 @@
-[submodule "triattention/longlive/longlive"]
-	path = triattention/longlive/longlive
+[submodule "longlive/longlive"]
+	path = longlive/longlive
 	url = https://github.com/NVlabs/LongLive.git

@@ -3,8 +3,8 @@
 Entry point for LongLive inference with TriAttention KV compression.
 
 Usage:
-    python -m triattention.longlive.run --config_path triattention/longlive/configs/triattention_120f.yaml
-    python -m triattention.longlive --config_path triattention/longlive/configs/triattention_120f.yaml
+    python -m longlive.run --config_path longlive/configs/triattention_120f.yaml
+    python -m longlive --config_path longlive/configs/triattention_120f.yaml
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from einops import rearrange
 from torchvision.io import write_video
 
 # Apply patches BEFORE importing anything from LongLive.
-from triattention.longlive.patches import apply_patches
+from longlive.patches import apply_patches
 
 apply_patches()
 

@@ -52,4 +52,4 @@ videos/
 longlive_models
 wan_models
 example/
-triattention/longlive/__pycache__/
+longlive/__pycache__/

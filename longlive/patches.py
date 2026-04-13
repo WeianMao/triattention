@@ -25,7 +25,7 @@ def apply_patches(longlive_root: str | Path | None = None) -> None:
 
     Args:
         longlive_root: Path to LongLive repo root. If None, uses the
-                       bundled submodule at ``triattention/longlive/longlive``.
+                       bundled submodule at ``longlive/longlive``.
     """
     if longlive_root is None:
         longlive_root = Path(__file__).parent / "longlive"
@@ -38,7 +38,7 @@ def apply_patches(longlive_root: str | Path | None = None) -> None:
         sys.path.insert(0, longlive_str)
 
     # Inject our kv_compression module BEFORE LongLive tries to import it.
-    from triattention.longlive import kv_compression
+    from longlive import kv_compression
 
     sys.modules.setdefault("utils.kv_compression", kv_compression)
 
@@ -85,7 +85,7 @@ def _get_kw(model_kwargs: Any, key: str, default: Any) -> Any:
 def _patch_causal_inference() -> None:
     """Patch CausalInferencePipeline for KV compression support."""
     from pipeline.causal_inference import CausalInferencePipeline
-    from triattention.longlive.kv_compression import (
+    from longlive.kv_compression import (
         KVCompressionConfig,
         LongLiveKVCompressor,
         QStatsAccumulator,
