@@ -358,7 +358,8 @@ def _patched_engine_core_step_with_batch_queue(self):
         exec_future = self.model_executor.execute_model(
             scheduler_output, non_block=True
         )
-        if not self.is_ec_producer:
+        # vLLM version compatibility: `is_ec_producer` exists in some versions and is missing in others. Default to False.
+        if not getattr(self, "is_ec_producer", False):
             model_executed = scheduler_output.total_num_scheduled_tokens > 0
 
         if self.is_pooling_model or not model_executed:
