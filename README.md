@@ -36,6 +36,7 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 
 ## News
 
+- **[2026-04-14]** Community DGX Spark (GB10/sm-121) enablement by [@dscain](https://github.com/dscain) — vLLM support merged ([PR #10](https://github.com/WeianMao/triattention/pull/10)), non-vLLM path in progress ([PR #11](https://github.com/WeianMao/triattention/pull/11)).
 - **[2026-04-12]** TriAttention now supports AR video generation with KV cache compression. See [LongLive README](longlive/README.md).
 - **[2026-04-11]** Community C/ggml port for llama.cpp (HIP/ROCm) by [@domvox](https://github.com/domvox) — enables TriAttention on AMD GPUs via llama.cpp, with ~6.8× KV reduction when composed with TurboQuant. See [triattention-ggml](https://github.com/domvox/triattention-ggml).
 - **[2026-04-09]** Experimental MLX and TurboQuant support for Apple Silicon (M1/M2/M3/M4) — thanks to [@DeadByDawn101](https://github.com/DeadByDawn101) (RavenX AI) for proposing and contributing this feature.
