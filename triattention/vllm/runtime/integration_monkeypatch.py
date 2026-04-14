@@ -362,7 +362,7 @@ def _patched_engine_core_step_with_batch_queue(self):
         if not getattr(self, "is_ec_producer", False):
             model_executed = scheduler_output.total_num_scheduled_tokens > 0
 
-        if self.is_pooling_model or not model_executed:
+        if getattr(self, "is_pooling_model", False) or not model_executed:
             future = cast(Future[ModelRunnerOutput], exec_future)
         else:
             if not scheduler_output.pending_structured_output_tokens:
@@ -404,7 +404,7 @@ def _patched_engine_core_step_with_batch_queue(self):
     )
 
     if deferred_scheduler_output:
-        if self.use_spec_decode:
+        if getattr(self, "use_spec_decode", False):
             draft_token_ids = self.model_executor.take_draft_token_ids()
             assert draft_token_ids is not None
             self.scheduler.update_draft_token_ids_in_output(
