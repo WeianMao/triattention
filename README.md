@@ -104,6 +104,8 @@ vllm serve <model_path> \
 ## Installation
 
 ```bash
+git clone https://github.com/WeianMao/triattention.git
+cd triattention
 pip install -e .
 pip install flash-attn --no-build-isolation  # recommended (takes 105m in DGX Spark / GB10)
 ```
@@ -193,7 +195,9 @@ uv pip install -e .
 
 export TRITON_CACHE_DIR=~/.cache/.triton-cache
 mkdir -p $TRITON_CACHE_DIR
-export LD_LIBRARY_PATH=./.venv/lib/python3.10/site-packages/torch/lib:./.venv/lib/python3.10/site-packages/nvidia/cu13/lib:/usr/local/lib/ollama/cuda_v12:/usr/local/cuda/targets/sbsa-linux/lib:${LD_LIBRARY_PATH:-}
+
+PY_SITE=$(.venv/bin/python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")  # Or adjust as needed to your environment
+export LD_LIBRARY_PATH="$PY_SITE/torch/lib:$PY_SITE/nvidia/cu13/lib:/usr/local/cuda/targets/sbsa-linux/lib:${LD_LIBRARY_PATH:-}"
 
 vllm serve Qwen/Qwen3-8B \
   --dtype bfloat16 \
