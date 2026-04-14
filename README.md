@@ -296,6 +296,8 @@ We thank the following projects for their contributions and inspiration:
 
 [@kishan5111](https://github.com/kishan5111) — GPT-OSS-120B model integration
 
+[@dscain](https://github.com/dscain) — DGX Spark (GB10) enablement for vLLM and non-vLLM paths
+
 ## License
 
 This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
