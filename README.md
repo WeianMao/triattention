@@ -107,7 +107,7 @@ vllm serve <model_path> \
 git clone https://github.com/WeianMao/triattention.git
 cd triattention
 pip install -e .
-pip install flash-attn --no-build-isolation  # recommended
+pip install flash-attn --no-build-isolation  # recommended (takes 105m in DGX Spark / GB10)
 ```
 
 ## Quick Start
@@ -164,7 +164,7 @@ TriAttention includes a vLLM plugin that enables transparent KV cache compressio
 export TRIATTN_RUNTIME_KV_BUDGET=2048
 export TRIATTN_RUNTIME_SPARSE_STATS_PATH=triattention/vllm/stats/qwen3_32b_int4_stats.pt
 
-# Launch vLLM server -- TriAttention activates automatically
+# Launch vLLM server -- TriAttention activates automatically. Set `ENABLE_TRIATTENTION=0` to disable.
 vllm serve <model_path> \
     --dtype bfloat16 \
     --max-model-len 32768 \
@@ -176,6 +176,42 @@ vllm serve <model_path> \
 curl http://localhost:8000/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{"model": "<model_path>", "messages": [{"role": "user", "content": "Solve: ..."}]}'
+```
+
+#### vLLM with DGX Spark / GB10
+
+To enable vLLM in DGX Spark / GB10, run these installation steps instead:
+
+```bash
+uv venv
+. .venv/bin/activate
+uv pip install --index-url https://download.pytorch.org/whl/cu130 torch torchvision torchaudio
+uv pip install \
+  https://github.com/vllm-project/vllm/releases/download/v0.19.0/vllm-0.19.0-cp38-abi3-manylinux_2_31_aarch64.whl \
+  --extra-index-url https://download.pytorch.org/whl/cu130 \
+  --extra-index-url https://pypi.org/simple \
+  --index-strategy unsafe-best-match
+uv pip install -e .
+
+export TRITON_CACHE_DIR=~/.cache/.triton-cache
+mkdir -p $TRITON_CACHE_DIR
+
+PY_SITE=$(.venv/bin/python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")  # Or adjust as needed to your environment
+export LD_LIBRARY_PATH="$PY_SITE/torch/lib:$PY_SITE/nvidia/cu13/lib:/usr/local/cuda/targets/sbsa-linux/lib:${LD_LIBRARY_PATH:-}"
+
+vllm serve Qwen/Qwen3-8B \
+  --dtype bfloat16 \
+  --max-model-len 32768 \
+  --enforce-eager \
+  --trust-remote-code \
+  --no-enable-prefix-caching \
+  --gpu-memory-utilization 0.7
+```
+
+Verify the first vLLM log line is `[TriAttention] Runtime (V2) plugin activated: patch_scheduler=True patch_worker=True`.
+```bash
+curl http://127.0.0.1:8000/v1/models
+curl http://127.0.0.1:8000/v1/completions -H 'Content-Type: application/json' -d '{"model":"Qwen/Qwen3-8B","prompt":"hello","max_tokens":16}'
 ```
 
 ### Python API

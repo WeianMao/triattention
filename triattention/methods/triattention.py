@@ -853,8 +853,12 @@ def apply_triattention_patch(
         if isinstance(pkv, Cache):
             if hasattr(pkv, 'to_legacy_cache'):
                 pkv_tuple = pkv.to_legacy_cache()
-            else:
+            elif hasattr(pkv, 'key_cache') and hasattr(pkv, 'value_cache'):
+                # Older cache API
                 pkv_tuple = tuple(zip(pkv.key_cache, pkv.value_cache))
+            else:
+                # Transformers >=5 cache API
+                pkv_tuple = tuple((layer[0], layer[1]) for layer in pkv)
         else:
             pkv_tuple = tuple(pkv) if pkv else ()
 
@@ -1012,7 +1016,13 @@ def apply_triattention_patch(
         if isinstance(outputs.past_key_values, Cache):
             if hasattr(DynamicCache, 'from_legacy_cache'):
                 new_cache = DynamicCache.from_legacy_cache(pkv_tuple)
+            elif hasattr(DynamicCache, 'update'):
+                # Transformers >=5 cache API
+                new_cache = DynamicCache()
+                for layer_idx, (k, v) in enumerate(pkv_tuple):
+                    new_cache.update(k, v, layer_idx)
             else:
+                # Older cache API
                 new_cache = DynamicCache()
                 for k, v in pkv_tuple:
                     new_cache.key_cache.append(k)
