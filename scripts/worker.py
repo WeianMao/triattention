@@ -6,6 +6,7 @@ import json
 import os
 import random
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
@@ -476,6 +477,11 @@ def main(args: argparse.Namespace) -> None:
                 UserWarning
             )
 
+    shard_generated_samples = 0
+    shard_output_tokens = 0
+    shard_total_tokens = 0
+    shard_generation_seconds = 0.0
+
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_path, use_fast=True, padding_side="left"
     )
@@ -695,6 +701,7 @@ def main(args: argparse.Namespace) -> None:
                     f"problem={progress}/{expected_records} sample_idx={sample_idx}\n"
                 )
                 sys.stderr.flush()
+                gen_started = time.perf_counter()
                 output = model.generate(
                     **tokenized_prompts,
                     max_length=args.max_length,
@@ -709,9 +716,12 @@ def main(args: argparse.Namespace) -> None:
                     num_beams=1,
                     num_return_sequences=1,
                 )
+                gen_seconds = time.perf_counter() - gen_started
 
                 total_tokens = int((output[0] != tokenizer.pad_token_id).sum().item())
                 output_tokens = total_tokens - prefill_length
+                output_tps = float(output_tokens / gen_seconds) if gen_seconds > 0 else 0.0
+                total_tps = float(total_tokens / gen_seconds) if gen_seconds > 0 else 0.0
                 decoded = tokenizer.decode(
                     output[0][prefill_length:], skip_special_tokens=True
                 )
@@ -722,8 +732,16 @@ def main(args: argparse.Namespace) -> None:
                 record["prefill_tokens"] = prefill_length
                 record["output_tokens"] = output_tokens
                 record["total_tokens"] = total_tokens
+                record["generation_seconds"] = gen_seconds
+                record["output_tokens_per_second"] = output_tps
+                record["total_tokens_per_second"] = total_tps
                 record["sample_idx"] = sample_idx
                 record["draw_idx"] = run_id
+
+                shard_generated_samples += 1
+                shard_output_tokens += output_tokens
+                shard_total_tokens += total_tokens
+                shard_generation_seconds += gen_seconds
 
                 fout.write(json.dumps(record, ensure_ascii=False) + "\n")
                 fout.flush()
@@ -733,6 +751,19 @@ def main(args: argparse.Namespace) -> None:
         write_run_meta(artifacts["meta"], run_id, args.shard_id, expected_records)
         if out_path == artifacts["tmp"]:
             artifacts["tmp"].replace(artifacts["run"])
+
+    if shard_generated_samples > 0 and shard_generation_seconds > 0:
+        avg_output_tps = shard_output_tokens / shard_generation_seconds
+        avg_total_tps = shard_total_tokens / shard_generation_seconds
+        sys.stderr.write(
+            "[throughput] "
+            f"shard={args.shard_id} generated_samples={shard_generated_samples} "
+            f"generation_seconds={shard_generation_seconds:.3f} "
+            f"output_tokens={shard_output_tokens} total_tokens={shard_total_tokens} "
+            f"output_tokens_per_second={avg_output_tps:.3f} "
+            f"total_tokens_per_second={avg_total_tps:.3f}\n"
+        )
+        sys.stderr.flush()
     torch.cuda.empty_cache()
 
 

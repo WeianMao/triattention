@@ -468,6 +468,7 @@ def run_shards(
         raise ValueError("No GPUs available to schedule shards")
 
     question_mode = use_question_sharding(num_samples, total_shards) and (total_questions or 0) > 0
+    total_questions = total_questions or 0
     if question_mode:
         print(f"[dispatch] shard-over-questions mode: {total_questions} questions across {total_shards} shards, {num_samples} draw(s) each")
     else:
@@ -576,6 +577,55 @@ def run_shards(
         terminate_active(active.values())
         raise
 
+def summarize_throughput_from_merged(merged_dir: Path) -> None:
+    merged_file = merged_dir / "merged.jsonl"
+    if not merged_file.exists():
+        return
+
+    num_records = 0
+    output_tokens_sum = 0
+    total_tokens_sum = 0
+    generation_seconds_sum = 0.0
+
+    try:
+        with merged_file.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                gen_s = rec.get("generation_seconds")
+                out_tok = rec.get("output_tokens")
+                tot_tok = rec.get("total_tokens")
+                if not isinstance(gen_s, (int, float)):
+                    continue
+                if not isinstance(out_tok, int) or not isinstance(tot_tok, int):
+                    continue
+                if gen_s <= 0:
+                    continue
+                num_records += 1
+                output_tokens_sum += out_tok
+                total_tokens_sum += tot_tok
+                generation_seconds_sum += float(gen_s)
+    except OSError:
+        return
+
+    if num_records == 0 or generation_seconds_sum <= 0:
+        return
+
+    output_tps = output_tokens_sum / generation_seconds_sum
+    total_tps = total_tokens_sum / generation_seconds_sum
+    print(
+        "[throughput-summary] "
+        f"records={num_records} "
+        f"generation_seconds={generation_seconds_sum:.3f} "
+        f"output_tokens={output_tokens_sum} total_tokens={total_tokens_sum} "
+        f"output_tokens_per_second={output_tps:.3f} "
+        f"total_tokens_per_second={total_tps:.3f}"
+    )
 
 def merge_outputs(shard_output_dir: Path, merged_dir_name: str, skip_merge: bool, dry_run: bool) -> None:
     if skip_merge:
@@ -699,6 +749,8 @@ def main() -> None:
     )
     merge_outputs(runner_args["output_dir"], merged_dir_name, args.skip_merge, args.dry_run)
     merged_dir = runner_args["output_dir"].parent / merged_dir_name
+    if not args.dry_run:
+        summarize_throughput_from_merged(merged_dir)
     if not eval_output_dir:
         eval_output_dir = merged_dir.parent / "eval"
     if not args.no_eval:
