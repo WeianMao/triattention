@@ -20,7 +20,7 @@ import yaml
 
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "dispatch_default.yaml"
 MERGE_SCRIPT = REPO_ROOT / "scripts" / "merge_shards.py"
-MULTI_EVAL_SCRIPT = REPO_ROOT / "evaluation" / "eval_math_multi.py"
+MULTI_EVAL_SCRIPT = REPO_ROOT / "triattention" / "evaluation" / "eval_math_multi.py"
 PATH_ARG_KEYS = {"output_dir", "dataset_path", "model_path", "tokenizer_path"}
 RUNNER_EXCLUDE_KEYS = {"num_samples_by_dataset"}
 
