@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -403,6 +404,31 @@ def build_base_command(conda_env: str, runner_path: Path, runner_args: List[str]
     return ["conda", "run", "-n", conda_env, "python", str(runner_path)] + runner_args
 
 
+def conda_to_python_fallback(cmd: List[str]) -> List[str]:
+    """Convert a conda-run command to direct python invocation."""
+    if not cmd:
+        return [sys.executable]
+
+    # Exact expected shape: conda run -n <env> python <script> ...
+    if len(cmd) >= 6 and cmd[:3] == ["conda", "run", "-n"] and cmd[4] == "python":
+        return [sys.executable] + cmd[5:]
+
+    # Fallback parser for other conda run shapes.
+    if cmd[0] == "conda" and len(cmd) > 1 and cmd[1] == "run":
+        py_idx: int | None = None
+        for idx, token in enumerate(cmd):
+            name = Path(token).name
+            if name == "python" or name.startswith("python"):
+                py_idx = idx
+                break
+        if py_idx is not None:
+            return [sys.executable] + cmd[py_idx + 1 :]
+        return [sys.executable] + cmd[2:]
+
+    # Last resort: just replace first token.
+    return [sys.executable] + cmd[1:]
+
+
 def prepare_environment(env_overrides: Dict[str, str]) -> Dict[str, str]:
     merged = os.environ.copy()
     for key, value in env_overrides.items():
@@ -425,14 +451,31 @@ def launch_shard(
     env["CUDA_VISIBLE_DEVICES"] = str(gpu)
     log_handle = log_path.open("w", buffering=1)
     print(f"[launch] shard {shard_id} -> GPU {gpu}, log {log_path}")
-    process = subprocess.Popen(
-        shard_cmd,
-        cwd=str(REPO_ROOT),
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        env=env,
-        start_new_session=True,
-    )
+    try:
+        process = subprocess.Popen(
+            shard_cmd,
+            cwd=str(REPO_ROOT),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            env=env,
+            start_new_session=True,
+        )
+    except FileNotFoundError as exc:
+        # Final safety net: if conda is still missing at launch time, retry
+        # directly with the current interpreter.
+        if shard_cmd and shard_cmd[0] == "conda":
+            fallback_cmd = conda_to_python_fallback(shard_cmd)
+            print(f"[fallback] conda not found at launch time; retrying shard {shard_id} with {sys.executable}")
+            process = subprocess.Popen(
+                fallback_cmd,
+                cwd=str(REPO_ROOT),
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                env=env,
+                start_new_session=True,
+            )
+        else:
+            raise exc
     return ActiveShard(shard_id=shard_id, gpu=gpu, process=process, log_handle=log_handle, log_path=log_path)
 
 
@@ -466,6 +509,14 @@ def run_shards(
 ) -> None:
     if not gpus:
         raise ValueError("No GPUs available to schedule shards")
+
+    # Keep original command shape. Only switch to plain python when command is
+    # conda-form and conda/env is unavailable.
+    if len(base_cmd) >= 6 and base_cmd[:3] == ["conda", "run", "-n"] and base_cmd[4] == "python":
+        conda_env = str(base_cmd[3]).strip()
+        conda_available = bool(shutil.which("conda", path=base_env.get("PATH")))
+        if not (conda_env and conda_available):
+            base_cmd = conda_to_python_fallback(base_cmd)
 
     question_mode = use_question_sharding(num_samples, total_shards) and (total_questions or 0) > 0
     total_questions = total_questions or 0
@@ -661,6 +712,19 @@ def run_evaluation(base_dir: Path, dataset: str, exp_name: str, output_dir: Opti
         "--exp_name",
         exp_name,
     ]
+
+    # In case conda not available
+    if not (conda_env and shutil.which("conda")):
+        python_executable = sys.executable
+        # Non-conda fallback uses the selected Python interpreter.
+        cmd = [python_executable, str(MULTI_EVAL_SCRIPT)] + [
+            "--base_dir",
+            str(base_dir),
+            "--dataset",
+            dataset,
+            "--exp_name",
+            exp_name,
+        ]
     if output_dir:
         cmd.extend(["--output_dir", str(output_dir)])
     if num_samples:
@@ -732,6 +796,8 @@ def main() -> None:
     dataset_example_count = count_dataset_examples(runner_args["dataset_path"], max_examples)
 
     base_cmd = build_base_command(conda_env, runner_path, format_runner_args(runner_args, total_shards))
+    if not conda_env:
+        base_cmd = [sys.executable, str(runner_path)] + format_runner_args(runner_args, total_shards)
     num_samples = int(runner_args.get("num_samples", 64))
 
     run_shards(
