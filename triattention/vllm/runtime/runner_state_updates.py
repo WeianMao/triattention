@@ -6,7 +6,6 @@ import logging
 import os
 from typing import Any
 
-from .debug_trace import trace_event
 from .signals import CompressionSignal
 
 
@@ -117,14 +116,6 @@ def consume_runner_signals(
         )
         if signal.should_compress:
             state_store.mark_trigger(req_id, signal.reason, signal.step)
-            trace_event(
-                "signal_trigger",
-                req_id=repr(req_id),
-                step=int(signal.step),
-                reason=str(signal.reason),
-                estimated_cache_len=int(signal.estimated_cache_len),
-                scheduled_tokens=int(getattr(signal, "scheduled_tokens", 1)),
-            )
             if log_decisions:
                 logger.debug(
                     "TriAttention trigger req=%s step=%d reason=%s len=%d mode=%s",

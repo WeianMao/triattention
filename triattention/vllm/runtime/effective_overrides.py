@@ -6,7 +6,6 @@ from typing import Any
 
 import torch
 
-from .debug_trace import trace_event
 from .request_key_compat import get_scheduled_token_items
 from .runner_struct_compat import resolve_req_id_to_index
 
@@ -159,14 +158,6 @@ def _resolve_abs_progress_for_override(
         state=state,
         scheduler_step=scheduler_step,
     ) is True:
-        trace_event(
-            "effective_override_prefill_progress_clamp",
-            abs_progress=int(abs_progress),
-            prefill_len=int(prefill_len),
-            scheduled_tokens=int(scheduled_tokens),
-            scheduler_step=int(scheduler_step) if isinstance(scheduler_step, int) else -1,
-            compression_count=int(compression_count),
-        )
         return int(prefill_len)
     return abs_progress
 
@@ -343,20 +334,6 @@ def build_effective_sparse_overrides(
                 scheduler_step=scheduler_step,
             )
             delta = int(effective_before_step - abs_progress)
-        trace_event(
-            "effective_override_observe",
-            req_id=repr(req_id),
-            req_idx=int(req_idx),
-            scheduled_tokens=int(scheduled_tokens),
-            abs_progress=int(abs_progress),
-            current_cache_len=int(getattr(state, "current_cache_len", abs_progress)) if state is not None else int(abs_progress),
-            current_cache_len_semantics=str(getattr(state, "current_cache_len_semantics", "none")) if state is not None else "none",
-            current_cache_len_step=int(getattr(state, "current_cache_len_step", -1)) if state is not None else -1,
-            effective_before_step=int(effective_before_step),
-            pos_delta=int(delta),
-            scheduler_step=int(scheduler_step) if isinstance(scheduler_step, int) else -1,
-            compression_count=int(getattr(state, "compression_count", 0)) if state is not None else 0,
-        )
         if delta == 0:
             continue
         # Sparse overrides only need rows whose effective base differs from the
@@ -364,20 +341,6 @@ def build_effective_sparse_overrides(
         # to the unmodified base implementation outputs.
         seq_bases[req_idx] = effective_before_step
         pos_deltas[req_idx] = delta
-        trace_event(
-            "effective_override_row",
-            req_id=repr(req_id),
-            req_idx=int(req_idx),
-            scheduled_tokens=int(scheduled_tokens),
-            abs_progress=int(abs_progress),
-            current_cache_len=int(getattr(state, "current_cache_len", abs_progress)) if state is not None else int(abs_progress),
-            current_cache_len_semantics=str(getattr(state, "current_cache_len_semantics", "none")) if state is not None else "none",
-            current_cache_len_step=int(getattr(state, "current_cache_len_step", -1)) if state is not None else -1,
-            effective_before_step=int(effective_before_step),
-            pos_delta=int(delta),
-            scheduler_step=int(scheduler_step) if isinstance(scheduler_step, int) else -1,
-            compression_count=int(getattr(state, "compression_count", 0)) if state is not None else 0,
-        )
 
     single_seq_base: int | None = None
     single_pos_delta = 0

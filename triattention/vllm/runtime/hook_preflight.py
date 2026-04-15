@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .debug_trace import trace_event
 from .hook_group_pipeline import normalize_mutable_block_ids_by_group
 from .runner_struct_compat import resolve_request_state_view
 
@@ -195,59 +194,12 @@ def resolve_hook_request_context(
             )
             source = f"{source}+scheduler_output_num_computed"
             resolved_num_computed = scheduler_num_computed
-        trace_event(
-            "hook_req_state_resolved",
-            req_id=repr(req_id),
-            source=source,
-            resolved_num_computed=resolved_num_computed,
-            requests_num_computed=requests_num_computed,
-            req_states_num_computed=req_states_num_computed,
-            input_batch_num_computed=input_batch_num_computed,
-            scheduler_output_num_computed=scheduler_num_computed,
-            has_scheduler_output=(scheduler_output is not None),
-        )
     if req_state is None:
         if scheduler_output_req_state is not None:
             req_state = scheduler_output_req_state
             if req_state is not None:
                 source = "scheduler_output_new_req"
         if req_state is None:
-            trace_event(
-                "hook_req_state_missing",
-                req_id=repr(req_id),
-                source=source,
-                has_requests=isinstance(requests, dict),
-                has_req_states=(req_states is not None),
-                has_req_states_req_id_to_index=isinstance(req_states_req_id_to_index, dict),
-                req_states_contains_req_id=(
-                    bool(isinstance(req_states_req_id_to_index, dict) and req_id in req_states_req_id_to_index)
-                ),
-                req_states_keys_sample=(
-                    [repr(k) for k in list(req_states_req_id_to_index.keys())[:4]]
-                    if isinstance(req_states_req_id_to_index, dict)
-                    else None
-                ),
-                has_input_batch=(input_batch is not None),
-                has_input_batch_req_id_to_index=isinstance(input_batch_req_id_to_index, dict),
-                input_batch_contains_req_id=(
-                    bool(isinstance(input_batch_req_id_to_index, dict) and req_id in input_batch_req_id_to_index)
-                ),
-                input_batch_keys_sample=(
-                    [repr(k) for k in list(input_batch_req_id_to_index.keys())[:4]]
-                    if isinstance(input_batch_req_id_to_index, dict)
-                    else None
-                ),
-                has_block_tables=(getattr(base_runner, "block_tables", None) is not None),
-                has_scheduler_output=(scheduler_output is not None),
-                scheduled_new_req_ids=(
-                    [
-                        repr(getattr(new_req, "req_id", None))
-                        for new_req in (getattr(scheduler_output, "scheduled_new_reqs", None) or [])[:4]
-                    ]
-                    if scheduler_output is not None
-                    else None
-                ),
-            )
             return {"applied": False, "reason": "req_state_not_found"}
     state_store = getattr(base_runner, "_triattention_state_store", None)
     req_runtime_state = (

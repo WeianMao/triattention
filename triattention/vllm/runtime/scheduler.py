@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
 from typing import Any
 
 from vllm.config import VllmConfig
@@ -28,17 +25,6 @@ from .request_key_compat import iter_scheduled_token_items
 from .signals import CompressionSignal
 
 logger = init_logger(__name__)
-
-_DUMP_FIRST_PROMPT_TOKEN_IDS = (
-    os.environ.get("TRIATTN_DEBUG_DUMP_FIRST_PROMPT_TOKEN_IDS", "0").strip().lower()
-    in {"1", "true", "yes", "on"}
-)
-_DUMP_FIRST_PROMPT_TOKEN_IDS_PATH = os.environ.get(
-    "TRIATTN_DEBUG_DUMP_FIRST_PROMPT_TOKEN_IDS_PATH",
-    "",
-).strip()
-_FIRST_PROMPT_TOKEN_IDS_DUMPED = False
-
 
 def _evict_reclaimed_block_metadata(block_pool: Any, block: Any) -> None:
     """Best-effort clear of prefix-cache metadata before reusing a block."""
@@ -149,7 +135,6 @@ class TriAttentionScheduler(Scheduler):
         return threshold
 
     def _sync_prefill_lens(self, scheduler_output: SchedulerOutput) -> None:
-        global _FIRST_PROMPT_TOKEN_IDS_DUMPED
         for new_req in scheduler_output.scheduled_new_reqs:
             req_id = new_req.req_id
             is_first_seen = req_id not in self._prefill_lens
@@ -162,34 +147,7 @@ class TriAttentionScheduler(Scheduler):
                     req_id,
                     new_req.num_computed_tokens,
                 )
-            prompt_token_ids = getattr(new_req, "prompt_token_ids", None)
             prefill_len = _resolve_full_prefill_len_from_request_like(new_req)
-            if (
-                is_first_seen
-                and _DUMP_FIRST_PROMPT_TOKEN_IDS
-                and not _FIRST_PROMPT_TOKEN_IDS_DUMPED
-                and _DUMP_FIRST_PROMPT_TOKEN_IDS_PATH
-                and isinstance(prompt_token_ids, list)
-            ):
-                try:
-                    dump_path = Path(_DUMP_FIRST_PROMPT_TOKEN_IDS_PATH)
-                    dump_path.parent.mkdir(parents=True, exist_ok=True)
-                    dump_path.write_text(
-                        json.dumps(
-                            {
-                                "req_id": req_id,
-                                "prefill_len": int(prefill_len),
-                                "prompt_token_ids_len": len(prompt_token_ids),
-                                "prompt_token_ids": [int(x) for x in prompt_token_ids],
-                            },
-                            ensure_ascii=False,
-                            indent=2,
-                        ),
-                        encoding="utf-8",
-                    )
-                    _FIRST_PROMPT_TOKEN_IDS_DUMPED = True
-                except Exception:
-                    pass
             self._prefill_lens[req_id] = prefill_len
             self._length_threshold_cache[req_id] = self._compute_length_threshold(prefill_len)
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -11,7 +10,7 @@ import torch
 
 from .config import TriAttentionRuntimeConfig
 from .constants import TRITON_SCORING_REQUIRED_MARKER
-from .kv_compaction import gather_request_k_dense, gather_request_k_dense_range
+from .kv_compaction import gather_request_k_dense_range
 
 def build_triattention_selector(
     config: TriAttentionRuntimeConfig,
@@ -119,38 +118,6 @@ def build_triattention_selector(
     compressor = TriAttentionCompressor(tri_cfg)
     available_layers_sorted: tuple[int, ...] | None = None
     available_layers_set: set[int] | None = None
-    dump_k_sample_path = os.environ.get(
-        "TRIATTN_DEBUG_DUMP_FIRST_K_SAMPLE_PATH",
-        "",
-    ).strip()
-    dump_k_sample_done = False
-    dump_dense_keys_path = os.environ.get(
-        "TRIATTN_DEBUG_DUMP_FIRST_DENSE_KEYS_PATH",
-        "",
-    ).strip()
-    dump_single_layer_dense_keys_path = os.environ.get(
-        "TRIATTN_DEBUG_DUMP_FIRST_DENSE_LAYER_PATH",
-        "",
-    ).strip()
-    dump_single_layer_target_raw = os.environ.get(
-        "TRIATTN_DEBUG_DUMP_FIRST_DENSE_LAYER_INDEX",
-        "",
-    ).strip()
-    dump_single_layer_target = (
-        int(dump_single_layer_target_raw) if dump_single_layer_target_raw else None
-    )
-    dump_dense_keys_done = False
-    dump_single_layer_dense_keys_done = False
-    debug_dump_group_score_samples = (
-        os.environ.get("TRIATTN_DEBUG_DUMP_GROUP_SCORE_SAMPLES", "0").strip().lower()
-        in {"1", "true", "yes", "on"}
-    )
-    debug_dump_model_path_info_path = os.environ.get(
-        "TRIATTN_DEBUG_DUMP_SELECTOR_MODEL_PATH_INFO_PATH",
-        "",
-    ).strip()
-    debug_dump_model_path_info_done = False
-
     def _resolve_effective_recent_count(total_tokens: int) -> int:
         if total_tokens <= 0 or config.window_size <= 0:
             return 0
@@ -174,53 +141,6 @@ def build_triattention_selector(
         if layer_idx in available_layers_set:
             return layer_idx
         return available_layers_sorted[layer_idx % len(available_layers_sorted)]
-
-    if debug_dump_model_path_info_path and not debug_dump_model_path_info_done:
-        try:
-            compressor._lazy_init()
-            dump_path = Path(debug_dump_model_path_info_path)
-            dump_path.parent.mkdir(parents=True, exist_ok=True)
-            omega_head = (
-                compressor.omega[:8].detach().to(device="cpu", dtype=torch.float32).tolist()
-                if getattr(compressor, "omega", None) is not None
-                else None
-            )
-            inv_freq_head = (
-                compressor.inv_freq[:8].detach().to(device="cpu", dtype=torch.float32).tolist()
-                if getattr(compressor, "inv_freq", None) is not None
-                else None
-            )
-            payload = {
-                "config_model_path": (
-                    None if getattr(config, "model_path", None) is None else str(config.model_path)
-                ),
-                "resolved_effective_model_path": (
-                    None if effective_model_path is None else str(effective_model_path)
-                ),
-                "base_runner_type": None if base_runner is None else type(base_runner).__name__,
-                "base_runner_model_config_model": None,
-                "base_runner_vllm_config_model_config_model": None,
-                "compressor_rope_style": getattr(compressor.config, "rope_style", None),
-                "compressor_omega_head": omega_head,
-                "compressor_inv_freq_head": inv_freq_head,
-            }
-            if base_runner is not None:
-                model_config = getattr(base_runner, "model_config", None)
-                model_value = getattr(model_config, "model", None)
-                if model_value is not None:
-                    payload["base_runner_model_config_model"] = str(model_value)
-                vllm_config = getattr(base_runner, "vllm_config", None)
-                inner_model_config = getattr(vllm_config, "model_config", None)
-                inner_model_value = getattr(inner_model_config, "model", None)
-                if inner_model_value is not None:
-                    payload["base_runner_vllm_config_model_config_model"] = str(inner_model_value)
-            dump_path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            debug_dump_model_path_info_done = True
-        except Exception:
-            pass
 
     reduced_head_stats_cache: dict[tuple[int, int], tuple[dict[str, torch.Tensor], torch.Tensor]] = {}
 
@@ -300,33 +220,6 @@ def build_triattention_selector(
             layer_idx=layer_idx,
             runtime_heads=runtime_heads,
         )
-        nonlocal dump_single_layer_dense_keys_done
-
-        should_dump_single_layer = (
-            dump_single_layer_dense_keys_path
-            and not dump_single_layer_dense_keys_done
-            and (
-                dump_single_layer_target is None
-                or int(layer_idx) == dump_single_layer_target
-            )
-        )
-        if should_dump_single_layer:
-            try:
-                dump_path = Path(dump_single_layer_dense_keys_path)
-                dump_path.parent.mkdir(parents=True, exist_ok=True)
-                payload = {
-                    "layer_idx": int(layer_idx),
-                    "round_start": int(round_start),
-                    "total_tokens": int(keys_dense.shape[0]),
-                    "num_heads": int(keys_dense.shape[1]),
-                    "head_dim": int(keys_dense.shape[2]),
-                    "dtype": str(keys_dense.dtype),
-                    "keys_dense": keys_dense.detach().to(device="cpu"),
-                }
-                torch.save(payload, dump_path)
-                dump_single_layer_dense_keys_done = True
-            except Exception:
-                pass
 
         scores = _compute_layer_scores_raw(
             keys_dense=keys_dense,
@@ -489,38 +382,6 @@ def build_triattention_selector(
             layer_idx=layer_idx,
             runtime_heads=runtime_heads,
         )
-        nonlocal dump_single_layer_dense_keys_done
-        should_dump_single_layer = (
-            dump_single_layer_dense_keys_path
-            and not dump_single_layer_dense_keys_done
-            and (
-                dump_single_layer_target is None
-                or int(layer_idx) == dump_single_layer_target
-            )
-        )
-        if should_dump_single_layer:
-            try:
-                dump_path = Path(dump_single_layer_dense_keys_path)
-                dump_path.parent.mkdir(parents=True, exist_ok=True)
-                dense_keys_full = gather_request_k_dense(
-                    kv_cache=kv_cache,
-                    block_ids=block_ids,
-                    block_size=block_size,
-                    total_tokens=total_tokens,
-                )
-                payload = {
-                    "layer_idx": int(layer_idx),
-                    "round_start": int(round_start),
-                    "total_tokens": int(total_tokens),
-                    "num_heads": int(dense_keys_full.shape[1]),
-                    "head_dim": int(dense_keys_full.shape[2]),
-                    "dtype": str(dense_keys_full.dtype),
-                    "keys_dense": dense_keys_full.detach().to(device="cpu"),
-                }
-                torch.save(payload, dump_path)
-                dump_single_layer_dense_keys_done = True
-            except Exception:
-                pass
         chunk_tokens = _score_chunk_tokens(block_size, total_tokens)
         chunks: list[torch.Tensor] = []
         start = 0
@@ -578,62 +439,6 @@ def build_triattention_selector(
         if protect_prefill and prefill_len > 0:
             guard_mask |= token_positions < prefill_len
         return guard_mask
-
-    def _dump_first_k_sample(
-        *,
-        layer_entries: list[dict[str, Any]],
-        total_tokens: int,
-    ) -> None:
-        nonlocal dump_k_sample_done
-        if dump_k_sample_done or not dump_k_sample_path or not layer_entries:
-            return
-        sample_positions = sorted(
-            set(
-                [0, 1, 2, 3, 4]
-                + [max(0, total_tokens // 4 - 1), total_tokens // 4, min(total_tokens - 1, total_tokens // 4 + 1)]
-                + [max(0, total_tokens // 2 - 1), total_tokens // 2, min(total_tokens - 1, total_tokens // 2 + 1)]
-                + [max(0, (3 * total_tokens) // 4 - 1), (3 * total_tokens) // 4, min(total_tokens - 1, (3 * total_tokens) // 4 + 1)]
-                + [max(0, total_tokens - 5), max(0, total_tokens - 4), max(0, total_tokens - 3), max(0, total_tokens - 2), total_tokens - 1]
-            )
-        )
-        payload = {
-            "total_tokens": int(total_tokens),
-            "sample_positions": [int(x) for x in sample_positions],
-            "layers": {},
-        }
-        preferred_layers = {0, 1, 16, 32, 48, 63}
-        selected_entries = [
-            entry for entry in layer_entries if int(entry["layer_idx"]) in preferred_layers
-        ]
-        if not selected_entries:
-            selected_entries = layer_entries[:2]
-        for entry in selected_entries:
-            keys_dense = gather_request_k_dense(
-                kv_cache=entry["kv_cache"],
-                block_ids=entry["block_ids"],
-                block_size=entry["block_size"],
-                total_tokens=total_tokens,
-            )
-            layer_payload = {}
-            head_limit = min(2, int(keys_dense.shape[1]))
-            for head_idx in range(head_limit):
-                vectors = []
-                for pos in sample_positions:
-                    vectors.append(
-                        keys_dense[0, head_idx, pos]
-                        .detach()
-                        .to(device="cpu", dtype=torch.float32)
-                        .tolist()
-                    )
-                layer_payload[str(head_idx)] = vectors
-            payload["layers"][str(entry["layer_idx"])] = layer_payload
-        out_path = Path(dump_k_sample_path)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        dump_k_sample_done = True
 
     def _apply_token_guards(
         *,
@@ -909,70 +714,6 @@ def build_triattention_selector(
                 protect_prefill=protect_prefill,
                 budget_total=budget_total,
             )
-            if (
-                os.environ.get("TRIATTN_DEBUG_COMPARE_PAGED_DENSE_KEEP", "0") == "1"
-                and paged_result is not None
-            ):
-                try:
-                    keys_dense_dbg = gather_request_k_dense(
-                        kv_cache=kv_cache,
-                        block_ids=block_ids,
-                        block_size=block_size,
-                        total_tokens=total_tokens,
-                    )
-                    dense_scores_dbg = _compute_layer_scores(
-                        keys_dense=keys_dense_dbg,
-                        layer_idx=layer_idx,
-                        round_start=round_start,
-                        prefill_len=prefill_len,
-                        protect_prefill=protect_prefill,
-                    )
-                    k_dbg = min(int(budget_total), int(dense_scores_dbg.shape[-1]))
-                    if k_dbg <= 0:
-                        dense_result = {"mode": "shared", "indices": []}
-                    elif (
-                        requested_pruning_mode in {"per_head", "per_layer_per_head"}
-                        and dense_scores_dbg.ndim == 3
-                    ):
-                        topk_dbg = torch.topk(
-                            dense_scores_dbg,
-                            k=k_dbg,
-                            dim=-1,
-                            largest=True,
-                            sorted=False,
-                        ).indices[0]
-                        dense_result = {
-                            "mode": "per_head",
-                            "indices": torch.sort(topk_dbg, dim=-1).values.contiguous(),
-                        }
-                    else:
-                        dense_scores_agg = dense_scores_dbg
-                        if dense_scores_agg.ndim == 3:
-                            dense_scores_agg = dense_scores_agg.max(dim=1).values
-                        selected_dbg = torch.topk(
-                            dense_scores_agg,
-                            k=k_dbg,
-                            dim=-1,
-                            largest=True,
-                            sorted=False,
-                        ).indices[0]
-                        dense_result = {
-                            "mode": "shared",
-                            "indices": torch.sort(selected_dbg).values.contiguous(),
-                        }
-                    _debug_compare_selector_results(
-                        paged_result=paged_result,
-                        dense_result=dense_result,
-                        total_tokens=total_tokens,
-                        layer_idx=layer_idx,
-                        round_start=round_start,
-                    )
-                except Exception as exc:
-                    raise RuntimeError(
-                        "TRIATTN_PAGED_DENSE_COMPARE_FAILED:"
-                        f"layer_idx={layer_idx}:total_tokens={total_tokens}:"
-                        f"round_start={round_start}:{type(exc).__name__}:{exc}"
-                    ) from exc
             return paged_result
         else:
             raise RuntimeError("missing scoring inputs for selector")
@@ -1004,85 +745,6 @@ def build_triattention_selector(
         ).indices[0]
         keep = torch.sort(selected).values.contiguous()
         return {"mode": "shared", "indices": keep}
-
-    def _debug_compare_selector_results(
-        *,
-        paged_result: dict[str, Any] | None,
-        dense_result: dict[str, Any] | None,
-        total_tokens: int,
-        layer_idx: int,
-        round_start: int,
-    ) -> None:
-        if paged_result is None or dense_result is None:
-            if paged_result != dense_result:
-                raise RuntimeError(
-                    "TRIATTN_PAGED_DENSE_COMPARE_MISMATCH:"
-                    f"layer_idx={layer_idx}:total_tokens={total_tokens}:"
-                    f"round_start={round_start}:paged={paged_result}:dense={dense_result}"
-                )
-            return
-        if paged_result.get("mode") != dense_result.get("mode"):
-            raise RuntimeError(
-                "TRIATTN_PAGED_DENSE_COMPARE_MODE_MISMATCH:"
-                f"layer_idx={layer_idx}:total_tokens={total_tokens}:"
-                f"round_start={round_start}:paged_mode={paged_result.get('mode')}:"
-                f"dense_mode={dense_result.get('mode')}"
-            )
-        p_idx = paged_result.get("indices")
-        d_idx = dense_result.get("indices")
-        if isinstance(p_idx, list):
-            p_idx = torch.as_tensor(p_idx)
-        if isinstance(d_idx, list):
-            d_idx = torch.as_tensor(d_idx)
-        if not isinstance(p_idx, torch.Tensor) or not isinstance(d_idx, torch.Tensor):
-            if p_idx != d_idx:
-                raise RuntimeError(
-                    "TRIATTN_PAGED_DENSE_COMPARE_INDEX_TYPE_MISMATCH:"
-                    f"layer_idx={layer_idx}:paged_type={type(p_idx)}:dense_type={type(d_idx)}"
-                )
-            return
-        p_cpu = p_idx.detach().to("cpu", dtype=torch.long).contiguous()
-        d_cpu = d_idx.detach().to("cpu", dtype=torch.long).contiguous()
-        if p_cpu.shape != d_cpu.shape or not torch.equal(p_cpu, d_cpu):
-            # Ties can cause benign differences; fail only when overlap is clearly low.
-            if p_cpu.ndim == 1 and d_cpu.ndim == 1:
-                p_set = set(int(x) for x in p_cpu.tolist())
-                d_set = set(int(x) for x in d_cpu.tolist())
-                inter = len(p_set & d_set)
-                union = max(1, len(p_set | d_set))
-                jaccard = inter / union
-                if jaccard >= 0.98:
-                    return
-                p_head = p_cpu[: min(16, p_cpu.numel())].tolist()
-                d_head = d_cpu[: min(16, d_cpu.numel())].tolist()
-                raise RuntimeError(
-                    "TRIATTN_PAGED_DENSE_COMPARE_INDEX_MISMATCH:"
-                    f"layer_idx={layer_idx}:total_tokens={total_tokens}:"
-                    f"round_start={round_start}:jaccard={jaccard:.4f}:"
-                    f"paged_head={p_head}:dense_head={d_head}"
-                )
-            if p_cpu.ndim == 2 and d_cpu.ndim == 2 and p_cpu.shape == d_cpu.shape:
-                head_jaccards: list[float] = []
-                for h in range(p_cpu.shape[0]):
-                    p_set = set(int(x) for x in p_cpu[h].tolist())
-                    d_set = set(int(x) for x in d_cpu[h].tolist())
-                    inter = len(p_set & d_set)
-                    union = max(1, len(p_set | d_set))
-                    head_jaccards.append(inter / union)
-                if head_jaccards and min(head_jaccards) >= 0.98:
-                    return
-                raise RuntimeError(
-                    "TRIATTN_PAGED_DENSE_COMPARE_PERHEAD_MISMATCH:"
-                    f"layer_idx={layer_idx}:total_tokens={total_tokens}:"
-                    f"round_start={round_start}:min_jaccard={min(head_jaccards):.4f}:"
-                    f"mean_jaccard={sum(head_jaccards)/len(head_jaccards):.4f}"
-                )
-            raise RuntimeError(
-                "TRIATTN_PAGED_DENSE_COMPARE_SHAPE_MISMATCH:"
-                f"layer_idx={layer_idx}:total_tokens={total_tokens}:"
-                f"round_start={round_start}:paged_shape={tuple(p_cpu.shape)}:"
-                f"dense_shape={tuple(d_cpu.shape)}"
-            )
 
     def _select_keep_indices_for_group_per_head(
         *,
@@ -1149,7 +811,6 @@ def build_triattention_selector(
             return None
 
         if iter_mode == "paged":
-            nonlocal dump_dense_keys_done
             group_agg_mode = os.environ.get(
                 "TRIATTN_RUNTIME_DEBUG_GROUP_PERHEAD_AGG_MODE",
                 "mean",
@@ -1187,61 +848,6 @@ def build_triattention_selector(
                         "group_size": group_size,
                     }
                 )
-
-            _dump_first_k_sample(
-                layer_entries=prepared_layers,
-                total_tokens=total_tokens,
-            )
-            if dump_dense_keys_path and not dump_dense_keys_done:
-                try:
-                    dump_path = Path(dump_dense_keys_path)
-                    dump_path.parent.mkdir(parents=True, exist_ok=True)
-                    preferred_layers_env = os.environ.get(
-                        "TRIATTN_DEBUG_DUMP_FIRST_DENSE_KEYS_LAYERS",
-                        "",
-                    ).strip()
-                    if preferred_layers_env.lower() == "all":
-                        selected_entries = prepared_layers
-                    else:
-                        preferred_layers = {0, 1, 16, 32, 48, 63}
-                        if preferred_layers_env:
-                            try:
-                                preferred_layers = {
-                                    int(part.strip())
-                                    for part in preferred_layers_env.split(",")
-                                    if part.strip()
-                                }
-                            except Exception:
-                                preferred_layers = {0, 1, 16, 32, 48, 63}
-                        selected_entries = [
-                            entry
-                            for entry in prepared_layers
-                            if int(entry["layer_idx"]) in preferred_layers
-                        ]
-                        if not selected_entries:
-                            selected_entries = prepared_layers[:1]
-                    payload = {
-                        "round_start": int(round_start),
-                        "total_tokens": int(total_tokens),
-                        "layers": {},
-                    }
-                    for entry in selected_entries:
-                        dense_keys_full = gather_request_k_dense(
-                            kv_cache=entry["kv_cache"],
-                            block_ids=entry["block_ids"],
-                            block_size=entry["block_size"],
-                            total_tokens=total_tokens,
-                        )
-                        payload["layers"][str(int(entry["layer_idx"]))] = {
-                            "num_heads": int(dense_keys_full.shape[1]),
-                            "head_dim": int(dense_keys_full.shape[2]),
-                            "dtype": str(dense_keys_full.dtype),
-                            "keys_dense": dense_keys_full.detach().to(device="cpu"),
-                        }
-                    torch.save(payload, dump_path)
-                    dump_dense_keys_done = True
-                except Exception:
-                    pass
 
             prepared_layer_indices = [int(entry["layer_idx"]) for entry in prepared_layers]
 
@@ -1429,8 +1035,6 @@ def build_triattention_selector(
             aggregated_scores: torch.Tensor | None = None
             layer_count = 0
             dense_layer_indices: list[int] = []
-            sample_positions: list[int] | None = None
-            layer_score_samples: dict[str, Any] = {}
             for layer_idx, keys_dense in iter_inputs:
                 dense_layer_indices.append(int(layer_idx))
                 scores = _compute_layer_scores(
@@ -1449,26 +1053,6 @@ def build_triattention_selector(
                     aggregated_scores = layer_scores.clone()
                 else:
                     aggregated_scores.add_(layer_scores)
-                if debug_dump_group_score_samples and int(layer_idx) in {0, 1, 16, 32, 48, 63}:
-                    total = int(layer_scores.shape[-1])
-                    if sample_positions is None:
-                        sample_positions = sorted(
-                            {
-                                0,
-                                1,
-                                2,
-                                max(0, total // 2),
-                                max(0, total - 3),
-                                max(0, total - 2),
-                                max(0, total - 1),
-                            }
-                        )
-                    layer_score_samples[str(int(layer_idx))] = {
-                        "head0_scores": [
-                            float(layer_scores[0, pos].detach().to(device="cpu", dtype=torch.float32).item())
-                            for pos in sample_positions
-                        ]
-                    }
                 layer_count += 1
             if aggregated_scores is None or layer_count <= 0:
                 return None
@@ -1485,7 +1069,7 @@ def build_triattention_selector(
                 sorted=False,
             ).indices
             keep_per_head = torch.sort(topk, dim=-1).values.contiguous()
-            payload = {
+            return {
                 "mode": "per_head",
                 "indices": keep_per_head,
                 "semantic": "hf_aligned_global_per_head",
@@ -1493,30 +1077,6 @@ def build_triattention_selector(
                 "debug_group_layer_indices": dense_layer_indices,
                 "debug_recent_count": _resolve_effective_recent_count(total_tokens),
             }
-            if debug_dump_group_score_samples:
-                total = int(aggregated_scores.shape[-1])
-                if sample_positions is None:
-                    sample_positions = sorted(
-                        {
-                            0,
-                            1,
-                            2,
-                            max(0, total // 2),
-                            max(0, total - 3),
-                            max(0, total - 2),
-                            max(0, total - 1),
-                        }
-                    )
-                payload["debug_score_sample_positions"] = sample_positions
-                payload["debug_layer_score_samples"] = layer_score_samples
-                payload["debug_agg_head0_scores"] = [
-                    float(aggregated_scores[0, pos].detach().to(device="cpu", dtype=torch.float32).item())
-                    for pos in sample_positions
-                ]
-                payload["debug_effective_model_path"] = (
-                    None if effective_model_path is None else str(effective_model_path)
-                )
-            return payload
 
     setattr(_select_keep_indices, "_supports_paged", True)
     setattr(_select_keep_indices_for_group_per_head, "_supports_paged_group", True)

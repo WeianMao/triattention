@@ -9,7 +9,10 @@ Legacy V1 custom backend registration is retired.
 
 from __future__ import annotations
 
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 def _truthy(raw: str | None, default: bool) -> bool:
@@ -66,7 +69,7 @@ def register_triattention_backend():
 
     if interface_mode in {"legacy", "legacy_custom", "v1", "custom"}:
         if not quiet:
-            print(
+            logger.info(
                 "[TriAttention] Legacy V1 backend plugin registration is retired; "
                 "use runtime interface (TRIATTENTION_INTERFACE=runtime)."
             )
@@ -93,11 +96,12 @@ def register_triattention_backend():
             patch_worker=patch_worker,
         )
         if not quiet:
-            print(
+            logger.info(
                 "[TriAttention] Runtime (V2) plugin activated: "
-                f"patch_scheduler={patch_scheduler} patch_worker={patch_worker}"
+                "patch_scheduler=%s patch_worker=%s",
+                patch_scheduler, patch_worker,
             )
     except Exception as exc:  # pragma: no cover - safety guard
         if not quiet:
-            print(f"[TriAttention] Runtime plugin activation failed: {type(exc).__name__}: {exc}")
+            logger.error("[TriAttention] Runtime plugin activation failed: %s: %s", type(exc).__name__, exc)
         raise

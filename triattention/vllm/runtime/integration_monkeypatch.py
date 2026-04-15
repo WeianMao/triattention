@@ -178,26 +178,6 @@ def _patched_scheduler_update_from_output(self, scheduler_output, model_runner_o
     try:
         outputs = _ORIG_SCHED_UPDATE_FROM_OUTPUT(self, scheduler_output, model_runner_output)
     except KeyError:
-        if os.environ.get("TRIATTN_DEBUG_LOG_UPDATE_FROM_OUTPUT_KEYS", "0") == "1":
-            try:
-                scheduled_req_ids = list(getattr(scheduler_output, "num_scheduled_tokens", {}).keys())
-            except Exception:
-                scheduled_req_ids = []
-            try:
-                output_req_map = getattr(model_runner_output, "req_id_to_index", None)
-                output_req_ids = list(output_req_map.keys()) if isinstance(output_req_map, dict) else []
-            except Exception:
-                output_req_ids = []
-            try:
-                raw_req_ids = list(getattr(model_runner_output, "req_ids", []) or [])
-            except Exception:
-                raw_req_ids = []
-            logger.error(
-                "TriAttention debug update_from_output key mismatch: scheduled_req_ids=%s output_req_ids=%s raw_req_ids=%s",
-                scheduled_req_ids,
-                output_req_ids,
-                raw_req_ids,
-            )
         raise
 
     cfg = getattr(self, "triattention_config", None)
@@ -248,7 +228,7 @@ def _patched_worker_init_device(self):
     self._triattention_runner_proxy_installed = False
     if _debug_early_install_proxy_enabled():
         TriAttentionWorker._ensure_triattention_runner_proxy(self)
-        logger.info("TriAttention debug: eagerly installed runner proxy during worker init_device")
+        logger.debug("TriAttention: eagerly installed runner proxy during worker init_device")
 
 
 def _patched_worker_execute_model(self, scheduler_output):

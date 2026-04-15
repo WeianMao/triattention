@@ -5,7 +5,6 @@ import logging
 from typing import Any
 
 from .constants import TRITON_SCORING_REQUIRED_MARKER
-from .debug_trace import trace_event
 from .signals import CompressionSignal
 
 
@@ -19,8 +18,6 @@ def execute_runner_compression_actions(
     allowed_strict_skip_reasons: set[str],
     logger: logging.Logger,
     log_decisions: bool,
-    compression_debug_log: Any = None,
-    base_runner: Any = None,
 ) -> list[dict[str, Any]]:
     """Execute compression for triggered requests and emit scheduler-side events."""
     events: list[dict[str, Any]] = []
@@ -69,14 +66,6 @@ def execute_runner_compression_actions(
                 req_id=req_id,
                 signal=signal,
                 scheduler_output=scheduler_output,
-            )
-            trace_event(
-                "runner_compression_result",
-                req_id=repr(req_id),
-                step=int(signal.step),
-                applied=bool(getattr(result, "applied", False)),
-                reason=str(getattr(result, "reason", "unknown")),
-                cache_len_after=getattr(result, "cache_len_after", None),
             )
         except Exception as exc:  # pragma: no cover - safety fallback
             if strict_no_downgrade:
@@ -170,14 +159,6 @@ def execute_runner_compression_actions(
                 scheduled_tokens=int(getattr(signal, "scheduled_tokens", 1)),
                 scheduler_nct=_sched_nct,
             )
-            if compression_debug_log is not None and base_runner is not None:
-                compression_debug_log.record_compression_event(
-                    req_id=req_id,
-                    step=signal.step,
-                    before_tokens=before_len if isinstance(before_len, int) else 0,
-                    after_tokens=int(cache_len_after),
-                    base_runner=base_runner,
-                )
             if log_decisions:
                 logger.debug(
                     "TriAttention compression applied req=%s step=%d reason=%s",

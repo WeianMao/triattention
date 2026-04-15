@@ -7,9 +7,7 @@ import os
 import time
 from typing import Any
 
-from .compression_debug_log import CompressionDebugLog
 from .config import TriAttentionRuntimeConfig
-from .debug_trace import trace_event
 from .executor import CompressionExecutor, RunnerHookCompressionExecutor
 from .input_patch_backend import install_runtime_input_patch
 from .request_key_compat import get_scheduled_token_items
@@ -53,7 +51,6 @@ class TriAttentionModelRunner:
         self._perf = TriAttentionPerfProfile.from_env(self._logger)
         self._pending_compression_events: list[dict[str, Any]] = []
         self._strict_no_downgrade = bool(self.config.enable_experimental_kv_compaction)
-        self._compression_debug_log = CompressionDebugLog(self.config)
         self._runtime_input_patch_installed = False
         self._allowed_strict_skip_reasons = {
             "under_budget",
@@ -73,9 +70,6 @@ class TriAttentionModelRunner:
         )
 
     def _cleanup_finished_requests(self, scheduler_output: Any) -> None:
-        if self._compression_debug_log.enabled:
-            for req_id in getattr(scheduler_output, "finished_req_ids", []):
-                self._compression_debug_log.flush_request(req_id)
         cleanup_finished_requests(state_store=self.state_store, scheduler_output=scheduler_output)
 
     def _mark_preemptions(self, scheduler_output: Any) -> None:
@@ -229,8 +223,6 @@ class TriAttentionModelRunner:
             allowed_strict_skip_reasons=self._allowed_strict_skip_reasons,
             logger=self._logger,
             log_decisions=bool(self.config.log_decisions),
-            compression_debug_log=self._compression_debug_log if self._compression_debug_log.enabled else None,
-            base_runner=self._base_runner,
         )
 
     def _apply_worker_block_reclaim_events(self) -> None:
@@ -356,72 +348,12 @@ class TriAttentionModelRunner:
         if self._runtime_input_patch_installed:
             return
         patch_ok = install_runtime_input_patch()
-        trace_event(
-            "runner_install_runtime_input_patch",
-            patch_ok=bool(patch_ok),
-            base_runner_has_req_states=bool(getattr(self._base_runner, "req_states", None) is not None),
-            base_runner_has_input_batch=bool(getattr(self._base_runner, "input_batch", None) is not None),
-        )
         if not patch_ok:
             raise RuntimeError(
                 "TriAttention runtime requires gpu seq_len/slot_mapping patch when "
                 "effective-length overrides are active, but patch installation failed"
             )
         self._runtime_input_patch_installed = True
-
-    def _collect_post_compression_tokens(self, output: Any) -> None:
-        """Feed newly sampled tokens into the compression debug log."""
-        if not self._compression_debug_log.enabled:
-            return
-        # No pending captures → nothing to collect.
-        if not self._compression_debug_log._pending:
-            return
-        # In V1 async path, sample_tokens returns AsyncGPUModelRunnerOutput.
-        # At this point, sampled_token_ids in the inner ModelRunnerOutput is []
-        # because the GPU→CPU async copy hasn't completed yet.
-        # For debug logging, we synchronize and read from the CPU tensor.
-        async_copy_event = getattr(output, "async_copy_ready_event", None)
-        sampled_cpu = getattr(output, "sampled_token_ids_cpu", None)
-        if async_copy_event is not None and sampled_cpu is not None:
-            async_copy_event.synchronize()
-            inner = getattr(output, "_model_runner_output", None)
-            if inner is None:
-                return
-            req_ids = getattr(inner, "req_ids", None)
-            req_id_to_index = getattr(inner, "req_id_to_index", None)
-            if not req_ids or not isinstance(req_id_to_index, dict):
-                return
-            sampled_token_ids = sampled_cpu.tolist()
-            # Filter out invalid requests (their tokens are cleared in get_output)
-            invalid_indices = set(getattr(output, "_invalid_req_indices", []))
-            for req_id in req_ids:
-                idx = req_id_to_index.get(req_id)
-                if idx is None or idx >= len(sampled_token_ids) or idx in invalid_indices:
-                    continue
-                new_tokens = sampled_token_ids[idx]
-                if not new_tokens:
-                    continue
-                for token_id in new_tokens:
-                    self._compression_debug_log.collect_post_token(req_id, int(token_id))
-            return
-        # Sync path: ModelRunnerOutput has sampled_token_ids directly.
-        inner = getattr(output, "_model_runner_output", None)
-        if inner is not None:
-            output = inner
-        req_ids = getattr(output, "req_ids", None)
-        req_id_to_index = getattr(output, "req_id_to_index", None)
-        sampled_token_ids = getattr(output, "sampled_token_ids", None)
-        if not req_ids or not isinstance(req_id_to_index, dict) or not sampled_token_ids:
-            return
-        for req_id in req_ids:
-            idx = req_id_to_index.get(req_id)
-            if idx is None or idx >= len(sampled_token_ids):
-                continue
-            new_tokens = sampled_token_ids[idx]
-            if not new_tokens:
-                continue
-            for token_id in new_tokens:
-                self._compression_debug_log.collect_post_token(req_id, int(token_id))
 
     def execute_model(
         self,
@@ -447,12 +379,6 @@ class TriAttentionModelRunner:
         self._patch_scheduler_output_for_compressed_reqs(scheduler_output)
         t_reclaim_ms = (time.perf_counter() - t0) * 1000.0 if perf_enabled else 0.0
         need_effective_overrides = self._needs_effective_input_overrides(scheduler_output)
-        trace_event(
-            "runner_need_effective_overrides",
-            need_effective_overrides=bool(need_effective_overrides),
-            pending_events=len(self._pending_compression_events),
-            active_compressed=bool(getattr(self.state_store, "has_active_compressed_requests", lambda: False)()),
-        )
         self._ensure_runtime_input_patch_if_needed(need_effective_overrides)
         bridge_perf: dict[str, float] | None = {} if perf_enabled else None
         output = execute_base_model_with_effective_overrides(
@@ -476,7 +402,6 @@ class TriAttentionModelRunner:
             t_base_exec_ms=float((bridge_perf or {}).get("base_exec_ms", 0.0)),
             t_total_exec_ms=t_total_exec_ms,
         )
-        self._collect_post_compression_tokens(output)
         output, self._pending_compression_events = attach_execute_model_compression_events(
             output=output,
             pending_events=self._pending_compression_events,
@@ -488,7 +413,6 @@ class TriAttentionModelRunner:
         # In vLLM V1 async path, execute_model returns None and the actual
         # ModelRunnerOutput (with sampled_token_ids) is produced here.
         output = self._base_runner.sample_tokens(grammar_output)
-        self._collect_post_compression_tokens(output)
         output, self._pending_compression_events = attach_sample_tokens_compression_events(
             output=output,
             pending_events=self._pending_compression_events,

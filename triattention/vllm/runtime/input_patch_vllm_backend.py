@@ -12,8 +12,6 @@ from .input_patch_ops import (
     overwrite_seq_lens_from_effective_base_map,
     overwrite_seq_lens_from_effective_lengths,
     shift_positions_from_sparse_deltas,
-    validate_slot_mapping_capacity,
-    validate_slot_mapping_values,
 )
 
 
@@ -204,22 +202,7 @@ def make_patched_compute_slot_mappings(
             and eff_positions.ndim == 1
             and eff_positions.numel() == positions.numel()
         ):
-            if os.environ.get("TRIATTN_DEBUG_VALIDATE_SLOT_MAPPING", "0") == "1":
-                validate_slot_mapping_capacity(
-                    block_tables=self,
-                    idx_mapping=idx_mapping,
-                    query_start_loc=query_start_loc,
-                    effective_positions=eff_positions,
-                )
             out = original_compute_slot_mappings(self, idx_mapping, query_start_loc, eff_positions)
-            if os.environ.get("TRIATTN_DEBUG_VALIDATE_SLOT_MAPPING_VALUES", "0") == "1":
-                validate_slot_mapping_values(
-                    block_tables=self,
-                    idx_mapping=idx_mapping,
-                    query_start_loc=query_start_loc,
-                    effective_positions=eff_positions,
-                    slot_mappings=out,
-                )
             return out
         if isinstance(eff_positions, torch.Tensor):
             raise RuntimeError(

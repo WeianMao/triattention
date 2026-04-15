@@ -7,7 +7,6 @@ from typing import Any
 
 from .config import TriAttentionRuntimeConfig
 from .constants import TRITON_SCORING_REQUIRED_MARKER
-from .debug_trace import trace_event
 from .request_key_compat import get_scheduled_token_items
 from .signals import CompressionSignal
 
@@ -195,20 +194,6 @@ def build_hook_runtime_context(
         and not kv_override
         and not length_gate_hit
     )
-    trace_event(
-        "hook_runtime_context_summary",
-        req_id=repr(req_id),
-        scheduled_tokens=int(scheduled_tokens),
-        num_computed_tokens=int(num_computed_tokens),
-        estimated_effective_tokens=int(estimated_effective_tokens),
-        effective_tokens=int(effective_tokens),
-        budget_total=int(budget_total),
-        prefill_len=int(prefill_len),
-        prefill_incomplete=bool(prefill_incomplete),
-        should_defer_recompress=bool(should_defer_recompress),
-        signal_reason=str(getattr(signal, "reason", "")),
-    )
-
     return HookRuntimeContext(
         scheduled_tokens=int(scheduled_tokens),
         num_computed_tokens=int(num_computed_tokens),
