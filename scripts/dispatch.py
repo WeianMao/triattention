@@ -318,17 +318,22 @@ def questions_for_shard(total_questions: int, num_shards: int, shard_id: int) ->
 def auto_detect_gpus(threshold: int) -> List[str]:
     cmd = [
         "nvidia-smi",
-        "--query-gpu=index,memory.used",
+        "--query-gpu=index,memory.used,name",
         "--format=csv,noheader,nounits",
     ]
+    smi_text = subprocess.check_output(["nvidia-smi"], text=True)
+    if "NVIDIA GB10" in smi_text:
+        print("GB10/sm-121 found")
+        return ["0"] if threshold >= 0 else []
     try:
         output = subprocess.check_output(cmd, text=True)
     except (FileNotFoundError, subprocess.CalledProcessError):
         return []
+
     detected: List[str] = []
     for line in output.strip().splitlines():
         parts = [p.strip() for p in line.split(",")]
-        if len(parts) < 2:
+        if len(parts) < 3:
             continue
         if not parts[0].isdigit() or not parts[1].isdigit():
             continue
