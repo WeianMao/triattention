@@ -132,6 +132,8 @@ class KVCompressionConfig:
     random_seed: int = 0
     grid_h: int = 0
     grid_w: int = 0
+    sink_size: int = 0  # Number of sink frames (matches LongLive's sink_size); first sink_size*frame_seq_length slots are pinned to absolute positions 0..sink_tokens-1
+    protect_sink: bool = True  # When True, compressor never evicts sink slots
 
 
 class LongLiveKVCompressor:
@@ -162,7 +164,6 @@ class LongLiveKVCompressor:
         # Per-(layer, head) absolute token positions after each compression.
         # Shape [L, H, S], where S matches current cache sequence length.
         self.cache_positions_per_layer_head: torch.Tensor | None = None
-        self.next_absolute_position: int = 0
 
         self._generator = torch.Generator(device="cpu")
         self._generator.manual_seed(int(self.config.random_seed))
@@ -298,98 +299,51 @@ class LongLiveKVCompressor:
             )
 
     def _sync_position_state(
-        self, seq_len: int, num_layers: int, num_heads: int, device: torch.device
+        self, kv_cache: List[dict], num_layers: int, num_heads: int, device: torch.device
     ) -> None:
-        # WARNING: This method assumes append-only cache growth (seq_len monotonically
-        # increases between compressions). If the cache is ever partially overwritten
-        # (e.g., KV-recache during prompt switching), position tracking will be wrong.
-        # Currently, switch_causal_inference.py does NOT use kv_compressor, so this
-        # is safe. If compressor is ever integrated with prompt switching, this method
-        # must be redesigned to accept explicit write metadata.
-        if self.config.pruning_mode == "layer_perhead":
-            if self.cache_positions_per_layer_head is None:
-                base = torch.arange(seq_len, device=device, dtype=torch.long)
-                self.cache_positions_per_layer_head = (
-                    base.view(1, 1, -1).expand(num_layers, num_heads, -1).clone()
-                )
-                self.next_absolute_position = int(seq_len)
-                return
+        # Tail-anchored position derivation: read current cache state from kv_cache[0]
+        # (local_end_index, global_end_index) and rebuild absolute positions from scratch.
+        # Sink slots [0, sink_tokens) map to absolute positions [0, sink_tokens); the
+        # remaining slots [sink_tokens, seq_len) are tail-anchored to global_end such that
+        # the last slot corresponds to absolute position global_end-1. This makes the
+        # method idempotent and robust to sliding-window eviction, since no incremental
+        # state is maintained between calls.
+        seq_len = int(kv_cache[0]["local_end_index"].item())
+        global_end = int(kv_cache[0]["global_end_index"].item())
+        sink_tokens = int(self.config.sink_size) * int(self.config.frame_seq_length)
 
-            state = self.cache_positions_per_layer_head
-            if state.shape[0] != num_layers:
-                if state.shape[0] >= num_layers:
-                    state = state[:num_layers].clone()
-                else:
-                    pad = state[0:1].expand(num_layers - state.shape[0], -1, -1).clone()
-                    state = torch.cat([state, pad], dim=0)
-            if state.shape[1] != num_heads:
-                if state.shape[1] >= num_heads:
-                    state = state[:, :num_heads].clone()
-                else:
-                    pad = state[:, 0:1].expand(-1, num_heads - state.shape[1], -1).clone()
-                    state = torch.cat([state, pad], dim=1)
-            self.cache_positions_per_layer_head = state
-            prev_len = int(state.shape[2])
-
-            if seq_len > prev_len:
-                added = seq_len - prev_len
-                new_pos = torch.arange(
-                    self.next_absolute_position,
-                    self.next_absolute_position + added,
-                    device=device,
-                    dtype=torch.long,
-                )
-                expanded = new_pos.view(1, 1, -1).expand(num_layers, num_heads, -1)
-                self.cache_positions_per_layer_head = torch.cat([state, expanded], dim=2)
-                self.next_absolute_position += int(added)
-            elif seq_len < prev_len:
-                # This can happen after external cache resets/rolls; truncate to align.
-                self.cache_positions_per_layer_head = state[:, :, :seq_len].contiguous()
-            return
-
-        if self.cache_positions_per_head is None:
-            base = torch.arange(seq_len, device=device, dtype=torch.long)
-            self.cache_positions_per_head = base.unsqueeze(0).expand(num_heads, -1).clone()
-            self.next_absolute_position = int(seq_len)
-            return
-
-        prev_len = int(self.cache_positions_per_head.shape[1])
-        if self.cache_positions_per_head.shape[0] != num_heads:
-            # Head-count drift should not happen for a fixed model; recover conservatively.
-            base = self.cache_positions_per_head
-            if base.shape[0] >= num_heads:
-                self.cache_positions_per_head = base[:num_heads].clone()
-            else:
-                pad = base[0:1].expand(num_heads - base.shape[0], -1).clone()
-                self.cache_positions_per_head = torch.cat([base, pad], dim=0)
-            prev_len = int(self.cache_positions_per_head.shape[1])
-
-        if seq_len > prev_len:
-            added = seq_len - prev_len
-            new_pos = torch.arange(
-                self.next_absolute_position,
-                self.next_absolute_position + added,
-                device=device,
-                dtype=torch.long,
+        positions = torch.empty(seq_len, device=device, dtype=torch.long)
+        sink_in_cache = min(sink_tokens, seq_len)
+        if sink_in_cache > 0:
+            positions[:sink_in_cache] = torch.arange(
+                0, sink_in_cache, device=device, dtype=torch.long
             )
-            expanded = new_pos.unsqueeze(0).expand(num_heads, -1)
-            self.cache_positions_per_head = torch.cat(
-                [self.cache_positions_per_head, expanded], dim=1
+        dynamic_in_cache = seq_len - sink_in_cache
+        if dynamic_in_cache > 0:
+            tail_start = global_end - dynamic_in_cache
+            positions[sink_in_cache:] = torch.arange(
+                tail_start, global_end, device=device, dtype=torch.long
             )
-            self.next_absolute_position += int(added)
-        elif seq_len < prev_len:
-            # This can happen after external cache resets/rolls; truncate to align.
-            self.cache_positions_per_head = self.cache_positions_per_head[
-                :, :seq_len
-            ].contiguous()
+
+        self.cache_positions_per_head = (
+            positions.unsqueeze(0).expand(num_heads, -1).clone()
+        )
+        self.cache_positions_per_layer_head = (
+            positions.view(1, 1, -1).expand(num_layers, num_heads, -1).clone()
+        )
 
     def _compute_layer_head_scores(
         self,
         kv_cache: List[dict],
         dynamic_len: int,
         current_end_frame: int,
+        dynamic_offset: int = 0,
     ) -> torch.Tensor:
         """
+        Args:
+            dynamic_offset: number of leading cache slots to skip (sink region).
+                Scoring reads positions/keys starting at this offset for
+                ``dynamic_len`` slots.
         Returns:
             scores: [L, H, T], layer/head token scores before per-head layer aggregation.
         """
@@ -453,14 +407,16 @@ class LongLiveKVCompressor:
             layers, kv_heads, dynamic_len, device=device, dtype=torch.float32
         )
 
+        dyn_start = int(dynamic_offset)
+        dyn_end = dyn_start + dynamic_len
         for layer_idx in range(layers):
             for head_idx in range(kv_heads):
                 if self.config.pruning_mode == "layer_perhead":
                     pos = self.cache_positions_per_layer_head[
-                        layer_idx, head_idx, :dynamic_len
+                        layer_idx, head_idx, dyn_start:dyn_end
                     ].to(device=device, dtype=torch.long)
                 else:
-                    pos = self.cache_positions_per_head[head_idx, :dynamic_len].to(
+                    pos = self.cache_positions_per_head[head_idx, dyn_start:dyn_end].to(
                         device=device, dtype=torch.long
                     )
                 key_frame = torch.div(
@@ -472,7 +428,7 @@ class LongLiveKVCompressor:
                 ).unsqueeze(1) + offsets.unsqueeze(0)
 
                 # Read post-RoPE key and analytically invert RoPE to get pre-RoPE complex key.
-                k_post = kv_cache[layer_idx]["k"][0, :dynamic_len, head_idx].to(
+                k_post = kv_cache[layer_idx]["k"][0, dyn_start:dyn_end, head_idx].to(
                     torch.float32
                 )  # [T, D]
                 k_post_complex = _to_complex_pairs(k_post)[:, :freq_dim]  # [T, F]
@@ -584,8 +540,18 @@ class LongLiveKVCompressor:
         keep_last_tokens = min(
             keep_count, max(0, int(self.config.keep_last_frames)) * self.config.frame_seq_length
         )
-        dynamic_len = max(0, seq_len - keep_last_tokens)
-        dynamic_keep = max(0, keep_count - keep_last_tokens)
+        # Sink protection: reserve the first sink_tokens slots as survivors.
+        sink_tokens_cfg = int(self.config.sink_size) * int(self.config.frame_seq_length)
+        if self.config.protect_sink and sink_tokens_cfg > 0:
+            sink_tokens = min(sink_tokens_cfg, seq_len)
+        else:
+            sink_tokens = 0
+        # If sink_tokens + keep_last_tokens exceeds keep_count, shrink keep_last_tokens
+        # so the budget can still hold the sink. Sink protection has priority.
+        if sink_tokens + keep_last_tokens > keep_count:
+            keep_last_tokens = max(0, keep_count - sink_tokens)
+        dynamic_len = max(0, seq_len - keep_last_tokens - sink_tokens)
+        dynamic_keep = max(0, keep_count - keep_last_tokens - sink_tokens)
         num_heads = int(kv_cache[0]["k"].shape[2])
 
         if dynamic_keep > 0 and dynamic_len > 0:
@@ -593,6 +559,7 @@ class LongLiveKVCompressor:
                 kv_cache=kv_cache,
                 dynamic_len=dynamic_len,
                 current_end_frame=current_end_frame,
+                dynamic_offset=sink_tokens,
             )  # [L, H, T]
             layer_head_scores = self._normalize_and_noise(layer_head_scores)
             perhead_scores = self._aggregate_perhead(layer_head_scores)  # [H, T]
@@ -606,6 +573,8 @@ class LongLiveKVCompressor:
                 else:
                     scores_h = torch.zeros(dynamic_len, device=kv_cache[0]["k"].device, dtype=torch.float32)
                 top_idx = torch.topk(scores_h, k=dynamic_keep, largest=True).indices
+                # Offset dynamic-region local indices back into absolute cache indices.
+                top_idx = top_idx + sink_tokens
                 keep_rows.append(torch.sort(top_idx).values)
             top_idx_per_head = torch.stack(keep_rows, dim=0)
         else:
@@ -613,6 +582,13 @@ class LongLiveKVCompressor:
                 num_heads, 0, device=kv_cache[0]["k"].device, dtype=torch.long
             )
 
+        keep_segments: List[torch.Tensor] = []
+        if sink_tokens > 0:
+            sink_idx = torch.arange(
+                0, sink_tokens, device=kv_cache[0]["k"].device, dtype=torch.long
+            ).unsqueeze(0).expand(num_heads, -1)
+            keep_segments.append(sink_idx)
+        keep_segments.append(top_idx_per_head)
         if keep_last_tokens > 0:
             tail_idx = torch.arange(
                 seq_len - keep_last_tokens,
@@ -621,9 +597,8 @@ class LongLiveKVCompressor:
                 dtype=torch.long,
             )
             tail_idx = tail_idx.unsqueeze(0).expand(num_heads, -1)
-            keep_idx_per_head = torch.cat([top_idx_per_head, tail_idx], dim=1)
-        else:
-            keep_idx_per_head = top_idx_per_head
+            keep_segments.append(tail_idx)
+        keep_idx_per_head = torch.cat(keep_segments, dim=1)
         keep_idx_per_head = torch.sort(keep_idx_per_head, dim=1).values
 
         new_len = int(keep_idx_per_head.shape[1])
@@ -662,8 +637,16 @@ class LongLiveKVCompressor:
         keep_last_tokens = min(
             keep_count, max(0, int(self.config.keep_last_frames)) * self.config.frame_seq_length
         )
-        dynamic_len = max(0, seq_len - keep_last_tokens)
-        dynamic_keep = max(0, keep_count - keep_last_tokens)
+        # Sink protection: reserve the first sink_tokens slots as survivors.
+        sink_tokens_cfg = int(self.config.sink_size) * int(self.config.frame_seq_length)
+        if self.config.protect_sink and sink_tokens_cfg > 0:
+            sink_tokens = min(sink_tokens_cfg, seq_len)
+        else:
+            sink_tokens = 0
+        if sink_tokens + keep_last_tokens > keep_count:
+            keep_last_tokens = max(0, keep_count - sink_tokens)
+        dynamic_len = max(0, seq_len - keep_last_tokens - sink_tokens)
+        dynamic_keep = max(0, keep_count - keep_last_tokens - sink_tokens)
         num_layers = len(kv_cache)
         num_heads = int(kv_cache[0]["k"].shape[2])
 
@@ -672,6 +655,7 @@ class LongLiveKVCompressor:
                 kv_cache=kv_cache,
                 dynamic_len=dynamic_len,
                 current_end_frame=current_end_frame,
+                dynamic_offset=sink_tokens,
             )  # [L, H, T]
             layer_head_scores = self._normalize_and_noise(layer_head_scores)
 
@@ -698,6 +682,8 @@ class LongLiveKVCompressor:
                     else:
                         scores = global_fallback
                     top_idx = torch.topk(scores, k=dynamic_keep, largest=True).indices
+                    # Offset dynamic-region local indices back into absolute cache indices.
+                    top_idx = top_idx + sink_tokens
                     keep_rows.append(torch.sort(top_idx).values)
                 keep_layers.append(torch.stack(keep_rows, dim=0))
             top_idx_per_layer_head = torch.stack(keep_layers, dim=0)  # [L, H, K]
@@ -706,6 +692,13 @@ class LongLiveKVCompressor:
                 num_layers, num_heads, 0, device=kv_cache[0]["k"].device, dtype=torch.long
             )
 
+        keep_segments: List[torch.Tensor] = []
+        if sink_tokens > 0:
+            sink_idx = torch.arange(
+                0, sink_tokens, device=kv_cache[0]["k"].device, dtype=torch.long
+            ).view(1, 1, -1).expand(num_layers, num_heads, -1)
+            keep_segments.append(sink_idx)
+        keep_segments.append(top_idx_per_layer_head)
         if keep_last_tokens > 0:
             tail_idx = torch.arange(
                 seq_len - keep_last_tokens,
@@ -714,9 +707,8 @@ class LongLiveKVCompressor:
                 dtype=torch.long,
             )
             tail_idx = tail_idx.view(1, 1, -1).expand(num_layers, num_heads, -1)
-            keep_idx_per_layer_head = torch.cat([top_idx_per_layer_head, tail_idx], dim=2)
-        else:
-            keep_idx_per_layer_head = top_idx_per_layer_head
+            keep_segments.append(tail_idx)
+        keep_idx_per_layer_head = torch.cat(keep_segments, dim=2)
         keep_idx_per_layer_head = torch.sort(keep_idx_per_layer_head, dim=2).values
 
         new_len = int(keep_idx_per_layer_head.shape[2])
@@ -749,10 +741,10 @@ class LongLiveKVCompressor:
             cache["local_end_index"].fill_(new_len)
         return True, new_len
 
-    def maybe_compress(self, kv_cache: List[dict], current_end_frame: int) -> bool:
+    def maybe_compress(self, kv_cache: List[dict], current_end_frame: int, force: bool = False) -> bool:
         if self.config.mode != "compress":
             return False
-        if current_end_frame - self.last_compressed_frame < self.config.compress_every_n_frames:
+        if not force and (current_end_frame - self.last_compressed_frame < self.config.compress_every_n_frames):
             return False
         seq_len = int(kv_cache[0]["local_end_index"].item())
         if seq_len <= int(self.config.budget_tokens):
@@ -760,25 +752,12 @@ class LongLiveKVCompressor:
         if kv_cache[0]["k"].shape[0] != 1:
             raise ValueError("Current KV compressor supports batch_size=1 only.")
 
-        # Ensure cache rolling cannot occur while compressor is active.
-        # Current design assumes compression keeps cache small enough to avoid
-        # the native LongLive sliding window eviction.
-        if kv_cache[0]["k"].shape[0] == 1:  # batch_size check already exists
-            cache_capacity = kv_cache[0]["k"].shape[1]
-            if seq_len > cache_capacity:
-                raise RuntimeError(
-                    f"KV cache is full ({seq_len}/{cache_capacity}). "
-                    f"Compression must trigger before cache reaches capacity to avoid "
-                    f"native sliding-window eviction which would desync position tracking. "
-                    f"Reduce compress_every_n_frames or increase cache size."
-                )
-
         self._load_stats(kv_cache[0]["k"].device)
+        num_layers = len(kv_cache)
+        num_heads = int(kv_cache[0]["k"].shape[2])
+        device = kv_cache[0]["k"].device
         self._sync_position_state(
-            seq_len=seq_len,
-            num_layers=len(kv_cache),
-            num_heads=int(kv_cache[0]["k"].shape[2]),
-            device=kv_cache[0]["k"].device,
+            kv_cache, num_layers=num_layers, num_heads=num_heads, device=device
         )
 
         if self.config.pruning_mode == "perhead":

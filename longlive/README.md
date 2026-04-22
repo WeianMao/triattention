@@ -1,6 +1,6 @@
 # LongLive Video Generation
 
-TriAttention supports KV cache compression for [LongLive](https://github.com/NVlabs/LongLive), a real-time causal long video generation model built on Wan2.1-T2V-1.3B. The integration uses a monkey-patch approach to inject trigonometric KV scoring into LongLive's causal inference pipeline, enabling longer video generation on the same GPU without modifying the upstream model code.
+TriAttention supports KV cache compression for [LongLive](https://github.com/NVlabs/LongLive), a real-time causal long video generation model built on Wan2.1-T2V-1.3B. The integration uses a monkey-patch approach to inject trigonometric KV scoring into LongLive's causal inference pipeline. Compression runs *on top of* LongLive's local-attention window: the compressor selects which tokens inside the window to keep, cutting KV memory roughly in half with no changes to the upstream model code.
 
 ## Setup
 
@@ -34,91 +34,92 @@ pip install flash-attn --no-build-isolation
 
 ### Download Model Weights
 
-LongLive requires the Wan2.1-T2V-1.3B base model, a LoRA checkpoint, and (optionally) pre-computed KV calibration statistics. Follow the instructions in the [LongLive README](https://github.com/NVlabs/LongLive) to download:
+LongLive requires the Wan2.1-T2V-1.3B base model and a LoRA checkpoint. Follow the instructions in the [LongLive README](https://github.com/NVlabs/LongLive) to download:
 
 - `longlive_models/models/longlive_base.pt` -- base generator checkpoint
 - `longlive_models/models/lora.pt` -- LoRA adapter weights
 
 Place them under the `longlive_models/` directory inside the LongLive submodule.
 
+A pre-computed TriAttention calibration file is bundled at `longlive/assets/calibration_stats_81f.pt`. It is domain-agnostic (depends only on model architecture, not on prompts), so no separate calibration step is required before running inference.
+
 ## Usage
 
-The workflow has two steps: **calibrate** (collect Q statistics) and **compress** (run inference with a reduced KV cache). A pre-computed calibration file is included at `longlive/assets/normal_q_stats_120f_peak49.pt`, so you can skip directly to Step 2.
+Two settings are supported out of the box:
 
-### Step 1: Calibrate (optional — pre-computed file provided)
+### Setting 1 -- Multi-prompt interactive demo
 
-A pre-computed calibration file is already included at `longlive/assets/normal_q_stats_120f_peak49.pt`. **You can skip this step entirely** and go directly to Step 2. Re-calibration is only needed if you change the model architecture or want to calibrate on a different frame count.
+Run LongLive's interactive pipeline with multiple prompts that switch at configurable frame indices, under 50% KV compression:
 
-To run calibration yourself, collect pre-RoPE Q statistics from a reference run. This produces a `.pt` file containing per-head frequency statistics used for scoring.
+```bash
+python -m longlive.run_interactive \
+    --config_path longlive/configs/triattention_interactive.yaml
+```
+
+The default config generates 240 latent frames with five prompt switches at frames 40, 80, 120, 160, 200. Output videos are written to `videos/triattention_interactive/`.
+
+### Setting 2 -- Single-prompt generation
+
+Run LongLive's standard causal pipeline with a single prompt per sample under 50% KV compression:
 
 ```bash
 python -m longlive.run \
-    --config_path longlive/configs/longlive_inference_triattention_120f.yaml \
-    --model_kwargs.kv_compression_mode calibrate \
-    --model_kwargs.kv_stats_path longlive_models/kv_stats/normal_q_stats_120f_peak49.pt
+    --config_path longlive/configs/triattention_120f.yaml
 ```
 
-Calibration runs a normal forward pass and records Q-state statistics from every attention layer. The resulting file is model-specific but domain-agnostic -- you do not need to re-calibrate when changing prompts.
+The default config generates 120 latent frames. Output videos are written to `videos/triattention_120f/`.
 
-### Step 2: Compress
+### Distributed Inference
 
-Run inference with the compressed KV cache:
+Both entry points support multi-GPU inference via `torchrun`:
 
 ```bash
-python -m longlive.run \
-    --config_path longlive/configs/longlive_inference_triattention_120f.yaml
+torchrun --nproc_per_node=8 -m longlive.run_interactive \
+    --config_path longlive/configs/triattention_interactive.yaml
 ```
 
-The example config retains 46 out of 120 latent frames (~38% budget) using layer-per-head pruning.
-
-### Example: 120-frame Generation
-
-```bash
-# Generate a 120-frame video with KV compression (budget = 46 frames)
-python -m longlive.run \
-    --config_path longlive/configs/longlive_inference_triattention_120f.yaml
-
-# Output is saved to videos/triattention_120f/
-```
+KV compression works transparently in distributed mode.
 
 ## Configuration Reference
 
-All parameters are set under `model_kwargs` in the YAML config file.
+All TriAttention parameters are set under `model_kwargs` in the YAML config file.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `kv_compression_mode` | Operating mode: `off` (disabled), `calibrate` (collect Q stats), or `compress` (prune KV cache) | `off` |
-| `kv_stats_path` | Path to save (calibrate) or load (compress) the Q statistics `.pt` file | -- |
-| `kv_budget_tokens` | Maximum number of KV tokens retained after pruning. Controls peak GPU memory | -- |
+| `local_attn_size` | LongLive's local-attention window, in frames. **Must be > 0** when compression is enabled; compression runs inside this window | `12` |
+| `sink_size` | Number of sink frames pinned to absolute positions 0..sink_tokens-1 (never evicted) | `3` |
+| `kv_compression_mode` | Operating mode: `off` (disabled) or `compress` (prune KV cache) | `off` |
+| `kv_stats_path` | Path to the pre-computed calibration `.pt` file (bundled at `longlive/assets/calibration_stats_81f.pt`) | -- |
+| `kv_budget_tokens` | Maximum number of KV tokens retained after pruning. Must be **strictly less than** `local_attn_size * frame_seq_length` (else compression is a no-op) | -- |
 | `kv_compress_every_n_frames` | Trigger compression every N decoded frames | `10` |
 | `kv_keep_last_frames` | Number of most-recent frames never evicted | `num_frame_per_block` |
 | `kv_pruning_mode` | Pruning granularity: `perhead` (shared across layers) or `layer_perhead` (independent per layer and head) | `perhead` |
 | `kv_score_aggregation` | Score aggregation across offset distances: `mean` or `max` | `mean` |
-| `kv_perhead_layer_aggregation` | Layer aggregation strategy for `layer_perhead` mode: `mean_of_layer_max` | `mean_of_layer_max` |
+| `kv_perhead_layer_aggregation` | Layer aggregation strategy for `perhead` mode: `mean_of_layer_max` or `max` | `mean_of_layer_max` |
 | `kv_offset_max_frames` | Maximum frame offset for geometric probing | `128` |
 | `kv_normalize_scores` | Normalize scores to zero-mean unit-variance before ranking | `true` |
 | `kv_tie_break_noise` | Add small random noise to break ties in score ranking | `true` |
 | `kv_tie_break_noise_scale` | Scale of tie-breaking noise | `1e-6` |
 | `kv_random_seed` | Random seed for reproducibility | `0` |
-| `local_attn_size` | **Must be `-1`** when using KV compression (see below) | `-1` |
-| `sink_size` | Number of sink tokens. Set to `0` when compression is active | `0` |
+| `kv_protect_sink` | When `true`, sink slots are never evicted by the compressor | `true` |
 
-Top-level config parameters:
+Top-level config parameters used by the runners:
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `num_frame_per_block` | Frames decoded per block (temporal chunk size) | `3` |
-| `num_output_frames` | Total number of latent frames to generate | `120` |
-| `data_path` | Path to a text file with one prompt per line | -- |
+| `num_output_frames` | Total number of latent frames to generate | -- |
+| `data_path` | Path to prompt file (`.txt` for Setting 2, `.jsonl` for Setting 1) | -- |
 | `output_folder` | Directory for output videos | -- |
+| `switch_frame_indices` | Setting 1 only: frame indices where the next prompt becomes active (comma-separated) | -- |
 
 ## Important Notes
 
-- **`local_attn_size` must be `-1`**: KV compression requires global attention. The compressor manages its own token eviction and is incompatible with LongLive's native sliding-window attention. Setting a positive `local_attn_size` with compression enabled will raise a `ValueError`.
-- **Pre-computed calibration**: The provided calibration file (`longlive/assets/normal_q_stats_120f_peak49.pt`) was collected on 120 latent frames. Re-calibration is only needed if you change the model architecture or the target frame count significantly.
-- **Memory savings**: The `kv_budget_tokens` parameter directly controls peak GPU memory. A budget of ~38% of total KV tokens typically preserves video quality while saving substantial memory.
+- **`local_attn_size` must be > 0**: Compression runs on top of LongLive's local attention. The compressor selects tokens from the local-attention window, so `local_attn_size` must be a positive integer and the budget must be strictly smaller than `local_attn_size * frame_seq_length`.
+- **Budget sizing**: For the bundled configs we use `local_attn_size=12`, `frame_seq_length=1560`, so the local-attention window is `12 * 1560 = 18720` tokens. A budget of `9360` keeps ~50% of the window.
+- **Pre-computed calibration**: The shipped file `longlive/assets/calibration_stats_81f.pt` is model-specific but domain-agnostic. Re-calibration is only needed if you change the model architecture.
+- **Multi-prompt support**: The interactive pipeline handles prompt switching at user-defined frame indices. After each switch, the compressor re-syncs its position state defensively and re-runs compression so the new prompt's context is retained.
 - **Zero overhead when disabled**: When `kv_compression_mode` is `off` (or unset), no compression code runs and the inference path is identical to the original LongLive pipeline.
-- **Distributed inference**: The pipeline supports multi-GPU inference via `torchrun`. KV compression works transparently in distributed mode.
 
 ## Citation
 

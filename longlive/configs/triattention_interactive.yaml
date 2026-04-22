@@ -1,17 +1,11 @@
-# TriAttention single-prompt config (Setting 2) -- 120-frame generation
-# Runs LongLive's causal inference pipeline on a single prompt per sample,
-# with TriAttention pruning roughly 50% of tokens from the local-attention window.
+# TriAttention multi-prompt demo config
+# Runs LongLive's interactive inference pipeline (multi-prompt with switches)
+# with TriAttention's 50% KV cache compression.
 #
 # To run:
-#   python -m longlive.run --config_path longlive/configs/triattention_120f.yaml
-#
-# Key ideas:
-#   - Compression runs on top of LongLive's local attention (local_attn_size > 0).
-#   - The KV budget must be strictly smaller than local_attn_size * frame_seq_length
-#     (otherwise compression is a no-op). Here: 9360 < 12 * 1560 = 18720 (50%).
-#   - Calibration statistics are domain-agnostic and shipped in-repo; no
-#     separate calibrate step is required.
+#   python -m longlive.run_interactive --config_path longlive/configs/triattention_interactive.yaml
 
+# Architecture (matches LongLive's official longlive_interactive_inference.yaml)
 denoising_step_list:
 - 1000
 - 750
@@ -22,12 +16,13 @@ num_frame_per_block: 3
 model_name: Wan2.1-T2V-1.3B
 
 model_kwargs:
-  # Local attention window the compressor prunes from.
+  # Local attention (LongLive local-attention window with a single sink frame
+  # — matches the setting used for the TriAttention demo video).
   local_attn_size: 12
   timestep_shift: 5.0
-  sink_size: 3
+  sink_size: 1
 
-  # TriAttention KV compression
+  # TriAttention KV compression (this file's headline feature)
   kv_compression_mode: compress
   kv_stats_path: longlive/assets/calibration_stats_81f.pt
   kv_budget_tokens: 9360           # 50% of local-attention window (12 * 1560 = 18720 tokens)
@@ -42,15 +37,16 @@ model_kwargs:
   kv_tie_break_noise_scale: 1.0e-6
   kv_random_seed: 0
 
-# Inference settings
-data_path: example/quick_test_prompt.txt
-output_folder: videos/triattention_120f
-inference_iter: 0
-num_output_frames: 120
+# Inference (matches LongLive's interactive_inference config)
+data_path: longlive_models/prompts/interactive_example.jsonl
+output_folder: videos/triattention_interactive
+inference_iter: -1
+num_output_frames: 240
 use_ema: false
-seed: 0
+seed: 1
 num_samples: 1
 save_with_index: true
+switch_frame_indices: 40, 80, 120, 160, 200
 global_sink: true
 context_noise: 0
 
