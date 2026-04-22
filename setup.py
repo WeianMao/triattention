@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="triattention",
-    version="0.1.0",
+    version="0.2.0",
     description="TriAttention: efficient KV cache compression via tri-directional sparse attention",
     author="Weian Mao, Xi Lin, Wei Huang, Yuxin Xie, Tianfu Fu, Bohan Zhuang, Song Han, Yukang Chen",
     url="https://github.com/WeianMao/triattention",
