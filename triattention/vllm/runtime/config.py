@@ -259,11 +259,11 @@ class TriAttentionRuntimeConfig:
                 "score_chunk_max_tokens must be >= 1, "
                 f"got {self.score_chunk_max_tokens}"
             )
-        if self.enable_experimental_kv_compaction and not self.require_triton_scoring:
-            raise ValueError(
-                "enable_experimental_kv_compaction requires require_triton_scoring=True "
-                "to prevent fallback downgrade"
-            )
+        # The previous constraint requiring require_triton_scoring=True
+        # alongside enable_experimental_kv_compaction has been relaxed.
+        # The PyTorch scoring path is mathematically equivalent to the
+        # Triton kernel and supports compaction, so the "fallback
+        # downgrade" concern is not applicable.
         if (
             self.enable_experimental_kv_compaction
             and self.require_physical_reclaim

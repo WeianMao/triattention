@@ -36,6 +36,7 @@ https://github.com/user-attachments/assets/768e59bb-897e-41bf-81b8-e7376aa72056
 
 ## News
 
+- **[2026-04-21]** SGLang backend support added — TriAttention now runs on SGLang in addition to vLLM. See [SGLang Integration](docs/sglang.md).
 - **[2026-04-14]** Community DGX Spark (GB10/sm-121) enablement by [@dscain](https://github.com/dscain) — vLLM support merged, non-vLLM path in progress.
 - **[2026-04-12]** TriAttention now supports AR video generation with KV cache compression. See [LongLive README](longlive/README.md).
 - **[2026-04-11]** Community C/ggml port for llama.cpp (HIP/ROCm) by [@domvox](https://github.com/domvox) — enables TriAttention on AMD GPUs via llama.cpp, with ~6.8× KV reduction when composed with TurboQuant. See [triattention-ggml](https://github.com/domvox/triattention-ggml).
@@ -62,6 +63,7 @@ Pre-RoPE Q/K vectors in long reasoning models concentrate around fixed centers t
 - [Reproduction Guide](docs/reproduction.md) -- full experiment commands for all benchmarks
 - [Calibration Guide](docs/calibration.md) -- generating custom Q/K statistics
 - [MLX Support](docs/mlx.md) -- supporting Apple Silicon Macs (M1/M2/M3/M4) via the MLX
+- [SGLang Integration](docs/sglang.md) -- deploying TriAttention with SGLang as the inference backend
 - [Video Generation](longlive/README.md) -- KV cache compression for long video generation with LongLive
 - [Full Results](docs/results.md) -- complete tables, figures, and analysis
 
