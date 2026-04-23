@@ -2,6 +2,12 @@
 
 TriAttention supports KV cache compression for [LongLive](https://github.com/NVlabs/LongLive), a real-time causal long video generation model built on Wan2.1-T2V-1.3B. The integration uses a monkey-patch approach to inject trigonometric KV scoring into LongLive's causal inference pipeline. Compression runs *on top of* LongLive's local-attention window: the compressor selects which tokens inside the window to keep, cutting KV memory roughly in half with no changes to the upstream model code.
 
+
+
+https://github.com/user-attachments/assets/67cc4584-88fa-4e25-b2e7-e77172baa848
+
+
+
 ## Setup
 
 ### Clone with Submodule
