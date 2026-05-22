@@ -57,6 +57,7 @@ class TriAttentionModelRunner:
             "prefill_exceeds_budget",
             "req_state_not_found",
             "batch_queue_dedup",
+            "no_compactable_groups",
         }
 
     def __getattr__(self, name: str) -> Any:

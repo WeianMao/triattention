@@ -172,12 +172,39 @@ def _convert_rkv_stats(
 
     num_layers = len(layer_nums)
     num_attention_heads = len(head_nums)
-    head_dim = rkv_metadata.get("head_dim", 128)
-    freq_count = head_dim // 2
+    layer_head_dims_raw = rkv_metadata.get("layer_head_dims")
+    layer_head_dims = (
+        {int(i): int(v) for i, v in enumerate(layer_head_dims_raw)}
+        if isinstance(layer_head_dims_raw, (list, tuple))
+        else {}
+    )
+
+    def _entry_freq_count(layer_idx: int) -> int:
+        for head_idx in sorted(head_nums):
+            entry = rkv_stats.get(f"layer{layer_idx:02d}_head{head_idx:02d}")
+            if not isinstance(entry, dict):
+                continue
+            for stat_name in ("q_abs_mean", "q_mean_real", "q_mean_imag"):
+                value = entry.get(stat_name)
+                if isinstance(value, torch.Tensor):
+                    return int(value.numel())
+        if layer_idx in layer_head_dims:
+            return max(1, layer_head_dims[layer_idx] // 2)
+        return int(rkv_metadata.get("head_dim", 128)) // 2
+
+    layer_freq_counts = {
+        int(layer_idx): _entry_freq_count(int(layer_idx)) for layer_idx in layer_nums
+    }
+    freq_count = max(layer_freq_counts.values()) if layer_freq_counts else 64
+    head_dim = max(int(rkv_metadata.get("head_dim", freq_count * 2)), freq_count * 2)
 
     # Handle GQA: if num_kv_heads specified and < num_attention_heads
     if num_kv_heads is None:
-        num_kv_heads = num_attention_heads
+        meta_kv_heads = rkv_metadata.get(
+            "num_kv_heads",
+            rkv_metadata.get("num_key_value_heads"),
+        )
+        num_kv_heads = int(meta_kv_heads) if meta_kv_heads else num_attention_heads
 
     gqa_ratio = num_attention_heads // num_kv_heads if num_kv_heads > 0 else 1
 
@@ -233,6 +260,14 @@ def _convert_rkv_stats(
         "num_kv_heads": num_kv_heads,
         "head_dim": head_dim,
         "num_layers": num_layers,
+        "layer_head_dims": [
+            int(layer_head_dims.get(layer_idx, layer_freq_counts.get(layer_idx, freq_count) * 2))
+            for layer_idx in range(num_layers)
+        ],
+        "layer_freq_counts": [
+            int(layer_freq_counts.get(layer_idx, freq_count))
+            for layer_idx in range(num_layers)
+        ],
         "rope_style": rkv_metadata.get("rope_style", "half"),
         "rope_type": rkv_metadata.get("rope_type"),
         "rope_theta": rkv_metadata.get("rope_theta", 10000.0),
@@ -295,11 +330,23 @@ def _convert_rkv_stats(
         )
 
     default_freq_scale_sq = _derive_freq_scale_sq_fallback()
+
+    def _pad_1d(value: torch.Tensor, target: int, *, fill: float = 0.0) -> torch.Tensor:
+        value = value.flatten()
+        if value.numel() == target:
+            return value
+        if value.numel() > target:
+            return value[:target]
+        out = torch.full((target,), fill, dtype=value.dtype)
+        out[: value.numel()] = value
+        return out
+
     for layer_idx in sorted(layer_nums):
         # Collect all attention heads' data for this layer
         all_q_mean_real = []
         all_q_mean_imag = []
         all_q_abs_mean = []
+        layer_freq_count = int(layer_freq_counts.get(layer_idx, freq_count))
 
         for head_idx in sorted(head_nums):
             key = f"layer{layer_idx:02d}_head{head_idx:02d}"
@@ -307,7 +354,11 @@ def _convert_rkv_stats(
                 head_data = rkv_stats[key]
                 # R-KV stores q_abs_mean as query statistic.
                 if "q_abs_mean" in head_data:
-                    q_abs = head_data["q_abs_mean"].to(dtype=dtype)
+                    q_abs = _pad_1d(
+                        head_data["q_abs_mean"].to(dtype=dtype),
+                        freq_count,
+                        fill=1.0,
+                    )
                     all_q_abs_mean.append(q_abs)
                 else:
                     all_q_abs_mean.append(
@@ -316,10 +367,10 @@ def _convert_rkv_stats(
 
                 if "q_mean_real" in head_data and "q_mean_imag" in head_data:
                     all_q_mean_real.append(
-                        head_data["q_mean_real"].to(dtype=dtype)
+                        _pad_1d(head_data["q_mean_real"].to(dtype=dtype), freq_count)
                     )
                     all_q_mean_imag.append(
-                        head_data["q_mean_imag"].to(dtype=dtype)
+                        _pad_1d(head_data["q_mean_imag"].to(dtype=dtype), freq_count)
                     )
 
         # Stack all attention heads: [num_attention_heads, freq_count]
@@ -336,6 +387,7 @@ def _convert_rkv_stats(
         head_stats[layer_idx] = {
             "freq_scale_sq": default_freq_scale_sq.clone(),
             "q_abs_mean": q_abs_mean.to(device),
+            "freq_count": layer_freq_count,
         }
 
         # Add q_mean_complex if available

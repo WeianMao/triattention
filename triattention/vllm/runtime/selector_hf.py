@@ -305,6 +305,23 @@ def build_triattention_selector(
         group_size: int,
         round_start: int,
     ) -> torch.Tensor:
+        runtime_freq_count = int(keys_dense.shape[-1]) // 2
+        if runtime_freq_count <= 0:
+            raise RuntimeError("invalid_runtime_head_dim")
+        if int(score_freq_scale_sq.shape[-1]) != runtime_freq_count:
+            score_freq_scale_sq = score_freq_scale_sq[..., :runtime_freq_count].contiguous()
+            sliced_stats: dict[str, torch.Tensor] = {}
+            for key, value in score_head_stats.items():
+                if key in {"q_abs_mean"} and isinstance(value, torch.Tensor):
+                    sliced_stats[key] = value[..., :runtime_freq_count].contiguous()
+                elif key in {"q_mean_complex"} and isinstance(value, torch.Tensor):
+                    sliced_stats[key] = value[..., :runtime_freq_count, :].contiguous()
+                else:
+                    sliced_stats[key] = value
+            score_head_stats = sliced_stats
+        omega = compressor.omega
+        if isinstance(omega, torch.Tensor) and int(omega.shape[-1]) != runtime_freq_count:
+            omega = omega[:runtime_freq_count].contiguous()
         score_inputs = (
             keys_dense.repeat_interleave(group_size, dim=1).contiguous()
             if use_hf_group_max and group_size > 1
@@ -315,7 +332,7 @@ def build_triattention_selector(
                 key_states=score_inputs,
                 cache_positions=None,
                 head_stats=score_head_stats,
-                omega=compressor.omega,
+                omega=omega,
                 offsets=compressor.offsets,
                 freq_scale_sq=score_freq_scale_sq,
                 config=tri_cfg,
