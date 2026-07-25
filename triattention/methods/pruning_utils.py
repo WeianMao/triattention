@@ -274,7 +274,7 @@ def compute_frequency_statistics_from_means(
     return amp, phi, extra
 
 
-def score_keys_for_round(
+def score_keys_for_round_reference(
     key_indices: torch.Tensor,
     round_start: int,
     amp: torch.Tensor,
@@ -286,6 +286,13 @@ def score_keys_for_round(
     freq_scale_sq: torch.Tensor,
     disable_trig: bool = False,
 ) -> torch.Tensor:
+    """Score keys by averaging over the future-offset schedule directly.
+
+    This is the original implementation, retained for two reasons: it defines the
+    reference semantics that the folded fast path in `score_keys_for_round` is
+    tested against, and it still serves the cases that do not fold (the `max`
+    aggregation, which is nonlinear, and `disable_trig`).
+    """
     if key_indices.numel() == 0:
         return torch.empty(0, device=amp.device, dtype=torch.float32)
 
@@ -307,6 +314,71 @@ def score_keys_for_round(
     if aggregation == "mean":
         return combined.mean(dim=1)
     return combined.max(dim=1).values
+
+
+def score_keys_for_round(
+    key_indices: torch.Tensor,
+    round_start: int,
+    amp: torch.Tensor,
+    phi: torch.Tensor,
+    omega: torch.Tensor,
+    extra: torch.Tensor,
+    offsets: torch.Tensor,
+    aggregation: str,
+    freq_scale_sq: torch.Tensor,
+    disable_trig: bool = False,
+) -> torch.Tensor:
+    # The average over future offsets is separable: the offset enters only through
+    # the RoPE rotation, so averaging cos((delta + d) * omega_f + phi_f) over the
+    # offset schedule folds into a per-band weight
+    #
+    #     W_f = mean_d exp(i * omega_f * d)
+    #
+    # which depends only on omega and offsets. The [keys, offsets, bands] phase
+    # tensor collapses to [keys, bands], so the offset loop disappears.
+    #
+    # Valid for the mean aggregation only -- max is nonlinear and does not fold.
+    # disable_trig is already offset-free, so it gains nothing here.
+    #
+    # Derivation: https://arxiv.org/abs/2607.13051
+    if aggregation != "mean" or disable_trig:
+        return score_keys_for_round_reference(
+            key_indices,
+            round_start,
+            amp,
+            phi,
+            omega,
+            extra,
+            offsets,
+            aggregation,
+            freq_scale_sq,
+            disable_trig,
+        )
+
+    if key_indices.numel() == 0:
+        return torch.empty(0, device=amp.device, dtype=torch.float32)
+
+    base_delta = round_start - key_indices.to(device=amp.device, dtype=torch.float32)
+    freq_scale_sq = freq_scale_sq.to(device=amp.device, dtype=torch.float32)
+    offsets = offsets.to(device=amp.device, dtype=torch.float32)
+
+    # W_f over the offset schedule: [F] each. Cost is O(offsets * bands), which is
+    # negligible against the O(keys * offsets * bands) it replaces, so there is
+    # nothing worth caching.
+    ang = offsets.unsqueeze(1) * omega.view(1, -1)
+    w_re = torch.cos(ang).mean(dim=0)
+    w_im = torch.sin(ang).mean(dim=0)
+
+    # Phase at the key's own distance, with no offset dimension: [keys, bands]
+    phase0 = base_delta.unsqueeze(1) * omega.view(1, -1) + phi
+
+    # Re{ exp(i * phase0) * W_f }
+    folded = w_re.view(1, -1) * torch.cos(phase0) - w_im.view(1, -1) * torch.sin(phase0)
+
+    base_scores = (amp * freq_scale_sq.view(1, -1) * folded).sum(dim=1)
+    # additive term uses original freq_scale_sq (not affected by high-freq masking)
+    additive = (extra * freq_scale_sq.view(1, -1)).sum(dim=1)
+    return base_scores + additive
 
 
 def save_head_frequency_stats(
