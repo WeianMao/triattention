@@ -2,7 +2,7 @@
 """Calibrate frequency-domain statistics for TriAttention.
 
 Runs a single forward pass on plain text input, hooks into every attention
-layer to capture query states, inverts RoPE, and computes per-head frequency
+layer to capture pre-RoPE query states, and computes per-head frequency
 statistics.  The resulting .pt file can be loaded directly by
 ``triattention.pruning_utils.load_head_frequency_stats``.
 
@@ -35,47 +35,6 @@ def _determine_rope_style(config: AutoConfig) -> str:
     if "llama" in model_type:
         return "half"
     return "half"
-
-
-def _rotate_half(x: torch.Tensor, *, style: str = "half") -> torch.Tensor:
-    if style == "interleaved":
-        x_even = x[..., ::2]
-        x_odd = x[..., 1::2]
-        return torch.stack((-x_odd, x_even), dim=-1).flatten(-2)
-    d = x.shape[-1] // 2
-    return torch.cat((-x[..., d:], x[..., :d]), dim=-1)
-
-
-def _invert_rope(
-    rotated: torch.Tensor,
-    cos: torch.Tensor,
-    sin: torch.Tensor,
-    scale: float,
-    *,
-    style: str = "half",
-) -> torch.Tensor:
-    if scale == 0:
-        raise ValueError("attention scaling factor must be non-zero")
-    scale_t = torch.tensor(scale, device=rotated.device, dtype=rotated.dtype)
-    base = rotated / scale_t
-    cos_unit = cos / scale_t
-    sin_unit = sin / scale_t
-    if style == "interleaved":
-        even = base[..., ::2]
-        odd = base[..., 1::2]
-        cos_even = cos_unit[..., ::2]
-        cos_odd = cos_unit[..., 1::2]
-        sin_even = sin_unit[..., ::2]
-        sin_odd = sin_unit[..., 1::2]
-        det = cos_even * cos_odd + sin_even * sin_odd
-        det = det.clamp_min(1e-12)
-        orig_even = (even * cos_odd + odd * sin_even) / det
-        orig_odd = (odd * cos_even - even * sin_odd) / det
-        restored = torch.empty_like(base)
-        restored[..., ::2] = orig_even
-        restored[..., 1::2] = orig_odd
-        return restored
-    return base * cos_unit - _rotate_half(base, style=style) * sin_unit
 
 
 def _to_complex_pairs(tensor: torch.Tensor, *, style: str = "half") -> torch.Tensor:
@@ -143,15 +102,8 @@ def calibrate(
     num_kv_heads = getattr(config, "num_key_value_heads", num_heads)
     rope_style = _determine_rope_style(config)
 
-    # --- Build rotary for RoPE inversion ---
+    # --- Locate attention layers ---
     attn_layers = _find_attention_layers(model)
-    backbone = getattr(model, "model", model)
-    # rotary_emb may live on backbone (Qwen2) or on individual attn layers
-    if hasattr(backbone, "rotary_emb"):
-        rotary = backbone.rotary_emb
-    else:
-        rotary = attn_layers[0].rotary_emb
-    attn_scale = float(getattr(rotary, "attention_scaling", 1.0))
 
     # --- Read and tokenize input ---
     print(f"Reading input: {input_path}", file=sys.stderr)
@@ -161,13 +113,7 @@ def calibrate(
     seq_len = input_ids.shape[1]
     print(f"Tokenized length: {seq_len}", file=sys.stderr)
 
-    # --- Pre-compute cos/sin tables ---
-    position_ids = torch.arange(seq_len, device=device_obj).unsqueeze(0)
-    probe = torch.zeros(1, seq_len, head_dim, device=device_obj, dtype=dtype)
-    cos_table, sin_table = rotary(probe, position_ids)
-    # cos_table, sin_table: [1, seq_len, head_dim]
-
-    # --- Register hooks to capture Q ---
+    # --- Register hooks to capture pre-RoPE Q ---
     captured_q: Dict[int, torch.Tensor] = {}
 
     def _make_pre_hook(layer_idx: int):
@@ -175,18 +121,15 @@ def calibrate(
             hidden_states = args[0] if args else kwargs.get("hidden_states")
             if hidden_states is None:
                 return
-            # Compute Q projection manually
+            # Compute pre-RoPE Q directly (including optional QK-norm, e.g. Qwen3)
             attn = module
             bsz, q_len, _ = hidden_states.shape
-            q = attn.q_proj(hidden_states)
-            q = q.view(bsz, q_len, num_heads, head_dim).transpose(1, 2)
-            # Apply RoPE
-            pos_ids = torch.arange(q_len, device=hidden_states.device).unsqueeze(0)
-            p = torch.zeros(1, q_len, head_dim, device=hidden_states.device, dtype=hidden_states.dtype)
-            cos, sin = rotary(p, pos_ids)
-            q_rot = (q * cos.unsqueeze(1)) + (_rotate_half(q, style=rope_style) * sin.unsqueeze(1))
-            q_rot = q_rot * attn_scale
-            captured_q[layer_idx] = q_rot.detach()
+            q = attn.q_proj(hidden_states).view(bsz, q_len, num_heads, head_dim)
+            q_norm = getattr(attn, "q_norm", None)
+            if q_norm is not None:
+                q = q_norm(q)
+            q = q.transpose(1, 2)
+            captured_q[layer_idx] = q.detach().cpu()
         return hook_fn
 
     handles = []
@@ -210,17 +153,12 @@ def calibrate(
     stats_dict: Dict[str, Dict[str, torch.Tensor]] = {}
 
     for layer_idx in range(num_layers):
-        q_rot = captured_q.get(layer_idx)
-        if q_rot is None:
+        q_base = captured_q.get(layer_idx)
+        if q_base is None:
             print(f"  [warn] No Q captured for layer {layer_idx}, skipping.", file=sys.stderr)
             continue
 
-        # q_rot: [1, num_heads, seq_len, head_dim]
-        # Invert RoPE to get base Q
-        cos = cos_table[:, :seq_len, :].unsqueeze(1)  # [1, 1, seq_len, head_dim]
-        sin = sin_table[:, :seq_len, :].unsqueeze(1)
-        q_base = _invert_rope(q_rot, cos, sin, attn_scale, style=rope_style)
-
+        # q_base: [1, num_heads, seq_len, head_dim] (pre-RoPE)
         for head_idx in range(num_heads):
             q_head = q_base[0, head_idx]  # [seq_len, head_dim]
             q_complex = _to_complex_pairs(q_head, style=rope_style)  # [seq_len, freq_count]

@@ -22,7 +22,7 @@ Any plain-text file containing natural, coherent text. The script tokenizes it a
 
 A Wikipedia article, a book chapter, or a source code file are all good choices.
 
-The calibration script runs a forward pass on plain text input, captures query states from every attention layer, inverts RoPE, and computes per-head frequency statistics. The resulting `.pt` file is loaded at inference time to score keys via the trigonometric series.
+The calibration script runs a forward pass on plain text input, captures pre-RoPE query states from every attention layer, and computes per-head frequency statistics. The resulting `.pt` file is loaded at inference time to score keys via the trigonometric series.
 
 ## Pre-computed Stats
 
